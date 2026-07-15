@@ -8,7 +8,7 @@ compatibility: macOS, Codex Desktop 26.707.72221 build 5307, Node.js 20 or newer
 
 ## Overview
 
-Install the complete v4 full-canvas Miku theme and matching native custom pet. The bundled installer validates the exact Codex build, creates a verified original backup, patches fixed-size ASAR entries atomically, installs `Miku Future` under the supported custom-pet directory, and refuses unsafe version mismatches.
+Install the complete v5 488137 Miku theme, optimized sidebar, and matching native custom pet. The bundled installer validates the exact Codex build, creates a verified original backup, patches fixed-size ASAR entries atomically, installs `Miku Future` under the supported custom-pet directory, and refuses unsafe version mismatches.
 
 ## Use the bundled commands
 

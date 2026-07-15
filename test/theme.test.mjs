@@ -7,7 +7,7 @@ const themePath = new URL("../src/theme.css", import.meta.url);
 test("defines the Miku palette and Codex surface tokens", async () => {
   const css = await readFile(themePath, "utf8");
 
-  assert.match(css, /CODEX_MIKU_THEME v4 FULL CANVAS PET/);
+  assert.match(css, /CODEX_MIKU_THEME v5 488137 SIDEBAR/);
 
   for (const token of [
     "--miku-cyan",
@@ -61,6 +61,28 @@ test("styles stable Codex shell, composer, and interaction surfaces", async () =
   ]) {
     assert.ok(css.includes(selector), `missing selector: ${selector}`);
   }
+});
+
+test("builds the reference sidebar hierarchy and interaction states", async () => {
+  const css = await readFile(themePath, "utf8");
+
+  for (const selector of [
+    "[data-app-action-sidebar-scroll]",
+    "[data-app-action-sidebar-section]",
+    "[data-app-action-sidebar-section-heading]",
+    "[data-app-action-sidebar-section-toggle]",
+    "[data-app-action-sidebar-project-row]",
+    "[data-app-action-sidebar-project-label]",
+    "[data-app-action-sidebar-thread-row]",
+    "[data-app-action-sidebar-thread-title]",
+    "[data-app-shell-sidebar-trigger]",
+  ]) {
+    assert.ok(css.includes(selector), `missing optimized sidebar selector: ${selector}`);
+  }
+
+  assert.match(css, /data-app-action-sidebar-thread-row[^}]*min-height:\s*32px/s);
+  assert.match(css, /data-app-action-sidebar-section-heading[^}]*letter-spacing/s);
+  assert.match(css, /data-app-action-sidebar-thread-row[^}]*:hover/s);
 });
 
 test("uses all four deterministic Miku crops and maximal decorative layers", async () => {

@@ -3,50 +3,68 @@
   "generator": "ffmpeg 8.1",
   "source": {
     "file": "miku-reference.png",
-    "sha256": "f51a2754354a301d1fef129b6ca6d90726e99942c6130c8d55a8eafe24bd29b0",
-    "width": 1672,
-    "height": 941
+    "sha256": "ffb05df56a95748266d6e52a1bbc70a073d706e0ec2930e60735f078241316e3",
+    "width": 5460,
+    "height": 3073
+  },
+  "portraitSource": {
+    "file": "miku-portrait-reference.png",
+    "sha256": "a1e8e01ae1617d21de5e903a2de8591489bd28018d5f19b57626c251d262527c",
+    "width": 5460,
+    "height": 3073
   },
   "crops": [
     {
       "role": "hero",
+      "source": "ui",
       "file": "miku-full-canvas.png",
-      "x": 382,
-      "y": 52,
+      "x": 1247,
+      "y": 170,
+      "sourceWidth": 4050,
+      "sourceHeight": 2903,
       "width": 1240,
       "height": 889,
-      "filter": "eq=saturation=1.25:contrast=1.04:brightness=0.01,pngquant=quality 78-94",
-      "sha256": "03b8e6a60821b4ead574f2b43168d64ae9627236fb65e62b2ce4abce10676644"
+      "filter": "scale=lanczos,eq=saturation=1.12:contrast=1.02,pngquant=256 colors",
+      "sha256": "e96290213fdd1fd374d3a360b63efca8b5078fb9489001b07f95e633a503b6bd"
     },
     {
       "role": "character",
+      "source": "portrait",
       "file": "miku-character.png",
-      "x": 840,
-      "y": 128,
+      "x": 2400,
+      "y": 150,
+      "sourceWidth": 2600,
+      "sourceHeight": 1604,
       "width": 608,
       "height": 375,
-      "filter": "eq=saturation=1.32:contrast=1.05:brightness=0.01",
-      "sha256": "0e549285b237c6eef148152b6fe6296a21f391eab5d2e1e51b24e19820e95114"
+      "filter": "scale=lanczos,eq=saturation=1.08:contrast=1.02",
+      "sha256": "4b203f967ed49db1c9a140d6637664700fcc5a2c948eb0d9a81645039272ca77"
     },
     {
       "role": "sidebar",
+      "source": "ui",
       "file": "miku-sidebar-wash.png",
-      "x": 236,
-      "y": 170,
+      "x": 771,
+      "y": 555,
+      "sourceWidth": 320,
+      "sourceHeight": 2103,
       "width": 98,
       "height": 644,
       "filter": null,
-      "sha256": "f5be49bf2ac12919ee2cc8de377c4856c19f907d8e40c2fbe3ca4cc33e53833f"
+      "sha256": "166774fc48661fb2de114623db325cb7649035282a27e963672bb7b49fc7b2e2"
     },
     {
       "role": "polaroid",
+      "source": "ui",
       "file": "miku-polaroid.png",
-      "x": 1409,
-      "y": 704,
+      "x": 4601,
+      "y": 2299,
+      "sourceWidth": 744,
+      "sourceHeight": 751,
       "width": 228,
       "height": 230,
       "filter": null,
-      "sha256": "dc90154c0f244ff4ff1cd3ec45c4190d8550d0d99bc85bc1ccf0d6f91c51d07f"
+      "sha256": "d30fb69fcd0db2c02b26d6927125caf2f89a178945199ddd9ea86f9853ecd042"
     }
   ],
   "pet": {
@@ -54,6 +72,6 @@
     "width": 1536,
     "height": 2288,
     "layout": "8 columns x 10 animation rows",
-    "sha256": "2168e2ca21d75ab0d2779780b35b0c157f6d41e5e2b289453f5ad5e551bcdedb"
+    "sha256": "3452954a055640cc6b116f4d4c99c0dbf8928674899900ccb238bc2601ba41ec"
   }
 }

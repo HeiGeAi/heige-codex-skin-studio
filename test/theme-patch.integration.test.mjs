@@ -103,7 +103,7 @@ test("CLI install and restore round-trip preserves the exact official ASAR", asy
 
     await runPatcher("install", target, home);
     const themed = await readFile(target);
-    assert.match(readEntry(themed, ENTRY_PATH).toString("utf8"), /CODEX_MIKU_THEME v4 FULL CANVAS PET/);
+    assert.match(readEntry(themed, ENTRY_PATH).toString("utf8"), /CODEX_MIKU_THEME v5 488137 SIDEBAR/);
 
     await runPatcher("restore", target, home);
     assert.deepEqual(await readFile(target), original);

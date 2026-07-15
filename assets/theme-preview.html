@@ -3,6 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:," />
     <title>Codex Miku Theme Preview</title>
     <style>
       :root {
@@ -50,6 +51,8 @@
 
       aside {
         padding: 30px 18px 20px;
+        display: flex;
+        flex-direction: column;
         background: linear-gradient(180deg, rgb(242 252 255 / 0.97), rgb(224 248 255 / 0.91));
         border-right: 1px solid var(--line);
       }
@@ -92,21 +95,34 @@
         background: linear-gradient(90deg, rgb(255 255 255 / 0.72), rgb(207 244 255 / 0.72));
       }
 
-      .nav { margin-top: 16px; }
+      .nav { margin-top: 12px; }
       .nav-item { padding: 10px 13px; color: #315f86; font-size: 14px; }
-      .nav-item.active { color: #056f8a; background: rgb(25 199 211 / 0.11); }
+      .nav-item:hover { color: #056f8a; background: linear-gradient(90deg, rgb(255 255 255 / .8), rgb(216 247 255 / .74), rgb(250 222 246 / .65)); }
 
       .section-label {
         margin: 22px 12px 10px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
         color: #5590b0;
         font-size: 11px;
         font-weight: 750;
         letter-spacing: 0.14em;
       }
 
-      .task-item { padding: 9px 12px; color: #416c91; font-size: 13px; }
-      .task-item.selected { color: #154f75; background: rgb(255 255 255 / 0.74); box-shadow: 0 7px 18px rgb(44 135 185 / 0.08); }
+      .section-label::after { height: 1px; flex: 1; content: ""; background: linear-gradient(90deg, rgb(25 201 229 / .6), transparent); }
+
+      .task-item { min-height: 32px; padding: 7px 12px; color: #416c91; font-size: 13px; }
+      .task-item:hover { color: #154f75; background: rgb(255 255 255 / 0.62); }
+      .task-item.selected { color: #154f75; border: 1px solid rgb(75 194 224 / .48); background: linear-gradient(90deg, rgb(25 201 229 / .18), rgb(144 179 250 / .16), rgb(243 151 224 / .18)); box-shadow: 0 7px 18px rgb(44 135 185 / 0.1); }
+      .task-item.nested { padding-left: 28px; }
+      .item-icon { width: 16px; text-align: center; color: #159bcf; font-weight: 800; }
       .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 0 4px rgb(25 199 211 / 0.1); }
+
+      .sidebar-footer { margin-top: auto; padding-top: 14px; border-top: 1px solid rgb(75 194 224 / .35); }
+      .progress-pill { padding: 9px 12px; display: flex; justify-content: space-between; color: #2a6b8b; font-size: 12px; border: 1px solid rgb(75 194 224 / .45); border-radius: 999px; background: linear-gradient(90deg, rgb(25 201 229 / .15), rgb(243 151 224 / .18)); }
+      .profile { margin-top: 12px; display: flex; align-items: center; gap: 10px; color: #194c71; font-size: 13px; font-weight: 700; }
+      .avatar { width: 32px; height: 32px; border-radius: 50%; border: 2px solid white; background: url("./miku-character.png") center 18% / 220% auto; box-shadow: 0 0 0 1px rgb(75 194 224 / .5); }
 
       main { min-width: 0; display: grid; grid-template-rows: 72px 1fr; }
 
@@ -163,7 +179,7 @@
         border-radius: 22px;
         background:
           linear-gradient(90deg, rgb(235 250 255 / 0.88) 0%, rgb(255 255 255 / 0.18) 42%, rgb(250 218 255 / 0.1) 100%),
-          url("./miku-hero.png") center / cover no-repeat;
+          url("./miku-full-canvas.png") center 18% / cover no-repeat;
         box-shadow: 0 18px 44px rgb(62 149 215 / 0.24), 0 0 34px rgb(245 139 216 / 0.2), 0 0 0 2px white inset;
         filter: saturate(1.22) contrast(1.03);
       }
@@ -176,7 +192,7 @@
         width: 154px;
         height: 229px;
         pointer-events: none;
-        background: url("./miku-pet-spritesheet.webp") 0 0 / 800% 1000% no-repeat;
+        background: url("../custom-pet/miku-future/spritesheet.webp") 0 0 / 800% 1000% no-repeat;
         filter: drop-shadow(0 10px 14px rgb(15 75 125 / 0.24)) drop-shadow(0 0 12px rgb(237 110 193 / 0.28));
       }
 
@@ -266,22 +282,33 @@
   <body>
     <div class="app">
       <aside>
-        <div class="brand"><span class="brand-mark">✦</span><span>Codex Miku</span></div>
+        <div class="brand"><span class="brand-mark">✦</span><span>Miku Codex</span></div>
         <div class="new-task"><b>＋</b><span>新建任务</span></div>
         <div class="nav">
-          <div class="nav-item active"><b>◉</b><span>任务</span></div>
-          <div class="nav-item"><b>◇</b><span>已安排</span></div>
-          <div class="nav-item"><b>⌘</b><span>技能</span></div>
-          <div class="nav-item"><b>◎</b><span>站点</span></div>
+          <div class="nav-item"><b>▣</b><span>已安排</span></div>
+          <div class="nav-item"><b>◇</b><span>技能</span></div>
+          <div class="nav-item"><b>▦</b><span>站点</span></div>
+          <div class="nav-item"><b>⑂</b><span>拉取请求</span></div>
+          <div class="nav-item"><b>◌</b><span>聊天</span></div>
         </div>
-        <div class="section-label">最近任务</div>
-        <div class="task-item selected"><span class="dot"></span><span>开发 Codex 主题</span></div>
-        <div class="task-item"><span class="dot"></span><span>整理工作日报</span></div>
-        <div class="task-item"><span class="dot"></span><span>检查前端项目</span></div>
+        <div class="section-label">✦ 项目</div>
+        <div class="task-item selected"><span class="item-icon">◉</span><span>Miku 灵感星球</span></div>
+        <div class="task-item nested"><span class="item-icon">♫</span><span>歌词生成器</span></div>
+        <div class="task-item nested"><span class="item-icon">☆</span><span>虚拟歌姬合成屋</span></div>
+        <div class="task-item nested"><span class="item-icon">▧</span><span>应援海报工坊</span></div>
+        <div class="task-item nested"><span class="item-icon">♡</span><span>收藏夹</span></div>
+        <div class="section-label">✧ 任务</div>
+        <div class="task-item"><span class="item-icon">✓</span><span>写一段应援文案</span></div>
+        <div class="task-item"><span class="item-icon">✓</span><span>做一个演唱会舞台页</span></div>
+        <div class="task-item"><span class="item-icon">✓</span><span>生成 Miku 纪念曲作</span></div>
+        <div class="sidebar-footer">
+          <div class="progress-pill"><span>⚙ 偏好设置</span><span>♡　0/4</span></div>
+          <div class="profile"><span class="avatar"></span><span>Miku 酱 ✧</span></div>
+        </div>
       </aside>
       <main>
         <header>
-          <div class="title">开发 Codex 主题</div>
+          <div class="title">初音未来主题 Codex App</div>
           <div class="status"><span class="dot"></span>本地工作区已连接</div>
         </header>
         <section class="workspace">
@@ -296,8 +323,8 @@
           </div>
           <div class="conversation">
             <div class="message user">把我的 Codex 前端换成参考图的主题风格。</div>
-            <div class="message ai"><strong>FULL CANVAS PET v4 已就绪。</strong>主视觉已延伸为全高聊天画布，并接入同款初音未来 Q 版动画宠物。
-              <div class="code">✓ full-height canvas<br />✓ native animated pet slot<br />✓ original restore preserved</div>
+            <div class="message ai"><strong>488137 SIDEBAR v5 已就绪。</strong>右侧定制字符与新参考图一致，左侧菜单已升级为完整的 Miku 分组视觉。
+              <div class="code">✓ 488137 customization<br />✓ optimized sidebar hierarchy<br />✓ native Miku Future pet</div>
             </div>
           </div>
           <div class="composer">

@@ -2,7 +2,7 @@
 
 把 macOS Codex Desktop 改造成高饱和天蓝、粉紫、雾白玻璃、全高角色主视觉与动画宠物结合的初音未来主题。
 
-![Codex Miku Theme v4](output/playwright/codex-miku-theme-v4-full-canvas-pet.png)
+![Codex Miku Theme v5 488137 Sidebar](output/playwright/codex-miku-theme-v5-488137-sidebar.png)
 
 ## 一键 Skill 安装
 
@@ -22,8 +22,8 @@ unzip codex-miku-theme.skill -d ~/.agents/skills
 ## 当前状态
 
 - 已适配 macOS Codex Desktop `26.707.72221`，构建号 `5307`。
-- v4 源码、可分发 Skill 与安装包均已完成。
-- 用户参考图已裁成全高主画布、角色、侧栏纹理和拍立得 4 张独立素材，并嵌入 4 个低频 PNG 资源槽。裁剪坐标、源图与目标图 SHA-256 记录在 `assets/miku-crops.json`。
+- v5 488137 源码、左侧菜单视觉、可分发 Skill 与安装包均已完成。
+- 两张 5460×3073 高清参考图分别作为完整 UI 与独立角色源，裁成全高主画布、角色、侧栏纹理和拍立得 4 张素材，并嵌入 4 个低频 PNG 资源槽。裁剪坐标、双源图与目标图 SHA-256 记录在 `assets/miku-crops.json`。
 - 已按 Codex Desktop 原生自定义宠物规范安装独立的 `Miku Future`，不再覆盖内置 `Codex` 宠物槽；包含待机、左右奔跑、跳跃、等待、审查、失败和 16 向观察动画。
 - 真实根节点、侧栏选中态、主区域、顶栏、输入框、用户消息、助手消息、审批卡片和弹窗均已按稳定选择器覆盖。
 - 首次安装会在 `~/Library/Application Support/Codex Miku Theme/backups/` 创建经过 SHA-256 校验的原始 ASAR 备份。
@@ -38,7 +38,7 @@ unzip codex-miku-theme.skill -d ~/.agents/skills
 open scripts/install-pet.command
 ```
 
-然后打开「设置 > 宠物」，点击刷新并选择 `Miku Future`。完整主题仍需使用 `Command + Q` 完全退出 Codex后安装。
+安装脚本会同时把 `selected-avatar-id` 切换为 `custom:miku-future`。完全退出并重新打开 Codex 后即可显示；也可以打开「设置 > 宠物」点击刷新并选择 `Miku Future`。完整主题仍需使用 `Command + Q` 完全退出 Codex 后安装。
 
 ## 检查状态
 

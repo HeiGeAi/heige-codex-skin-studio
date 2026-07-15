@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SOURCE="$ROOT/assets/miku-reference.png"
+PORTRAIT_SOURCE="$ROOT/assets/miku-portrait-reference.png"
 
 for dependency in ffmpeg pngquant; do
   if ! command -v "$dependency" >/dev/null 2>&1; then
@@ -22,26 +23,27 @@ verify_hash() {
   fi
 }
 
-verify_hash "$SOURCE" "f51a2754354a301d1fef129b6ca6d90726e99942c6130c8d55a8eafe24bd29b0"
+verify_hash "$SOURCE" "ffb05df56a95748266d6e52a1bbc70a073d706e0ec2930e60735f078241316e3"
+verify_hash "$PORTRAIT_SOURCE" "a1e8e01ae1617d21de5e903a2de8591489bd28018d5f19b57626c251d262527c"
 
 ffmpeg -hide_banner -loglevel error -y -i "$SOURCE" \
-  -vf "crop=1240:889:382:52,eq=saturation=1.25:contrast=1.04:brightness=0.01" \
+  -vf "crop=4050:2903:1247:170,scale=1240:889:flags=lanczos,eq=saturation=1.12:contrast=1.02" \
   -frames:v 1 "$ROOT/assets/miku-full-canvas-unquantized.png"
-pngquant --force --quality 78-94 --speed 1 \
+pngquant --force --colors 256 --speed 1 \
   --output "$ROOT/assets/miku-full-canvas.png" \
   -- "$ROOT/assets/miku-full-canvas-unquantized.png"
 rm "$ROOT/assets/miku-full-canvas-unquantized.png"
-ffmpeg -hide_banner -loglevel error -y -i "$SOURCE" \
-  -vf "crop=608:375:840:128,eq=saturation=1.32:contrast=1.05:brightness=0.01" \
+ffmpeg -hide_banner -loglevel error -y -i "$PORTRAIT_SOURCE" \
+  -vf "crop=2600:1604:2400:150,scale=608:375:flags=lanczos,eq=saturation=1.08:contrast=1.02" \
   -frames:v 1 "$ROOT/assets/miku-character.png"
 ffmpeg -hide_banner -loglevel error -y -i "$SOURCE" \
-  -vf "crop=98:644:236:170" -frames:v 1 "$ROOT/assets/miku-sidebar-wash.png"
+  -vf "crop=320:2103:771:555,scale=98:644:flags=lanczos" -frames:v 1 "$ROOT/assets/miku-sidebar-wash.png"
 ffmpeg -hide_banner -loglevel error -y -i "$SOURCE" \
-  -vf "crop=228:230:1409:704" -frames:v 1 "$ROOT/assets/miku-polaroid.png"
+  -vf "crop=744:751:4601:2299,scale=228:230:flags=lanczos" -frames:v 1 "$ROOT/assets/miku-polaroid.png"
 
-verify_hash "$ROOT/assets/miku-full-canvas.png" "03b8e6a60821b4ead574f2b43168d64ae9627236fb65e62b2ce4abce10676644"
-verify_hash "$ROOT/assets/miku-character.png" "0e549285b237c6eef148152b6fe6296a21f391eab5d2e1e51b24e19820e95114"
-verify_hash "$ROOT/assets/miku-sidebar-wash.png" "f5be49bf2ac12919ee2cc8de377c4856c19f907d8e40c2fbe3ca4cc33e53833f"
-verify_hash "$ROOT/assets/miku-polaroid.png" "dc90154c0f244ff4ff1cd3ec45c4190d8550d0d99bc85bc1ccf0d6f91c51d07f"
+verify_hash "$ROOT/assets/miku-full-canvas.png" "e96290213fdd1fd374d3a360b63efca8b5078fb9489001b07f95e633a503b6bd"
+verify_hash "$ROOT/assets/miku-character.png" "4b203f967ed49db1c9a140d6637664700fcc5a2c948eb0d9a81645039272ca77"
+verify_hash "$ROOT/assets/miku-sidebar-wash.png" "166774fc48661fb2de114623db325cb7649035282a27e963672bb7b49fc7b2e2"
+verify_hash "$ROOT/assets/miku-polaroid.png" "d30fb69fcd0db2c02b26d6927125caf2f89a178945199ddd9ea86f9853ecd042"
 
 echo "Rebuilt and verified the full-canvas Miku artwork and three supporting crops."

@@ -1,4 +1,4 @@
-/* CODEX_MIKU_THEME v4 FULL CANVAS PET */
+/* CODEX_MIKU_THEME v5 488137 SIDEBAR */
 @layer theme, base, components, utilities;
 
 :root[data-codex-window-type="electron"] {
@@ -14,48 +14,20 @@
   --startup-logo-shimmer-base: #19c9e5 !important;
   --color-background-surface: #f8f8fce8 !important;
   --color-background-surface-under: #d2dafb !important;
-  --color-background-editor-opaque: #f5f6fc !important;
-  --color-background-elevated-primary: #fafaffed !important;
-  --color-background-elevated-primary-opaque: #fafaff !important;
-  --color-background-elevated-secondary: #e9f3fce8 !important;
-  --color-background-elevated-secondary-opaque: #e9f3fc !important;
   --color-background-control: #fafaffdf !important;
-  --color-background-control-opaque: #fafaff !important;
   --color-background-panel: #f8f8fcf2 !important;
   --color-background-button-primary: #19c9e5 !important;
-  --color-background-button-primary-hover: #4bc2e0 !important;
-  --color-background-button-primary-active: #186ec2 !important;
   --color-background-button-secondary: #e9f3fce8 !important;
-  --color-background-button-secondary-hover: #dbf4fc !important;
-  --color-background-button-secondary-active: #c9def8 !important;
   --color-background-accent: #19c9e526 !important;
-  --color-background-accent-hover: #90b3fa38 !important;
-  --color-background-accent-active: #ed6ec13d !important;
   --color-text-foreground: #122c60 !important;
   --color-text-foreground-secondary: #426c8d !important;
   --color-text-foreground-tertiary: #5c76aa !important;
-  --color-text-accent: #0e438d !important;
-  --color-text-link: #186ec2 !important;
   --color-icon-primary: #0e438d !important;
-  --color-icon-secondary: #426c8d !important;
-  --color-icon-tertiary: #5c76aa !important;
   --color-border: #90b3fa70 !important;
-  --color-border-light: #c9def8a8 !important;
-  --color-border-heavy: #4bc2e0b8 !important;
-  --color-border-focus: #ed6ec1 !important;
   --vscode-editor-background: #f8f8fcd9 !important;
   --vscode-sideBar-background: #dbf4fce8 !important;
   --vscode-input-background: #fafaffe8 !important;
   --vscode-input-border: #7ed9eb !important;
-  --vscode-input-placeholderForeground: #5c76aa !important;
-  --vscode-dropdown-background: #fafafff2 !important;
-  --vscode-focusBorder: #ed6ec1 !important;
-  --vscode-button-background: #19c9e5 !important;
-  --vscode-button-hoverBackground: #4bc2e0 !important;
-  --vscode-list-hoverBackground: #90b3fa24 !important;
-  --vscode-list-activeSelectionBackground: #19c9e536 !important;
-  --vscode-textLink-foreground: #186ec2 !important;
-  --vscode-scrollbarSlider-background: #19c9e52e !important;
   --vscode-terminal-background: #102c4a !important;
   --vscode-terminal-foreground: #e9fbff !important;
   --color-token-main-surface-primary: #f8f8fc54 !important;
@@ -110,7 +82,7 @@ body {
   z-index: 20;
   padding: 7px 14px;
   pointer-events: none;
-  content: "MIKU 01  ♡";
+  content: "MIKU 488137  ♡";
   color: #0e438d;
   font: 800 11px/1.2 ui-monospace, monospace;
   letter-spacing: .16em;
@@ -129,13 +101,78 @@ body {
   backdrop-filter: blur(16px) saturate(1.15);
 }
 
+[data-app-action-sidebar-scroll] {
+  padding: 4px 7px 12px !important;
+  scrollbar-color: #19c9e566 transparent;
+}
+
+[data-app-action-sidebar-section] {
+  margin: 8px 0 4px !important;
+}
+
+[data-app-action-sidebar-section-heading] {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #2589bd !important;
+  font-size: 11px !important;
+  font-weight: 800 !important;
+  letter-spacing: .12em;
+  text-shadow: 0 1px #fff;
+}
+
+[data-app-action-sidebar-section-heading]::after {
+  height: 1px;
+  flex: 1;
+  content: "";
+  background: linear-gradient(90deg, #19c9e580, #90b3fa66, transparent);
+}
+
+[data-app-action-sidebar-section-toggle],
+[data-app-shell-sidebar-trigger],
+.app-shell-left-panel button {
+  border-radius: 12px !important;
+}
+
 [data-app-action-sidebar-thread-row],
 [data-app-action-sidebar-project-row] {
+  min-height: 32px;
+  margin: 2px 3px;
+  padding: 0 8px !important;
+  color: #244f79 !important;
+  border: 1px solid transparent;
   border-radius: 13px !important;
+  transition: background-color .14s ease, border-color .14s ease;
+}
+
+[data-app-action-sidebar-thread-row]:hover,
+[data-app-action-sidebar-project-row]:hover,
+.app-shell-left-panel button:hover {
+  color: #0e438d !important;
+  border-color: #7ed9eb70;
+  background: linear-gradient(90deg, #fff9, #dbf4fca8, #f5d5efa3) !important;
+  box-shadow: 0 5px 14px #1c99cd1c;
+}
+
+[data-app-action-sidebar-project-row] {
+  color: #154f75 !important;
+  font-weight: 750 !important;
+}
+
+[data-app-action-sidebar-project-label],
+[data-app-action-sidebar-thread-title] {
+  letter-spacing: .01em;
+  text-shadow: 0 1px #fff;
+}
+
+.app-shell-left-panel svg {
+  color: #159bcf !important;
+  filter: drop-shadow(0 1px 2px #fff);
 }
 
 [data-app-action-sidebar-thread-active="true"] {
   color: #0e438d !important;
+  border-color: #4bc2e080 !important;
   background: linear-gradient(90deg, #19c9e538, #90b3fa32 58%, #f397e03d) !important;
   box-shadow: 0 0 0 1px #4bc2e080, 0 7px 18px #1c99cd24 !important;
 }

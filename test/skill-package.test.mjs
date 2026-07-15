@@ -9,7 +9,7 @@ async function text(path) {
   return readFile(new URL(path, skillRoot), "utf8");
 }
 
-test("ships a standard Codex skill with the complete v4 theme payload", async () => {
+test("ships a standard Codex skill with the complete v5 theme payload", async () => {
   const required = [
     "SKILL.md",
     "README.md",
@@ -52,11 +52,17 @@ test("queued installer waits for Codex to quit and never bypasses compatibility 
   assert.doesNotMatch(`${installer}\n${runner}`, /killall|pkill|codesign/);
 });
 
+test("pet installer selects the independent Miku Future avatar", async () => {
+  const installer = await text("scripts/install-pet.command");
+  assert.match(installer, /custom:miku-future/);
+  assert.match(installer, /\.codex\/pets\/miku-future/);
+});
+
 test("bundled theme stays self-contained and includes the full-canvas marker", async () => {
   const css = await text("payload/src/theme.css");
   const patcher = await text("payload/src/theme-patch.mjs");
-  assert.match(css, /CODEX_MIKU_THEME v4 FULL CANVAS PET/);
-  assert.match(patcher, /CODEX_MIKU_THEME v4 FULL CANVAS PET/);
+  assert.match(css, /CODEX_MIKU_THEME v5 488137 SIDEBAR/);
+  assert.match(patcher, /CODEX_MIKU_THEME v5 488137 SIDEBAR/);
   assert.doesNotMatch(css, /https?:\/\//i);
   assert.doesNotMatch(patcher, /\/Users\/blakexu/);
 });

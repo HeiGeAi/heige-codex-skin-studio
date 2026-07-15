@@ -22,7 +22,7 @@ import {
 } from "./asar.mjs";
 
 const ENTRY_PATH = "webview/index.html";
-const THEME_MARKER = "CODEX_MIKU_THEME v4 FULL CANVAS PET";
+const THEME_MARKER = "CODEX_MIKU_THEME v5 488137 SIDEBAR";
 const DEFAULT_ASAR = "/Applications/ChatGPT.app/Contents/Resources/app.asar";
 const INFO_PLIST = "/Applications/ChatGPT.app/Contents/Info.plist";
 const SUPPORTED_APP_VERSION = "26.707.72221";
@@ -495,7 +495,9 @@ async function check(asarPath) {
     entryBytes: context.entry.size,
     installed: context.themeInstalled && context.assets.every(({ installed }) => installed),
     installedVersion: hasMarker
-      ? 4
+      ? 5
+      : context.originalHtml.includes("CODEX_MIKU_THEME v4 FULL CANVAS PET")
+        ? 4
       : context.originalHtml.includes("CODEX_MIKU_THEME v3 PIXEL MATCH")
         ? 3
       : context.originalHtml.includes("CODEX_MIKU_THEME v2 MAXIMAL")
@@ -573,7 +575,7 @@ async function install(asarPath) {
       sourceBytes: source.length,
     })),
     installedAt: new Date().toISOString(),
-    installedVersion: 4,
+    installedVersion: 5,
     themedArchiveSha256,
     themedEntrySha256: digest(Buffer.from(patchedHtml)),
   };

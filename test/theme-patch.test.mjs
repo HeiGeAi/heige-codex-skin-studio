@@ -31,7 +31,7 @@ test("replaces the first inline style and preserves byte length", () => {
 });
 
 test("is idempotent when the theme is already installed", () => {
-  const theme = "/* CODEX_MIKU_THEME v4 FULL CANVAS PET */\n:root{--miku-cyan:#19c9e5}";
+  const theme = "/* CODEX_MIKU_THEME v5 488137 SIDEBAR */\n:root{--miku-cyan:#19c9e5}";
   const once = buildPatchedHtml(original, theme);
   const twice = buildPatchedHtml(once, theme);
   assert.equal(twice, once);
@@ -39,12 +39,12 @@ test("is idempotent when the theme is already installed", () => {
 
 test("upgrades an older installed theme in place", () => {
   const oldTheme = "/* CODEX_MIKU_THEME v1 */\n:root{--miku-cyan:#18c7d4}";
-  const newTheme = "/* CODEX_MIKU_THEME v4 FULL CANVAS PET */\n:root{--miku-pink:#ed6ec1}";
+  const newTheme = "/* CODEX_MIKU_THEME v5 488137 SIDEBAR */\n:root{--miku-pink:#ed6ec1}";
   const oldInstalled = buildPatchedHtml(original, oldTheme);
   const upgraded = buildPatchedHtml(oldInstalled, newTheme);
 
   assert.equal(Buffer.byteLength(upgraded), Buffer.byteLength(original));
-  assert.match(upgraded, /CODEX_MIKU_THEME v4 FULL CANVAS PET/);
+  assert.match(upgraded, /CODEX_MIKU_THEME v5 488137 SIDEBAR/);
   assert.doesNotMatch(upgraded, /CODEX_MIKU_THEME v1/);
 });
 
@@ -129,7 +129,7 @@ function makeArchiveEntries(entries) {
   return Buffer.concat([prefix, json, Buffer.alloc(padding), ...payloads]);
 }
 
-test("the real v4 CSS fits the Codex inline slot and keeps static startup layout", async () => {
+test("the real v5 CSS fits the Codex inline slot and keeps static startup layout", async () => {
   const source = await readFile(new URL("../src/theme.css", import.meta.url), "utf8");
   const compiled = minifyThemeCss(source);
 
