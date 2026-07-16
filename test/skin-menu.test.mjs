@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildSkinMenuScript } from "../src/skin-menu.mjs";
+import { buildSkinMenuScript, CSS_SENTINELS } from "../src/skin-menu.mjs";
 
 const base = {
   styleId: "heige-codex-skin-style",
@@ -34,6 +34,22 @@ test("keeps hostile names as inert JSON instead of executable code", () => {
 
   assert.ok(script.includes(String.raw`\";alert(1);//`), "name must stay inside a JSON string");
   assert.match(script, /"accent":"#24c9d7"/);
+});
+
+test("ships the custom upload flow with the sentinel css template", () => {
+  const cssTemplate = `#root { background: url("${CSS_SENTINELS.hero}"); color: ${CSS_SENTINELS.text}; }`;
+  const script = buildSkinMenuScript({
+    ...base,
+    activeId: "a",
+    cssTemplate,
+    entries: [{ id: "a", name: "A", accent: "#123456", css: "#root{}" }],
+  });
+
+  assert.match(script, /heigeCodexCustomTheme/, "custom theme must persist via localStorage");
+  assert.match(script, /custom-upload/);
+  assert.match(script, /HEIGEHEROSENTINEL/, "css template must ride along for client-side builds");
+  assert.match(script, /extractPalette/, "palette extraction must ship");
+  assert.match(script, /__heigeCodexSkin/, "scriptable hook must be exposed");
 });
 
 test("rejects empty menus and unknown active themes", () => {

@@ -3,7 +3,7 @@ import { extname } from "node:path";
 
 import { CdpSession, fetchRendererTargets, waitForRendererTargets } from "./cdp-client.mjs";
 import { buildSkinCss } from "./skin-css.mjs";
-import { buildSkinMenuScript } from "./skin-menu.mjs";
+import { buildSkinMenuScript, CSS_SENTINELS } from "./skin-menu.mjs";
 
 const STYLE_ID = "heige-codex-skin-style";
 const MENU_ID = "heige-codex-skin-menu";
@@ -62,11 +62,27 @@ export async function applySkin({ loadedTheme, themes, port, deps = {} }) {
   const entries = [];
   for (const theme of menuThemes) entries.push(await themeEntry(theme));
   const themeId = loadedTheme.manifest.id;
+  // 自定义上传主题的客户端 CSS 模板：哨兵值占位，页面内替换，和内置主题同一套模板
+  const cssTemplate = buildSkinCss({
+    theme: {
+      id: CSS_SENTINELS.id,
+      name: "custom",
+      colors: {
+        accent: CSS_SENTINELS.accent,
+        secondary: CSS_SENTINELS.secondary,
+        surface: CSS_SENTINELS.surface,
+        text: CSS_SENTINELS.text,
+      },
+      copy: null,
+    },
+    heroDataUrl: CSS_SENTINELS.hero,
+  });
   const expression = buildSkinMenuScript({
     entries,
     activeId: themeId,
     styleId: STYLE_ID,
     menuId: MENU_ID,
+    cssTemplate,
   });
   const targets = await waitForMainTargets(wait, port, {
     timeoutMs: deps.waitTimeoutMs ?? 20_000,
