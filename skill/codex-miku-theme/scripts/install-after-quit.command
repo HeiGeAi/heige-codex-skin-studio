@@ -26,4 +26,5 @@ rm -f "$PLIST_PATH"
 /bin/launchctl bootstrap "$DOMAIN" "$PLIST_PATH"
 
 echo "兼容性检查通过，安装已排队。"
-echo "现在按 Command + Q 完全退出 Codex，不要手动重新打开；安装完成后 Codex 会自动重新打开。"
+echo "等待当前回复完整结束后，再由你按 Command + Q 完全退出 Codex。"
+echo "不要让 Agent 在输出过程中关闭应用，也不要手动重新打开；安装成功后 Codex 会自动重新打开。"

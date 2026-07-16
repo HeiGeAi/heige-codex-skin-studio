@@ -70,6 +70,9 @@ test("queued installer waits for Codex to quit and never bypasses compatibility 
   assert.match(installer, /"\$NODE_BIN" "\$ROOT\/payload\/src\/theme-patch\.mjs" check/);
   assert.match(installer, /launchctl bootstrap "\$DOMAIN" "\$PLIST_PATH"/);
   assert.match(restorer, /launchctl bootstrap "\$DOMAIN" "\$PLIST_PATH"/);
+  assert.match(installer, /等待当前回复完整结束后/);
+  assert.match(restorer, /等待当前回复完整结束后/);
+  assert.doesNotMatch(`${installer}\n${restorer}`, /^echo "现在按 Command \+ Q/m);
   assert.doesNotMatch(`${installer}\n${restorer}`, /launchctl submit/);
   assert.match(`${installer}\n${restorer}`, /com\.heigeai\.codex-miku-theme/);
   assert.match(`${installer}\n${restorer}`, /STAGING_ROOT/);
