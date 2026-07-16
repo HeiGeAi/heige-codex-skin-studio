@@ -1,0 +1,140 @@
+name: CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node:
+    name: Node 22 full suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: node scripts/check-asset-provenance.mjs --check
+      - name: Require a clean worktree
+        if: always()
+        run: test -z "$(git status --porcelain)"
+
+  macos:
+    name: macOS lifecycle and launchd
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Run macOS unit tests
+        run: >-
+          node --test
+          test/codex-app.test.mjs
+          test/controller.test.mjs
+          test/macos-launch-agent.test.mjs
+          test/scripts.test.mjs
+          test/state-store.test.mjs
+      - name: Parse every zsh entrypoint
+        run: |
+          for file in scripts/*.command scripts/lib/*.zsh; do
+            /bin/zsh -n "$file"
+          done
+      - name: Run isolated random-label launchd integration
+        env:
+          HEIGE_RUN_LAUNCHD_INTEGRATION: "1"
+        run: node --test test/macos-launch-agent.integration.test.mjs
+      - name: Require integration cleanup and a clean worktree
+        if: always()
+        run: |
+          test -z "$(find "$RUNNER_TEMP" -maxdepth 2 \( -name '*.journal' -o -name '*.staged' -o -name '*.removing' -o -name '*.detached' \) -print -quit)"
+          test -z "$(git status --porcelain)"
+
+  windows:
+    name: Windows PowerShell parity
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Windows PowerShell 5.1 suites
+        shell: pwsh
+        run: powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File test/windows/run-tests.ps1
+      - name: PowerShell 7 suites
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -File test/windows/run-tests.ps1
+      - name: 32-bit Windows PowerShell resolver
+        shell: pwsh
+        run: >-
+          & "$env:WINDIR\SysWOW64\WindowsPowerShell\v1.0\powershell.exe"
+          -NoLogo -NoProfile -ExecutionPolicy Bypass
+          -File test/windows/resolver.test.ps1
+      - name: Isolated current-user Scheduled Task integration
+        shell: pwsh
+        run: |
+          $name = "HeiGe Codex Skin Studio Test $([guid]::NewGuid())"
+          Set-Content -LiteralPath "$env:RUNNER_TEMP\heige-task-name.txt" -Value $name -Encoding UTF8
+          pwsh -NoLogo -NoProfile -File test/windows/scheduled-task.test.ps1 -Integration -TaskName $name
+      - name: Unconditionally remove the isolated test task
+        if: always()
+        shell: pwsh
+        run: |
+          $path = "$env:RUNNER_TEMP\heige-task-name.txt"
+          if (Test-Path -LiteralPath $path) {
+            $name = (Get-Content -LiteralPath $path -Raw).Trim()
+            if ($name -match '^HeiGe Codex Skin Studio Test [0-9a-f-]{36}$') {
+              Unregister-ScheduledTask -TaskName $name -Confirm:$false -ErrorAction SilentlyContinue
+            }
+          }
+      - name: Require a clean worktree
+        if: always()
+        shell: pwsh
+        run: |
+          $dirty = git status --porcelain
+          if ($dirty) { $dirty; exit 1 }
+
+  package:
+    name: Reproducible skill package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Build identical temporary candidates
+        run: |
+          node scripts/package-skill.mjs --output "$RUNNER_TEMP/a.skill" --source-date-epoch 1704067200
+          node scripts/package-skill.mjs --output "$RUNNER_TEMP/b.skill" --source-date-epoch 1704067200
+          cmp "$RUNNER_TEMP/a.skill" "$RUNNER_TEMP/b.skill"
+          sha256sum "$RUNNER_TEMP/a.skill" "$RUNNER_TEMP/b.skill"
+      - name: Verify allowlist legal files and archive metadata
+        run: node --test test/skill-package.test.mjs test/release-governance.test.mjs
+      - name: Install the extracted copy without launching Codex
+        run: |
+          mkdir -p "$RUNNER_TEMP/unpacked" "$RUNNER_TEMP/home"
+          unzip -q "$RUNNER_TEMP/a.skill" -d "$RUNNER_TEMP/unpacked"
+          HOME="$RUNNER_TEMP/home" HEIGE_SKIP_APPLY=1 /bin/zsh "$RUNNER_TEMP/unpacked/heige-codex-skin-studio/scripts/install.command"
+          node "$RUNNER_TEMP/home/.codex/heige-codex-skin-studio/src/cli.mjs" list >/dev/null
+      - name: Require a clean worktree
+        if: always()
+        run: test -z "$(git status --porcelain)"

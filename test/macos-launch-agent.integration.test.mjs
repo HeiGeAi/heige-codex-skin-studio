@@ -18,6 +18,16 @@ import {
 
 const execFileAsync = promisify(execFile);
 const enabled = process.platform === "darwin" && process.env.HEIGE_RUN_LAUNCHD_INTEGRATION === "1";
+const liveRuntimeEnabled = process.platform === "darwin" && process.env.HEIGE_RUN_LIVE_MAC_RUNTIME === "1";
+
+test("the current Mac resolves a trusted signed production runtime", { skip: !liveRuntimeEnabled }, async () => {
+  const trustedRuntime = await inspectTrustedProductionRuntime();
+  assert.match(trustedRuntime.nodePath, /\/Contents\/Resources\/cua_node\/bin\/node$/);
+  assert.equal(
+    trustedRuntime.controllerPath,
+    join(trustedUserHome(), ".codex", "heige-codex-skin-studio", "src", "cli.mjs"),
+  );
+});
 
 test("isolated random-label LaunchAgent can be registered and removed", { skip: !enabled }, async (t) => {
   const root = await realpath(
@@ -72,13 +82,6 @@ test("isolated random-label LaunchAgent can be registered and removed", { skip: 
       throw new AggregateError(errors, `isolated LaunchAgent cleanup failed for ${label}`);
     }
   });
-
-  const trustedRuntime = await inspectTrustedProductionRuntime();
-  assert.match(trustedRuntime.nodePath, /\/Contents\/Resources\/cua_node\/bin\/node$/);
-  assert.equal(
-    trustedRuntime.controllerPath,
-    join(trustedUserHome(), ".codex", "heige-codex-skin-studio", "src", "cli.mjs"),
-  );
 
   await registerControllerAgent(options);
   assert.equal((await inspectLaunchAgent(options)).loaded, true);

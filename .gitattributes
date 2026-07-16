@@ -1,0 +1,9 @@
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+*.mjs text eol=lf
+*.command text eol=lf
+*.zsh text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
