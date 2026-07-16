@@ -175,3 +175,28 @@ test("repair refuses drifted pollution, unsigned stages, live apps, and path ali
   await symlink(linked.stagedAppPath, alias);
   await assert.rejects(repairMacApp({ ...linked, stagedAppPath: alias }), /canonical real directory/);
 });
+
+for (const boundary of [
+  { name: "after detaching the polluted app", rejectCall: 3 },
+  { name: "after publishing the official app", rejectCall: 5 },
+]) {
+  test(`repair rolls back when Codex starts ${boundary.name}`, async (t) => {
+    const fx = await fixture(t);
+    let calls = 0;
+    fx.dependencies = {
+      ...fx.dependencies,
+      assertAppStopped: async () => {
+        calls += 1;
+        return calls !== boundary.rejectCall;
+      },
+    };
+
+    await assert.rejects(
+      repairMacApp(fx),
+      /must be fully stopped and remain stopped/,
+    );
+    assert.equal(await appBody(fx.currentAppPath), "polluted-asar\n");
+    assert.equal(await appBody(fx.stagedAppPath), "official-asar\n");
+    assert.equal(await exists(fx.journalPath), false);
+  });
+}

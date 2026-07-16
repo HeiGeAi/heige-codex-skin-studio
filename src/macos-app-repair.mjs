@@ -440,6 +440,14 @@ async function assertExactApp(path, expected, dependencies, label) {
   return observed;
 }
 
+async function assertRepairQuiescent(journal, dependencies, phase) {
+  for (const path of [journal.currentAppPath, journal.backupAppPath]) {
+    if (await dependencies.assertAppStopped(path) !== true) {
+      throw new Error(`Codex app must be fully stopped and remain stopped during ${phase}`);
+    }
+  }
+}
+
 async function removeBoundAppTree(path, expected, label) {
   const root = await lstat(path, { bigint: true });
   if (
@@ -511,20 +519,20 @@ async function prepareUnderLock(input, dependencies) {
 }
 
 async function publishUnderLock(journalPath, journal, dependencies, hooks = {}) {
-  if (await dependencies.assertAppStopped(journal.currentAppPath) !== true) {
-    throw new Error("Codex app must be fully stopped before repair");
-  }
+  await assertRepairQuiescent(journal, dependencies, "repair preparation");
   await assertExactApp(journal.currentAppPath, journal.before, dependencies, "current app");
   await assertExactApp(journal.stagedAppPath, journal.after, dependencies, "official stage");
   await rename(journal.currentAppPath, journal.backupAppPath);
   await syncDirectory(dirname(journal.currentAppPath));
   journal = await updateJournal(journalPath, journal, { phase: "backup-detached" });
   await hooks["after-backup-detached"]?.(journal);
+  await assertRepairQuiescent(journal, dependencies, "detached-backup verification");
   await rename(journal.stagedAppPath, journal.currentAppPath);
   await syncDirectory(dirname(journal.currentAppPath));
   await assertExactApp(journal.currentAppPath, journal.after, dependencies, "published official app");
   journal = await updateJournal(journalPath, journal, { phase: "target-published" });
   await hooks["after-target-published"]?.(journal);
+  await assertRepairQuiescent(journal, dependencies, "published-app verification");
   journal = await updateJournal(journalPath, journal, {
     decision: "commit",
     phase: "commit-decided",
