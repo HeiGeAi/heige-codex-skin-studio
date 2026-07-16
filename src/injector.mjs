@@ -42,16 +42,23 @@ async function evaluateTargets(targets, expression, Session) {
   return values;
 }
 
+async function assetDataUrl(path, field) {
+  if (!path) return null;
+  const mime = MIME[extname(path).toLowerCase()];
+  if (!mime) throw new Error(`不支持的 ${field} 图片类型`);
+  const bytes = await readFile(path);
+  return `data:${mime};base64,${bytes.toString("base64")}`;
+}
+
 async function themeEntry(loadedTheme) {
-  const bytes = await readFile(loadedTheme.heroPath);
-  const mime = MIME[extname(loadedTheme.heroPath).toLowerCase()];
-  if (!mime) throw new Error("不支持的 hero 图片类型");
-  const heroDataUrl = `data:${mime};base64,${bytes.toString("base64")}`;
+  const heroDataUrl = await assetDataUrl(loadedTheme.heroPath, "hero");
+  const logoDataUrl = await assetDataUrl(loadedTheme.logoPath, "logo");
+  const polaroidDataUrl = await assetDataUrl(loadedTheme.polaroidPath, "polaroid");
   return {
     id: loadedTheme.manifest.id,
     name: loadedTheme.manifest.name,
     accent: loadedTheme.manifest.colors?.accent,
-    css: buildSkinCss({ theme: loadedTheme.manifest, heroDataUrl }),
+    css: buildSkinCss({ theme: loadedTheme.manifest, heroDataUrl, logoDataUrl, polaroidDataUrl }),
   };
 }
 

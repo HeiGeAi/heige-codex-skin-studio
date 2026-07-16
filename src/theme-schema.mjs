@@ -37,20 +37,24 @@ function isInside(root, candidate) {
   );
 }
 
-function normalizeHero(hero) {
+function normalizeAssetPath(value, field) {
   if (
-    typeof hero !== "string" ||
-    !hero.trim() ||
-    isAbsolute(hero) ||
-    win32.isAbsolute(hero) ||
-    hero.split(/[\\/]+/).includes("..")
+    typeof value !== "string" ||
+    !value.trim() ||
+    isAbsolute(value) ||
+    win32.isAbsolute(value) ||
+    value.split(/[\\/]+/).includes("..")
   ) {
-    throw new Error("theme hero must be a relative path inside the theme directory");
+    throw new Error(`theme ${field} must be a relative path inside the theme directory`);
   }
-  if (!IMAGE_EXTENSIONS.has(extname(hero).toLowerCase())) {
-    throw new Error("theme hero must be PNG, JPEG, or WebP");
+  if (!IMAGE_EXTENSIONS.has(extname(value).toLowerCase())) {
+    throw new Error(`theme ${field} must be PNG, JPEG, or WebP`);
   }
-  return hero;
+  return value;
+}
+
+function normalizeHero(hero) {
+  return normalizeAssetPath(hero, "hero");
 }
 
 function normalizeColors(colors) {
@@ -104,32 +108,37 @@ export function validateThemeManifest(input) {
     id: input.id,
     name: input.name.trim(),
     hero: normalizeHero(input.hero),
+    logo: input.logo === undefined || input.logo === null ? null : normalizeAssetPath(input.logo, "logo"),
+    polaroid: input.polaroid === undefined || input.polaroid === null ? null : normalizeAssetPath(input.polaroid, "polaroid"),
     colors: normalizeColors(input.colors),
     copy: normalizeCopy(input.copy),
   };
+}
+
+async function resolveAsset(root, realRoot, relative, field) {
+  const assetPath = resolve(root, relative);
+  if (!isInside(root, assetPath)) {
+    throw new Error(`theme ${field} escapes the theme directory`);
+  }
+  const realAssetPath = await realpath(assetPath);
+  if (!isInside(realRoot, realAssetPath)) {
+    throw new Error(`theme ${field} escapes the theme directory`);
+  }
+  const info = await lstat(assetPath);
+  if (!info.isFile() || info.size < 1) {
+    throw new Error(`theme ${field} must be a non-empty file`);
+  }
+  return assetPath;
 }
 
 export async function loadTheme(themeDir) {
   const root = resolve(themeDir);
   const raw = JSON.parse(await readFile(join(root, "theme.json"), "utf8"));
   const manifest = validateThemeManifest(raw);
-  const heroPath = resolve(root, manifest.hero);
-  if (!isInside(root, heroPath)) {
-    throw new Error("theme hero escapes the theme directory");
-  }
+  const realRoot = await realpath(root);
+  const heroPath = await resolveAsset(root, realRoot, manifest.hero, "hero");
+  const logoPath = manifest.logo ? await resolveAsset(root, realRoot, manifest.logo, "logo") : null;
+  const polaroidPath = manifest.polaroid ? await resolveAsset(root, realRoot, manifest.polaroid, "polaroid") : null;
 
-  const [realRoot, realHeroPath] = await Promise.all([
-    realpath(root),
-    realpath(heroPath),
-  ]);
-  if (!isInside(realRoot, realHeroPath)) {
-    throw new Error("theme hero escapes the theme directory");
-  }
-
-  const info = await lstat(heroPath);
-  if (!info.isFile() || info.size < 1) {
-    throw new Error("theme hero must be a non-empty file");
-  }
-
-  return { manifest, heroPath, root };
+  return { manifest, heroPath, logoPath, polaroidPath, root };
 }

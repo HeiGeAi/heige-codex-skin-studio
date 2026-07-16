@@ -29,6 +29,8 @@ test("normalizes the minimal theme and supplies color defaults", () => {
     id: "miku-488137",
     name: "Miku 488137",
     hero: "hero.png",
+    logo: null,
+    polaroid: null,
     colors: {
       accent: "#4BC2E0",
       secondary: "#AD7ED5",

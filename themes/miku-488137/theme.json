@@ -2,16 +2,13 @@
   "schemaVersion": 1,
   "id": "miku-488137",
   "name": "Miku 488137",
-  "hero": "hero.png",
+  "hero": "hero.webp",
+  "logo": "logo.webp",
+  "polaroid": "polaroid.webp",
   "colors": {
     "accent": "#19c9e5",
     "secondary": "#ed6ec1",
     "surface": "#f5f6fc",
     "text": "#122c60"
-  },
-  "copy": {
-    "brand": "Miku Codex",
-    "headline": "我们今天来构建什么？",
-    "tagline": "和初音未来一起，把灵感写成代码"
   }
 }

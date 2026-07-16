@@ -15,9 +15,17 @@ function copy(value, fallback = "") {
   return JSON.stringify(typeof value === "string" ? value : fallback);
 }
 
-export function buildSkinCss({ theme, heroDataUrl }) {
-  if (!/^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/=]+$/i.test(heroDataUrl)) {
+const DATA_URL = /^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/=]+$/i;
+
+export function buildSkinCss({ theme, heroDataUrl, logoDataUrl = null, polaroidDataUrl = null }) {
+  if (!DATA_URL.test(heroDataUrl)) {
     throw new Error("hero 必须是本地 PNG、JPEG 或 WebP 数据");
+  }
+  if (logoDataUrl !== null && !DATA_URL.test(logoDataUrl)) {
+    throw new Error("logo 必须是本地 PNG、JPEG 或 WebP 数据");
+  }
+  if (polaroidDataUrl !== null && !DATA_URL.test(polaroidDataUrl)) {
+    throw new Error("polaroid 必须是本地 PNG、JPEG 或 WebP 数据");
   }
   const colors = {
     accent: color(theme.colors?.accent, DEFAULT_COLORS.accent),
@@ -99,5 +107,31 @@ export function buildSkinCss({ theme, heroDataUrl }) {
 [data-app-action-sidebar-thread-active="true"] {
   background: linear-gradient(90deg, color-mix(in srgb, var(--heige-accent) 22%, transparent), color-mix(in srgb, var(--heige-secondary) 16%, transparent)) !important;
 }
-`;
+${logoDataUrl === null ? "" : `
+/* 侧栏工作区标题换品牌 Logo，按钮仍可点开模式切换 */
+.app-shell-left-panel button[aria-haspopup="menu"][aria-label*="ChatGPT"] {
+  background: url(${JSON.stringify(logoDataUrl)}) left center / contain no-repeat !important;
+  width: 214px;
+  height: 78px !important;
+  margin: 4px 0 0;
+}
+.app-shell-left-panel button[aria-haspopup="menu"][aria-label*="ChatGPT"] > span,
+.app-shell-left-panel button[aria-haspopup="menu"][aria-label*="ChatGPT"] > svg {
+  visibility: hidden;
+}
+`}${polaroidDataUrl === null ? "" : `
+/* 右下角拍立得挂件，点击穿透 */
+body::after {
+  content: "";
+  position: fixed;
+  right: 20px;
+  bottom: 24px;
+  width: 200px;
+  height: 300px;
+  background: url(${JSON.stringify(polaroidDataUrl)}) center / contain no-repeat;
+  pointer-events: none;
+  z-index: 15;
+  filter: drop-shadow(0 12px 26px color-mix(in srgb, var(--heige-text) 24%, transparent));
+}
+`}`;
 }
