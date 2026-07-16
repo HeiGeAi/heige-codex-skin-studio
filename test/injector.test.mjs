@@ -33,20 +33,38 @@ async function fixture() {
       },
     },
     deps: {
-      waitForRendererTargets: async () => [{ id: "one", webSocketDebuggerUrl: "ws://127.0.0.1:9341/devtools/page/one" }],
-      fetchRendererTargets: async () => [{ id: "one", webSocketDebuggerUrl: "ws://127.0.0.1:9341/devtools/page/one" }],
+      waitForRendererTargets: async () => [
+        { id: "overlay", url: "app://-/index.html?initialRoute=%2Favatar-overlay", webSocketDebuggerUrl: "ws://127.0.0.1:9341/devtools/page/overlay" },
+        { id: "one", url: "app://-/index.html", webSocketDebuggerUrl: "ws://127.0.0.1:9341/devtools/page/one" },
+      ],
+      fetchRendererTargets: async () => [
+        { id: "overlay", url: "app://-/index.html?initialRoute=%2Favatar-overlay", webSocketDebuggerUrl: "ws://127.0.0.1:9341/devtools/page/overlay" },
+        { id: "one", url: "app://-/index.html", webSocketDebuggerUrl: "ws://127.0.0.1:9341/devtools/page/one" },
+      ],
       Session: FakeSession,
     },
   };
 }
 
-test("applies a single style to every Codex renderer and closes sessions", async () => {
+test("applies the skin to the main window only, never the pet overlay", async () => {
   FakeSession.expressions = [];
   const { loaded, deps } = await fixture();
   const result = await applySkin({ loadedTheme: loaded, port: 9341, deps });
   assert.equal(result.applied, 1);
+  assert.deepEqual(result.targets, ["one"]);
   assert.match(FakeSession.expressions[0], /heige-codex-skin-style/);
   assert.match(FakeSession.expressions[0], /data:image\/png;base64/);
+});
+
+test("keeps waiting when only the pet overlay renderer exists", async () => {
+  const { loaded, deps } = await fixture();
+  deps.waitForRendererTargets = async () => [
+    { id: "overlay", url: "app://-/index.html?initialRoute=%2Favatar-overlay", webSocketDebuggerUrl: "ws://127.0.0.1:9341/devtools/page/overlay" },
+  ];
+  await assert.rejects(
+    applySkin({ loadedTheme: loaded, port: 9341, deps: { ...deps, waitTimeoutMs: 30, pollMs: 5 } }),
+    /主窗口/,
+  );
 });
 
 test("injects the in-app switcher menu with every loaded theme", async () => {
@@ -65,7 +83,7 @@ test("injects the in-app switcher menu with every loaded theme", async () => {
 test("removes and checks the live style without persistent machinery", async () => {
   FakeSession.expressions = [];
   const { deps } = await fixture();
-  assert.equal((await removeSkin({ port: 9341, deps })).removed, 1);
+  assert.equal((await removeSkin({ port: 9341, deps })).removed, 2, "pause 要连宠物悬浮层一起清理");
   assert.deepEqual(await skinStatus({ port: 9341, deps }), [{ installed: true, themeId: "demo" }]);
   assert.match(FakeSession.expressions[0], /remove\(\)/);
   assert.match(FakeSession.expressions[0], /heige-codex-skin-menu/);

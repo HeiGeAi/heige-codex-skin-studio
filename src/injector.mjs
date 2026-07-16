@@ -8,6 +8,25 @@ import { buildSkinMenuScript } from "./skin-menu.mjs";
 const STYLE_ID = "heige-codex-skin-style";
 const MENU_ID = "heige-codex-skin-menu";
 const MIME = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp" };
+const OVERLAY_MARKER = "avatar-overlay";
+
+// 宠物悬浮层也是 app:// renderer，皮肤只能进主窗口
+function isMainTarget(target) {
+  return typeof target.url === "string" && !target.url.includes(OVERLAY_MARKER);
+}
+
+async function waitForMainTargets(wait, port, { timeoutMs = 20_000, pollMs = 500 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    const remainingMs = Math.max(1, deadline - Date.now());
+    const targets = (await wait(port, { timeoutMs: remainingMs })).filter(isMainTarget);
+    if (targets.length > 0) return targets;
+    if (Date.now() + pollMs >= deadline) {
+      throw new Error("只发现宠物悬浮层，等不到 Codex 主窗口 renderer");
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+}
 
 async function evaluateTargets(targets, expression, Session) {
   const values = [];
@@ -49,7 +68,10 @@ export async function applySkin({ loadedTheme, themes, port, deps = {} }) {
     styleId: STYLE_ID,
     menuId: MENU_ID,
   });
-  const targets = await wait(port, { timeoutMs: 10_000 });
+  const targets = await waitForMainTargets(wait, port, {
+    timeoutMs: deps.waitTimeoutMs ?? 20_000,
+    pollMs: deps.pollMs ?? 500,
+  });
   const values = await evaluateTargets(targets, expression, Session);
   return { applied: values.length, themeId, menuThemes: entries.map(({ id }) => id), targets: targets.map(({ id }) => id) };
 }
@@ -76,6 +98,6 @@ export async function skinStatus({ port, deps = {} }) {
     menu: Boolean(document.getElementById(${JSON.stringify(MENU_ID)})),
     themeId: document.documentElement.dataset.heigeCodexSkin ?? null
   }))()`;
-  const targets = await fetchTargets(port);
+  const targets = (await fetchTargets(port)).filter(isMainTarget);
   return evaluateTargets(targets, expression, Session);
 }
