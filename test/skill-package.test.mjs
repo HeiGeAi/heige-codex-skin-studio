@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import {
   access,
   chmod,
+  cp,
   mkdtemp,
   readFile,
   realpath,
@@ -52,14 +53,15 @@ test("packages only to a temporary output and installs a self-contained distribu
   });
 
   const trackedSha256 = createHash("sha256").update(trackedBytes).digest("hex");
-  const archive = join(outputRoot, "smoke.skill");
+  const archive = join(outputRoot, "nested/smoke.skill");
   const packageScript = join(repoRoot, "scripts/package-skill.command");
   const home = await realpath(await mkdtemp(join(tmpdir(), "heige-skin-skill-")));
   t.after(() => rm(home, { recursive: true, force: true }));
 
-  await execFileAsync(packageScript, [], {
+  const { stdout: packageStdout } = await execFileAsync(packageScript, [], {
     env: { ...process.env, HEIGE_SKILL_OUTPUT: archive },
   });
+  assert.equal(packageStdout.trim(), archive);
 
   const actualTrackedSha256 = createHash("sha256")
     .update(await readFile(tracked))
@@ -76,16 +78,6 @@ test("packages only to a temporary output and installs a self-contained distribu
     {
       trackedSha256,
       temporaryArchiveExists: true,
-    },
-  );
-
-  await assert.rejects(
-    execFileAsync(packageScript, [], {
-      env: { ...process.env, HEIGE_SKILL_OUTPUT: "" },
-    }),
-    (error) => {
-      assert.match(String(error.stderr), /HEIGE_SKILL_OUTPUT must not be empty/);
-      return true;
     },
   );
 
@@ -123,5 +115,74 @@ test("packages only to a temporary output and installs a self-contained distribu
   assert.ok(
     themes.some((theme) => theme.id === "miku-488137"),
     "installed copy must ship the Miku preset",
+  );
+});
+
+test("packages to the default output inside an isolated repository", async (t) => {
+  const fixtureRoot = await realpath(
+    await mkdtemp(join(tmpdir(), "heige-skill-repository-")),
+  );
+  t.after(() => rm(fixtureRoot, { recursive: true, force: true }));
+
+  for (const entry of [
+    "package.json",
+    "skill",
+    "src",
+    "themes",
+    "custom-pet",
+    "scripts",
+  ]) {
+    await cp(join(repoRoot, entry), join(fixtureRoot, entry), {
+      recursive: true,
+    });
+  }
+
+  const packageScript = join(fixtureRoot, "scripts/package-skill.command");
+  const archive = join(
+    fixtureRoot,
+    "output/heige-codex-skin-studio.skill",
+  );
+  const env = { ...process.env };
+  delete env.HEIGE_SKILL_OUTPUT;
+
+  const { stdout } = await execFileAsync(packageScript, [], { env });
+
+  assert.equal(stdout.trim(), archive);
+  await access(archive);
+});
+
+test("rejects an empty explicit package output path", async () => {
+  const packageScript = join(repoRoot, "scripts/package-skill.command");
+
+  await assert.rejects(
+    execFileAsync(packageScript, [], {
+      env: { ...process.env, HEIGE_SKILL_OUTPUT: "" },
+    }),
+    (error) => {
+      assert.equal(error.code, 64);
+      assert.equal(
+        String(error.stderr).trim(),
+        "HEIGE_SKILL_OUTPUT must not be empty",
+      );
+      return true;
+    },
+  );
+});
+
+test("rejects a relative explicit package output path", async () => {
+  const packageScript = join(repoRoot, "scripts/package-skill.command");
+
+  await assert.rejects(
+    execFileAsync(packageScript, [], {
+      env: { ...process.env, HEIGE_SKILL_OUTPUT: "relative.skill" },
+    }),
+    (error) => {
+      assert.equal(error.code, 64);
+      assert.equal(
+        String(error.stderr).trim(),
+        "HEIGE_SKILL_OUTPUT must be an absolute path",
+      );
+      return true;
+    },
   );
 });

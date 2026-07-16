@@ -10,6 +10,10 @@ if (( ${+HEIGE_SKILL_OUTPUT} )); then
     echo "HEIGE_SKILL_OUTPUT must not be empty" >&2
     exit 64
   fi
+  if [[ "$HEIGE_SKILL_OUTPUT" != /* ]]; then
+    echo "HEIGE_SKILL_OUTPUT must be an absolute path" >&2
+    exit 64
+  fi
   OUTPUT="$HEIGE_SKILL_OUTPUT"
 else
   OUTPUT="$ROOT/output/heige-codex-skin-studio.skill"
