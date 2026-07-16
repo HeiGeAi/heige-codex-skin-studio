@@ -4,10 +4,18 @@ set -euo pipefail
 ROOT="${0:A:h:h}"
 STAGE=$(mktemp -d "${TMPDIR:-/tmp}/heige-codex-skin.XXXXXX")
 TARGET="$STAGE/heige-codex-skin-studio"
-OUTPUT="$ROOT/output/heige-codex-skin-studio.skill"
 trap 'rm -rf "$STAGE"' EXIT
+if (( ${+HEIGE_SKILL_OUTPUT} )); then
+  if [[ -z "$HEIGE_SKILL_OUTPUT" ]]; then
+    echo "HEIGE_SKILL_OUTPUT must not be empty" >&2
+    exit 64
+  fi
+  OUTPUT="$HEIGE_SKILL_OUTPUT"
+else
+  OUTPUT="$ROOT/output/heige-codex-skin-studio.skill"
+fi
 
-mkdir -p "$TARGET/payload" "$ROOT/output"
+mkdir -p "$TARGET/payload" "${OUTPUT:h}"
 cp "$ROOT/skill/heige-codex-skin-studio/SKILL.md" "$TARGET/"
 cp "$ROOT/skill/heige-codex-skin-studio/README.md" "$TARGET/"
 cp -R "$ROOT/skill/heige-codex-skin-studio/scripts" "$TARGET/"
