@@ -27,6 +27,7 @@ const SAFE_ERRORS = Object.freeze({
   INVALID_REQUEST: { status: 400, message: "请求参数无效" },
   REVISION_CONFLICT: { status: 409, message: "状态已发生变化，请重试" },
   REQUEST_TIMEOUT: { status: 408, message: "请求超时，请重试" },
+  CONTROL_BUSY: { status: 503, message: "控制服务繁忙，请稍后重试" },
   CONTROL_UNAVAILABLE: { status: 503, message: "控制服务暂时不可用，请重试" },
   PERSISTENCE_UPDATE_FAILED: { status: 503, message: "常驻设置失败，请重试" },
   BACKGROUND_START_FAILED: {
@@ -48,6 +49,20 @@ class RequestTimeoutError extends Error {
   constructor() {
     super("request timed out");
     this.name = "RequestTimeoutError";
+  }
+}
+
+class ClientDisconnectedError extends Error {
+  constructor() {
+    super("client disconnected");
+    this.name = "ClientDisconnectedError";
+  }
+}
+
+class ControlClosingError extends Error {
+  constructor() {
+    super("control server is closing");
+    this.name = "ControlClosingError";
   }
 }
 
@@ -148,17 +163,21 @@ function isNonNegativeInteger(value) {
 }
 
 function extractState(value) {
-  if (
-    value === null ||
-    typeof value !== "object" ||
-    typeof value.persistenceEnabled !== "boolean" ||
-    !isNonNegativeInteger(value.revision)
-  ) {
+  if (value === null || typeof value !== "object") return null;
+  let persistenceEnabled;
+  let revision;
+  try {
+    persistenceEnabled = value.persistenceEnabled;
+    revision = value.revision;
+  } catch {
+    return null;
+  }
+  if (typeof persistenceEnabled !== "boolean" || !isNonNegativeInteger(revision)) {
     return null;
   }
   return {
-    persistenceEnabled: value.persistenceEnabled,
-    revision: value.revision,
+    persistenceEnabled,
+    revision,
   };
 }
 
@@ -169,6 +188,22 @@ function extractErrorState(error) {
   } catch {
     return null;
   }
+}
+
+function isVerifiedBackgroundFailure(current, input, state) {
+  if (
+    state === null ||
+    input.persistenceEnabled !== true ||
+    current.persistenceEnabled !== false ||
+    state.persistenceEnabled !== false
+  ) {
+    return false;
+  }
+  if (state.revision === current.revision) return true;
+  return (
+    current.revision <= Number.MAX_SAFE_INTEGER - 2 &&
+    state.revision === current.revision + 2
+  );
 }
 
 function exactRequestBody(value) {
@@ -215,7 +250,7 @@ function okBody(state) {
   };
 }
 
-function readBody(request, maxBodyBytes) {
+function readBody(request, maxBodyBytes, signal) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let totalBytes = 0;
@@ -226,6 +261,7 @@ function readBody(request, maxBodyBytes) {
       request.off("end", onEnd);
       request.off("aborted", onAborted);
       request.off("error", onError);
+      signal.removeEventListener("abort", onAbort);
     };
     const settle = (callback, value) => {
       if (settled) return;
@@ -246,11 +282,20 @@ function readBody(request, maxBodyBytes) {
     const onEnd = () => settle(resolve, Buffer.concat(chunks, totalBytes));
     const onAborted = () => settle(reject, protocolError("INVALID_REQUEST"));
     const onError = () => settle(reject, protocolError("INVALID_REQUEST"));
+    const onAbort = () => settle(
+      reject,
+      signal.reason instanceof Error ? signal.reason : new RequestTimeoutError(),
+    );
 
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
     request.on("data", onData);
     request.on("end", onEnd);
     request.on("aborted", onAborted);
     request.on("error", onError);
+    signal.addEventListener("abort", onAbort, { once: true });
   });
 }
 
@@ -294,11 +339,242 @@ function parseContentLength(request, maxBodyBytes) {
 
 function throwIfAborted(signal) {
   if (!signal.aborted) return;
-  if (signal.reason instanceof RequestTimeoutError) throw signal.reason;
+  if (signal.reason instanceof Error) throw signal.reason;
   throw new RequestTimeoutError();
 }
 
-async function routePersistenceRequest(request, context, signal) {
+function waitForPrecommit(value, signal) {
+  if (signal.aborted) return Promise.reject(
+    signal.reason instanceof Error ? signal.reason : new RequestTimeoutError(),
+  );
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    const settle = (callback, result) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      callback(result);
+    };
+    const onAbort = () => settle(
+      reject,
+      signal.reason instanceof Error ? signal.reason : new RequestTimeoutError(),
+    );
+    signal.addEventListener("abort", onAbort, { once: true });
+    Promise.resolve(value).then(
+      (result) => settle(resolve, result),
+      (error) => settle(reject, error),
+    );
+  });
+}
+
+function createPersistenceCoordinator(maxTransactions) {
+  const queue = [];
+  let activeTransaction;
+  let pendingTransactions = 0;
+  let closing = false;
+  let closePromise;
+  let resolveClose;
+
+  const notifyDrained = () => {
+    if (
+      closing &&
+      activeTransaction === undefined &&
+      queue.length === 0 &&
+      resolveClose !== undefined
+    ) {
+      resolveClose();
+      resolveClose = undefined;
+    }
+  };
+
+  const settleTransaction = (transaction, outcome, value) => {
+    if (transaction.phase === "settled") return;
+    transaction.phase = "settled";
+    transaction.precommitSignal.removeEventListener("abort", transaction.onAbort);
+    pendingTransactions -= 1;
+    if (outcome === "resolve") transaction.resolve(value);
+    else transaction.reject(value);
+    notifyDrained();
+  };
+
+  const removeQueuedTransaction = (transaction) => {
+    const index = queue.indexOf(transaction);
+    if (index !== -1) queue.splice(index, 1);
+  };
+
+  const runNext = () => {
+    if (activeTransaction !== undefined) return;
+    const transaction = queue.shift();
+    if (transaction === undefined) {
+      notifyDrained();
+      return;
+    }
+    if (transaction.phase === "settled") {
+      runNext();
+      return;
+    }
+    activeTransaction = transaction;
+    transaction.phase = "precommit";
+    const assertPrecommit = () => {
+      if (transaction.phase !== "precommit") throw new ControlClosingError();
+      throwIfAborted(transaction.precommitSignal);
+    };
+    const api = {
+      assertPrecommit,
+      waitPrecommit(value) {
+        assertPrecommit();
+        return waitForPrecommit(value, transaction.precommitSignal);
+      },
+      enterCommit() {
+        assertPrecommit();
+        transaction.phase = "committing";
+        transaction.markCommitStarted();
+        return transaction.commitController.signal;
+      },
+    };
+    void (async () => {
+      let outcome = "resolve";
+      let value;
+      try {
+        value = await transaction.operation(api);
+      } catch (error) {
+        outcome = "reject";
+        value = error;
+      }
+      activeTransaction = undefined;
+      settleTransaction(transaction, outcome, value);
+      runNext();
+    })();
+  };
+
+  const cancelTransaction = (transaction, reason) => {
+    if (transaction.phase === "committing" || transaction.phase === "settled") {
+      return false;
+    }
+    if (!transaction.cancelController.signal.aborted) {
+      transaction.cancelController.abort(reason);
+    }
+    return true;
+  };
+
+  return {
+    run(signal, markCommitStarted, operation) {
+      if (closing) return Promise.reject(new ControlClosingError());
+      if (pendingTransactions >= maxTransactions) {
+        return Promise.reject(protocolError("CONTROL_BUSY"));
+      }
+      return new Promise((resolve, reject) => {
+        const cancelController = new AbortController();
+        const precommitSignal = AbortSignal.any([
+          signal,
+          cancelController.signal,
+        ]);
+        const transaction = {
+          phase: "queued",
+          operation,
+          markCommitStarted,
+          resolve,
+          reject,
+          cancelController,
+          commitController: new AbortController(),
+          precommitSignal,
+          onAbort: undefined,
+        };
+        transaction.onAbort = () => {
+          if (transaction.phase !== "queued") return;
+          removeQueuedTransaction(transaction);
+          const reason = precommitSignal.reason instanceof Error
+            ? precommitSignal.reason
+            : new RequestTimeoutError();
+          settleTransaction(transaction, "reject", reason);
+          runNext();
+        };
+        pendingTransactions += 1;
+        precommitSignal.addEventListener("abort", transaction.onAbort, { once: true });
+        if (precommitSignal.aborted) {
+          transaction.onAbort();
+          return;
+        }
+        queue.push(transaction);
+        runNext();
+      });
+    },
+    close(reason = new ControlClosingError()) {
+      if (closePromise !== undefined) return closePromise;
+      closing = true;
+      closePromise = new Promise((resolve) => {
+        resolveClose = resolve;
+      });
+      for (const transaction of [...queue]) cancelTransaction(transaction, reason);
+      if (activeTransaction !== undefined) cancelTransaction(activeTransaction, reason);
+      notifyDrained();
+      return closePromise;
+    },
+  };
+}
+
+async function applyPersistenceRequest(input, context, transaction) {
+  let current;
+  try {
+    current = extractState(await transaction.waitPrecommit(context.readState()));
+  } catch {
+    transaction.assertPrecommit();
+    throw protocolError("CONTROL_UNAVAILABLE");
+  }
+  if (current === null) throw protocolError("CONTROL_UNAVAILABLE");
+
+  if (current.persistenceEnabled === input.persistenceEnabled) {
+    return okBody(current);
+  }
+  if (current.revision !== input.revision) {
+    throw protocolError("REVISION_CONFLICT", current);
+  }
+
+  let updated;
+  try {
+    const commitSignal = transaction.enterCommit();
+    updated = extractState(await context.setPersistence({
+      expectedRevision: input.revision,
+      enabled: input.persistenceEnabled,
+      signal: commitSignal,
+    }));
+  } catch (error) {
+    const authoritativeState = extractErrorState(error);
+    const safeAuthoritativeState = (
+      authoritativeState !== null &&
+      authoritativeState.revision >= current.revision
+    )
+      ? authoritativeState
+      : null;
+    let code;
+    try {
+      code = error?.code;
+    } catch {
+      code = undefined;
+    }
+    if (code === "REVISION_CONFLICT") {
+      throw protocolError("REVISION_CONFLICT", safeAuthoritativeState ?? undefined);
+    }
+    if (
+      code === "BACKGROUND_START_FAILED" &&
+      isVerifiedBackgroundFailure(current, input, safeAuthoritativeState)
+    ) {
+      throw protocolError("BACKGROUND_START_FAILED", safeAuthoritativeState ?? undefined);
+    }
+    throw protocolError("PERSISTENCE_UPDATE_FAILED", safeAuthoritativeState ?? undefined);
+  }
+  if (
+    updated === null ||
+    updated.persistenceEnabled !== input.persistenceEnabled ||
+    updated.revision !== current.revision + 1
+  ) {
+    throw protocolError("PERSISTENCE_UPDATE_FAILED");
+  }
+  return okBody(updated);
+}
+
+async function routePersistenceRequest(request, context, signal, markCommitStarted) {
   if (request.url !== CONTROL_PATH) throw protocolError("NOT_FOUND");
   if (request.method !== "POST" && request.method !== "OPTIONS") {
     throw protocolError("METHOD_NOT_ALLOWED");
@@ -333,7 +609,7 @@ async function routePersistenceRequest(request, context, signal) {
   }
 
   const declaredLength = parseContentLength(request, context.maxBodyBytes);
-  const bytes = await readBody(request, context.maxBodyBytes);
+  const bytes = await readBody(request, context.maxBodyBytes, signal);
   throwIfAborted(signal);
   if (bytes.length !== declaredLength) throw protocolError("INVALID_CONTENT_LENGTH");
 
@@ -346,57 +622,11 @@ async function routePersistenceRequest(request, context, signal) {
   const input = exactRequestBody(parsed);
   if (input === null) throw protocolError("INVALID_REQUEST");
 
-  let current;
-  try {
-    current = extractState(await context.readState());
-  } catch {
-    throwIfAborted(signal);
-    throw protocolError("CONTROL_UNAVAILABLE");
-  }
-  throwIfAborted(signal);
-  if (current === null) throw protocolError("CONTROL_UNAVAILABLE");
-
-  if (current.persistenceEnabled === input.persistenceEnabled) {
-    return okBody(current);
-  }
-  if (current.revision !== input.revision) {
-    throw protocolError("REVISION_CONFLICT", current);
-  }
-
-  let updated;
-  try {
-    updated = extractState(await context.setPersistence({
-      expectedRevision: input.revision,
-      enabled: input.persistenceEnabled,
-      signal,
-    }));
-  } catch (error) {
-    throwIfAborted(signal);
-    const authoritativeState = extractErrorState(error);
-    let code;
-    try {
-      code = error?.code;
-    } catch {
-      code = undefined;
-    }
-    if (code === "REVISION_CONFLICT") {
-      throw protocolError("REVISION_CONFLICT", authoritativeState ?? undefined);
-    }
-    if (code === "BACKGROUND_START_FAILED") {
-      throw protocolError("BACKGROUND_START_FAILED", authoritativeState ?? undefined);
-    }
-    throw protocolError("PERSISTENCE_UPDATE_FAILED");
-  }
-  throwIfAborted(signal);
-
-  if (
-    updated === null ||
-    updated.persistenceEnabled !== input.persistenceEnabled ||
-    updated.revision !== current.revision + 1
-  ) {
-    throw protocolError("PERSISTENCE_UPDATE_FAILED");
-  }
-  return okBody(updated);
+  return context.persistenceCoordinator.run(
+    signal,
+    markCommitStarted,
+    (transaction) => applyPersistenceRequest(input, context, transaction),
+  );
 }
 
 function sendResponse(response, descriptor, corsOrigin, request) {
@@ -435,19 +665,41 @@ function requestHandler(context) {
       ? origin.value
       : undefined;
     let timeoutId;
+    let commitStarted = false;
     const abortController = new AbortController();
+    const abortPrecommit = (reason) => {
+      if (commitStarted || abortController.signal.aborted) return;
+      abortController.abort(reason);
+    };
+    const onDisconnect = () => {
+      if (!response.writableFinished) abortPrecommit(new ClientDisconnectedError());
+    };
+    const requestEntry = {
+      abortPrecommit,
+    };
+    context.activeRequestEntries.add(requestEntry);
+    request.once("aborted", onDisconnect);
+    response.once("close", onDisconnect);
     const timeout = new Promise((_, reject) => {
       timeoutId = setTimeout(() => {
+        if (commitStarted) return;
         const error = new RequestTimeoutError();
         reject(error);
-        abortController.abort(error);
+        abortPrecommit(error);
       }, context.requestTimeoutMs);
       timeoutId.unref?.();
     });
 
     try {
       const descriptor = await Promise.race([
-        routePersistenceRequest(request, context, abortController.signal),
+        routePersistenceRequest(
+          request,
+          context,
+          abortController.signal,
+          () => {
+            commitStarted = true;
+          },
+        ),
         timeout,
       ]);
       sendResponse(response, descriptor, corsOrigin, request);
@@ -459,6 +711,15 @@ function requestHandler(context) {
           corsOrigin,
           request,
         );
+      } else if (error instanceof ClientDisconnectedError) {
+        // The peer is gone and no commit started, so there is nothing to acknowledge.
+      } else if (error instanceof ControlClosingError) {
+        sendResponse(
+          response,
+          { ...safeBody("CONTROL_UNAVAILABLE"), closeConnection: true },
+          corsOrigin,
+          request,
+        );
       } else if (error instanceof ProtocolError) {
         sendResponse(response, safeBody(error.code, error.state), corsOrigin, request);
       } else {
@@ -466,6 +727,9 @@ function requestHandler(context) {
       }
     } finally {
       clearTimeout(timeoutId);
+      request.off("aborted", onDisconnect);
+      response.off("close", onDisconnect);
+      context.activeRequestEntries.delete(requestEntry);
     }
   };
 }
@@ -522,22 +786,39 @@ function listen(server, { host, port }) {
   });
 }
 
-function createIdempotentClose(server, sockets) {
+function createIdempotentClose(server, sockets, activeHandlers, activeResponses, context) {
   let closePromise;
   return () => {
     if (closePromise !== undefined) return closePromise;
-    closePromise = new Promise((resolve, reject) => {
-      if (!server.listening) {
-        resolve();
-        return;
+    context.closing = true;
+    const closingError = new ControlClosingError();
+    for (const entry of context.activeRequestEntries) {
+      entry.abortPrecommit(closingError);
+    }
+    const transactionsDrained = context.persistenceCoordinator.close(closingError);
+    for (const socket of sockets) socket.pause();
+    const wasListening = server.listening;
+    const serverClose = wasListening
+      ? new Promise((resolve, reject) => {
+        server.close((error) => {
+          if (error && error.code !== "ERR_SERVER_NOT_RUNNING") reject(error);
+          else resolve();
+        });
+      })
+      : Promise.resolve();
+    void serverClose.catch(() => {});
+    closePromise = (async () => {
+      await transactionsDrained;
+      while (activeHandlers.size > 0) {
+        await Promise.allSettled([...activeHandlers]);
       }
-      server.close((error) => {
-        if (error && error.code !== "ERR_SERVER_NOT_RUNNING") reject(error);
-        else resolve();
-      });
+      while (activeResponses.size > 0) {
+        await Promise.allSettled([...activeResponses]);
+      }
       server.closeAllConnections?.();
       for (const socket of sockets) socket.destroy();
-    });
+      await serverClose;
+    })();
     return closePromise;
   };
 }
@@ -608,6 +889,7 @@ export async function startControlServer({
   maxBodyBytes = 1024,
   requestTimeoutMs = 1500,
   maxConnections = 8,
+  maxPendingRequests = maxConnections,
 }) {
   if (host !== "127.0.0.1") throw new Error("控制通道只能绑定 127.0.0.1");
   const safeToken = requireControlToken(token);
@@ -618,6 +900,7 @@ export async function startControlServer({
   const bodyLimit = requirePositiveInteger(maxBodyBytes, "maxBodyBytes");
   const timeoutMs = requirePositiveInteger(requestTimeoutMs, "requestTimeoutMs");
   const connectionLimit = requirePositiveInteger(maxConnections, "maxConnections");
+  const requestLimit = requirePositiveInteger(maxPendingRequests, "maxPendingRequests");
 
   const context = {
     token: safeToken,
@@ -627,13 +910,73 @@ export async function startControlServer({
     maxBodyBytes: bodyLimit,
     requestTimeoutMs: timeoutMs,
     expectedHost: undefined,
+    persistenceCoordinator: createPersistenceCoordinator(requestLimit),
+    activeRequestEntries: new Set(),
+    closing: false,
   };
   const sockets = new Set();
+  const activeHandlers = new Set();
+  const activeResponses = new Set();
+  let pendingRequests = 0;
   const handleRequest = requestHandler(context);
   let markRequestStarted = () => {};
   const server = createServer((request, response) => {
     markRequestStarted(request, response);
-    void handleRequest(request, response);
+    let markResponseDone;
+    const responseDone = new Promise((resolve) => {
+      markResponseDone = resolve;
+    });
+    let responseCompleted = false;
+    const completeResponse = () => {
+      if (responseCompleted) return;
+      responseCompleted = true;
+      activeResponses.delete(responseDone);
+      markResponseDone();
+    };
+    activeResponses.add(responseDone);
+    response.once("finish", completeResponse);
+    response.once("close", completeResponse);
+    if (context.closing) {
+      const origin = singleHeader(request, "origin");
+      const corsOrigin = isAllowedOrigin(origin, context.allowedOrigins)
+        ? origin.value
+        : undefined;
+      request.resume();
+      sendResponse(
+        response,
+        { ...safeBody("CONTROL_UNAVAILABLE"), closeConnection: true },
+        corsOrigin,
+        request,
+      );
+      return;
+    }
+    if (pendingRequests >= requestLimit) {
+      const origin = singleHeader(request, "origin");
+      const corsOrigin = isAllowedOrigin(origin, context.allowedOrigins)
+        ? origin.value
+        : undefined;
+      request.resume();
+      sendResponse(
+        response,
+        { ...safeBody("CONTROL_BUSY"), closeConnection: true },
+        corsOrigin,
+        request,
+      );
+      return;
+    }
+    pendingRequests += 1;
+    const handling = handleRequest(request, response);
+    activeHandlers.add(handling);
+    void handling.then(
+      () => {
+        pendingRequests -= 1;
+        activeHandlers.delete(handling);
+      },
+      () => {
+        pendingRequests -= 1;
+        activeHandlers.delete(handling);
+      },
+    );
   });
   server.maxConnections = connectionLimit;
   server.keepAliveTimeout = timeoutMs;
@@ -657,6 +1000,12 @@ export async function startControlServer({
   return {
     host,
     port: address.port,
-    close: createIdempotentClose(server, sockets),
+    close: createIdempotentClose(
+      server,
+      sockets,
+      activeHandlers,
+      activeResponses,
+      context,
+    ),
   };
 }

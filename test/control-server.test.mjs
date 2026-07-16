@@ -124,6 +124,7 @@ async function startFixture(t, overrides = {}) {
     maxBodyBytes: overrides.maxBodyBytes ?? 1024,
     requestTimeoutMs: overrides.requestTimeoutMs ?? 1500,
     maxConnections: overrides.maxConnections ?? 8,
+    maxPendingRequests: overrides.maxPendingRequests ?? 8,
   });
   t.after(() => server.close());
   return { server, calls, getState: () => structuredClone(state) };
@@ -425,6 +426,70 @@ test("rejects noninteger and negative revisions and nonboolean values", async (t
   }
 });
 
+test("snapshots state accessors exactly once before validating them", async (t) => {
+  let persistenceReads = 0;
+  let revisionReads = 0;
+  let writes = 0;
+  const deceptiveState = {};
+  Object.defineProperties(deceptiveState, {
+    persistenceEnabled: {
+      enumerable: true,
+      get() {
+        persistenceReads += 1;
+        return persistenceReads === 1;
+      },
+    },
+    revision: {
+      enumerable: true,
+      get() {
+        revisionReads += 1;
+        return revisionReads === 1 ? 3 : 4;
+      },
+    },
+  });
+  const { server } = await startFixture(t, {
+    readState: async () => deceptiveState,
+    setPersistence: async ({ expectedRevision, enabled }) => {
+      writes += 1;
+      return { persistenceEnabled: enabled, revision: expectedRevision + 1 };
+    },
+  });
+
+  const response = await request(server);
+
+  assert.equal(response.status, 200);
+  assert.equal(persistenceReads, 1);
+  assert.equal(revisionReads, 1);
+  assert.equal(writes, 1);
+  assert.deepEqual(responseJson(response), {
+    ok: true,
+    persistenceEnabled: false,
+    revision: 4,
+  });
+});
+
+test("fails closed when a backend state Proxy throws from a getter", async (t) => {
+  const secret = "proxy-secret-path-/Users/private/state.json";
+  const hostileState = new Proxy({}, {
+    get() {
+      throw new Error(secret);
+    },
+  });
+  const { server } = await startFixture(t, {
+    readState: async () => hostileState,
+  });
+
+  const response = await request(server);
+
+  assert.equal(response.status, 503);
+  assert.deepEqual(responseJson(response), {
+    ok: false,
+    code: "CONTROL_UNAVAILABLE",
+    message: "控制服务暂时不可用，请重试",
+  });
+  assert.equal(response.text.includes(secret), false);
+});
+
 test("returns the authoritative state for a stale same-value retry", async (t) => {
   let calls = 0;
   const { server } = await startFixture(t, {
@@ -446,6 +511,72 @@ test("returns the authoritative state for a stale same-value retry", async (t) =
     revision: 9,
   });
   assert.equal(calls, 0);
+});
+
+test("serializes same-value retries behind an in-flight opposite transition", async (t) => {
+  let state = { persistenceEnabled: true, revision: 3 };
+  let readCalls = 0;
+  let markSecondRead;
+  const secondRead = new Promise((resolve) => {
+    markSecondRead = resolve;
+  });
+  let releaseFirstCommit;
+  let markFirstCommitStarted;
+  const firstCommitStarted = new Promise((resolve) => {
+    markFirstCommitStarted = resolve;
+  });
+  const firstCommitGate = new Promise((resolve) => {
+    releaseFirstCommit = resolve;
+  });
+  t.after(() => releaseFirstCommit());
+  const { server } = await startFixture(t, {
+    readState: async () => {
+      readCalls += 1;
+      if (readCalls === 2) markSecondRead();
+      return { ...state };
+    },
+    setPersistence: async ({ expectedRevision, enabled }) => {
+      markFirstCommitStarted();
+      await firstCommitGate;
+      state = { persistenceEnabled: enabled, revision: expectedRevision + 1 };
+      return { ...state };
+    },
+  });
+
+  const disable = request(server, {
+    body: { revision: 3, persistenceEnabled: false },
+  });
+  await firstCommitStarted;
+
+  let retrySettled = false;
+  const enableRetry = request(server, {
+    body: { revision: 3, persistenceEnabled: true },
+  }).finally(() => {
+    retrySettled = true;
+  });
+  const readBeforeCommitSettled = await Promise.race([
+    secondRead.then(() => true),
+    new Promise((resolve) => setTimeout(() => resolve(false), 50)),
+  ]);
+  assert.equal(
+    readBeforeCommitSettled,
+    false,
+    "a queued retry must not read state before the first transaction settles",
+  );
+  assert.equal(retrySettled, false, "the retry must wait for the first linearization point");
+
+  releaseFirstCommit();
+  const [disableResponse, retryResponse] = await Promise.all([disable, enableRetry]);
+  assert.equal(disableResponse.status, 200);
+  assert.equal(retryResponse.status, 409);
+  assert.deepEqual(responseJson(retryResponse), {
+    ok: false,
+    code: "REVISION_CONFLICT",
+    message: "状态已发生变化，请重试",
+    persistenceEnabled: false,
+    revision: 4,
+  });
+  assert.deepEqual(state, { persistenceEnabled: false, revision: 4 });
 });
 
 test("rejects a backend success that skips the next revision", async (t) => {
@@ -514,6 +645,107 @@ test("a compensated backend failure returns safe authoritative state", async (t)
   });
 });
 
+test("does not claim persistence stayed off when compensation state is missing", async (t) => {
+  const missingStateError = new Error("compensation outcome unavailable");
+  missingStateError.code = "BACKGROUND_START_FAILED";
+  const { server } = await startFixture(t, {
+    state: { persistenceEnabled: false, revision: 3 },
+    setPersistence: async () => {
+      throw missingStateError;
+    },
+  });
+
+  const response = await request(server, {
+    body: { revision: 3, persistenceEnabled: true },
+  });
+
+  assert.equal(response.status, 503);
+  assert.deepEqual(responseJson(response), {
+    ok: false,
+    code: "PERSISTENCE_UPDATE_FAILED",
+    message: "常驻设置失败，请重试",
+  });
+});
+
+test("returns contradictory compensation state without a false closed claim", async (t) => {
+  const contradictoryError = backendError({
+    code: "BACKGROUND_START_FAILED",
+    persistenceEnabled: true,
+    revision: 4,
+  });
+  const { server } = await startFixture(t, {
+    state: { persistenceEnabled: false, revision: 3 },
+    setPersistence: async () => {
+      throw contradictoryError;
+    },
+  });
+
+  const response = await request(server, {
+    body: { revision: 3, persistenceEnabled: true },
+  });
+
+  assert.equal(response.status, 503);
+  assert.deepEqual(responseJson(response), {
+    ok: false,
+    code: "PERSISTENCE_UPDATE_FAILED",
+    message: "常驻设置失败，请重试",
+    persistenceEnabled: true,
+    revision: 4,
+  });
+});
+
+test("rejects an impossible compensation revision without claiming safe off", async (t) => {
+  const impossibleRevisionError = backendError({
+    code: "BACKGROUND_START_FAILED",
+    persistenceEnabled: false,
+    revision: 4,
+  });
+  const { server } = await startFixture(t, {
+    state: { persistenceEnabled: false, revision: 3 },
+    setPersistence: async () => {
+      throw impossibleRevisionError;
+    },
+  });
+
+  const response = await request(server, {
+    body: { revision: 3, persistenceEnabled: true },
+  });
+
+  assert.equal(response.status, 503);
+  assert.deepEqual(responseJson(response), {
+    ok: false,
+    code: "PERSISTENCE_UPDATE_FAILED",
+    message: "常驻设置失败，请重试",
+    persistenceEnabled: false,
+    revision: 4,
+  });
+});
+
+test("omits a regressive backend error state that cannot be authoritative", async (t) => {
+  const regressiveError = backendError({
+    code: "BACKGROUND_START_FAILED",
+    persistenceEnabled: false,
+    revision: 2,
+  });
+  const { server } = await startFixture(t, {
+    state: { persistenceEnabled: false, revision: 3 },
+    setPersistence: async () => {
+      throw regressiveError;
+    },
+  });
+
+  const response = await request(server, {
+    body: { revision: 3, persistenceEnabled: true },
+  });
+
+  assert.equal(response.status, 503);
+  assert.deepEqual(responseJson(response), {
+    ok: false,
+    code: "PERSISTENCE_UPDATE_FAILED",
+    message: "常驻设置失败，请重试",
+  });
+});
+
 test("redacts token path headers environment and stack from backend errors", async (t) => {
   const { server } = await startFixture(t, {
     setPersistence: async () => {
@@ -578,47 +810,87 @@ test("closes an idle keep-alive socket without an unsolicited response", async (
   assert.equal(rawResponse.includes("REQUEST_TIMEOUT"), false);
 });
 
-test("times out a backend handler that does not settle", async (t) => {
-  const { server } = await startFixture(t, {
-    requestTimeoutMs: 50,
-    setPersistence: async () => new Promise(() => {}),
-  });
-
-  const response = await request(server);
-
-  assert.equal(response.status, 408);
-  assert.deepEqual(responseJson(response), {
-    ok: false,
-    code: "REQUEST_TIMEOUT",
-    message: "请求超时，请重试",
-  });
-});
-
-test("aborts an in-flight persistence operation at the request deadline", async (t) => {
+test("a request deadline cannot acknowledge failure after commit begins", async (t) => {
+  let releaseCommit;
+  let markCommitStarted;
   let receivedSignal;
+  const commitStarted = new Promise((resolve) => {
+    markCommitStarted = resolve;
+  });
+  const commitGate = new Promise((resolve) => {
+    releaseCommit = resolve;
+  });
   const { server } = await startFixture(t, {
     requestTimeoutMs: 50,
     setPersistence: async (input) => {
       receivedSignal = input.signal;
-      return new Promise((resolve, reject) => {
-        if (input.signal?.aborted) {
-          reject(input.signal.reason);
-          return;
-        }
-        input.signal?.addEventListener(
-          "abort",
-          () => reject(input.signal.reason),
-          { once: true },
-        );
-      });
+      markCommitStarted();
+      await commitGate;
+      return { persistenceEnabled: false, revision: 4 };
     },
   });
 
-  const response = await request(server);
+  let responseSettled = false;
+  const responsePromise = request(server).finally(() => {
+    responseSettled = true;
+  });
+  await commitStarted;
+  await new Promise((resolve) => setTimeout(resolve, 80));
 
-  assert.equal(response.status, 408);
+  assert.equal(responseSettled, false, "the server must drain an entered commit");
   assert.ok(receivedSignal instanceof AbortSignal);
-  assert.equal(receivedSignal.aborted, true);
+  assert.equal(receivedSignal.aborted, false, "HTTP deadlines must not abort commit work");
+
+  releaseCommit();
+  const response = await responsePromise;
+  assert.equal(response.status, 200);
+  assert.deepEqual(responseJson(response), {
+    ok: true,
+    persistenceEnabled: false,
+    revision: 4,
+  });
+});
+
+test("a queued request times out without reading state after the active commit", async (t) => {
+  let releaseCommit;
+  let markCommitStarted;
+  let readCalls = 0;
+  const commitStarted = new Promise((resolve) => {
+    markCommitStarted = resolve;
+  });
+  const commitGate = new Promise((resolve) => {
+    releaseCommit = resolve;
+  });
+  t.after(() => releaseCommit());
+  const { server } = await startFixture(t, {
+    requestTimeoutMs: 50,
+    readState: async () => {
+      readCalls += 1;
+      return { persistenceEnabled: true, revision: 3 };
+    },
+    setPersistence: async ({ expectedRevision, enabled }) => {
+      markCommitStarted();
+      await commitGate;
+      return { persistenceEnabled: enabled, revision: expectedRevision + 1 };
+    },
+  });
+
+  const activeResponse = request(server);
+  await commitStarted;
+  const queuedResponse = await request(server);
+
+  assert.equal(queuedResponse.status, 408);
+  assert.deepEqual(responseJson(queuedResponse), {
+    ok: false,
+    code: "REQUEST_TIMEOUT",
+    message: "请求超时，请重试",
+  });
+  assert.equal(readCalls, 1);
+
+  releaseCommit();
+  assert.equal((await activeResponse).status, 200);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(readCalls, 1, "a timed-out queue node must never run later");
 });
 
 test("does not start a persistence write after the request deadline", async (t) => {
@@ -644,6 +916,110 @@ test("does not start a persistence write after the request deadline", async (t) 
   assert.equal(writes, 0);
 });
 
+test("client disconnect cancels a precommit request before any write", async (t) => {
+  let releaseReadState;
+  let markReadStarted;
+  let writes = 0;
+  const readStarted = new Promise((resolve) => {
+    markReadStarted = resolve;
+  });
+  const readGate = new Promise((resolve) => {
+    releaseReadState = resolve;
+  });
+  t.after(() => releaseReadState());
+  const { server } = await startFixture(t, {
+    requestTimeoutMs: 500,
+    readState: async () => {
+      markReadStarted();
+      await readGate;
+      return { persistenceEnabled: true, revision: 3 };
+    },
+    setPersistence: async () => {
+      writes += 1;
+      return { persistenceEnabled: false, revision: 4 };
+    },
+  });
+  const body = jsonText(VALID_BODY);
+  const socket = net.createConnection({ host: server.host, port: server.port });
+  socket.on("error", () => {});
+  t.after(() => socket.destroy());
+  await once(socket, "connect");
+  socket.write([
+    "POST /v1/persistence HTTP/1.1",
+    `Host: ${server.host}:${server.port}`,
+    `Origin: ${APP_ORIGIN}`,
+    "Content-Type: application/json",
+    `Content-Length: ${Buffer.byteLength(body)}`,
+    `X-HeiGe-Control-Token: ${CONTROL_TOKEN}`,
+    "Connection: close",
+    "",
+    body,
+  ].join("\r\n"));
+
+  await readStarted;
+  socket.destroy();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  releaseReadState();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+
+  assert.equal(writes, 0);
+});
+
+test("client disconnect drains a commit that already entered setPersistence", async (t) => {
+  let state = { persistenceEnabled: true, revision: 3 };
+  let releaseCommit;
+  let markCommitStarted;
+  let markCommitFinished;
+  let commitSignal;
+  const commitStarted = new Promise((resolve) => {
+    markCommitStarted = resolve;
+  });
+  const commitFinished = new Promise((resolve) => {
+    markCommitFinished = resolve;
+  });
+  const commitGate = new Promise((resolve) => {
+    releaseCommit = resolve;
+  });
+  t.after(() => releaseCommit());
+  const { server } = await startFixture(t, {
+    requestTimeoutMs: 500,
+    readState: async () => ({ ...state }),
+    setPersistence: async ({ expectedRevision, enabled, signal }) => {
+      commitSignal = signal;
+      markCommitStarted();
+      await commitGate;
+      state = { persistenceEnabled: enabled, revision: expectedRevision + 1 };
+      markCommitFinished();
+      return { ...state };
+    },
+  });
+  const body = jsonText(VALID_BODY);
+  const socket = net.createConnection({ host: server.host, port: server.port });
+  socket.on("error", () => {});
+  t.after(() => socket.destroy());
+  await once(socket, "connect");
+  socket.write([
+    "POST /v1/persistence HTTP/1.1",
+    `Host: ${server.host}:${server.port}`,
+    `Origin: ${APP_ORIGIN}`,
+    "Content-Type: application/json",
+    `Content-Length: ${Buffer.byteLength(body)}`,
+    `X-HeiGe-Control-Token: ${CONTROL_TOKEN}`,
+    "Connection: close",
+    "",
+    body,
+  ].join("\r\n"));
+
+  await commitStarted;
+  socket.destroy();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(commitSignal.aborted, false);
+  releaseCommit();
+  await commitFinished;
+
+  assert.deepEqual(state, { persistenceEnabled: false, revision: 4 });
+});
+
 test("caps simultaneous connections", async (t) => {
   const { server } = await startFixture(t, { maxConnections: 1 });
   const held = net.createConnection({ host: server.host, port: server.port });
@@ -666,6 +1042,106 @@ test("caps simultaneous connections", async (t) => {
   }
 });
 
+test("rejects work above the global active and queued request cap", async (t) => {
+  let releaseCommit;
+  let markCommitStarted;
+  const commitStarted = new Promise((resolve) => {
+    markCommitStarted = resolve;
+  });
+  const commitGate = new Promise((resolve) => {
+    releaseCommit = resolve;
+  });
+  t.after(() => releaseCommit());
+  const { server } = await startFixture(t, {
+    maxPendingRequests: 1,
+    setPersistence: async ({ expectedRevision, enabled }) => {
+      markCommitStarted();
+      await commitGate;
+      return { persistenceEnabled: enabled, revision: expectedRevision + 1 };
+    },
+  });
+
+  const firstResponse = request(server);
+  await commitStarted;
+  let limitTimer;
+  let overloadedResponse;
+  try {
+    overloadedResponse = await Promise.race([
+      request(server),
+      new Promise((_, reject) => {
+        limitTimer = setTimeout(
+          () => reject(new Error("GLOBAL_REQUEST_CAP_NOT_ENFORCED")),
+          100,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(limitTimer);
+    releaseCommit();
+  }
+
+  assert.equal(overloadedResponse.status, 503);
+  assert.deepEqual(responseJson(overloadedResponse), {
+    ok: false,
+    code: "CONTROL_BUSY",
+    message: "控制服务繁忙，请稍后重试",
+  });
+  assert.equal((await firstResponse).status, 200);
+});
+
+test("serializes authenticated requests pipelined on one raw TCP socket", async (t) => {
+  let state = { persistenceEnabled: true, revision: 3 };
+  let activeWrites = 0;
+  let maxActiveWrites = 0;
+  let writes = 0;
+  const { server } = await startFixture(t, {
+    maxPendingRequests: 4,
+    readState: async () => ({ ...state }),
+    setPersistence: async ({ expectedRevision, enabled }) => {
+      writes += 1;
+      activeWrites += 1;
+      maxActiveWrites = Math.max(maxActiveWrites, activeWrites);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      state = { persistenceEnabled: enabled, revision: expectedRevision + 1 };
+      activeWrites -= 1;
+      return { ...state };
+    },
+  });
+  const body = jsonText(VALID_BODY);
+  const rawRequest = (connection) => [
+    "POST /v1/persistence HTTP/1.1",
+    `Host: ${server.host}:${server.port}`,
+    `Origin: ${APP_ORIGIN}`,
+    "Content-Type: application/json",
+    `Content-Length: ${Buffer.byteLength(body)}`,
+    `X-HeiGe-Control-Token: ${CONTROL_TOKEN}`,
+    `Connection: ${connection}`,
+    "",
+    body,
+  ].join("\r\n");
+  const rawResponse = await new Promise((resolve, reject) => {
+    const socket = net.createConnection({ host: server.host, port: server.port });
+    const chunks = [];
+    socket.setEncoding("utf8");
+    socket.on("data", (chunk) => chunks.push(chunk));
+    socket.on("error", reject);
+    socket.on("close", () => resolve(chunks.join("")));
+    socket.on("connect", () => {
+      socket.write([
+        rawRequest("keep-alive"),
+        rawRequest("keep-alive"),
+        rawRequest("keep-alive"),
+        rawRequest("close"),
+      ].join(""));
+    });
+  });
+
+  assert.equal(rawResponse.match(/HTTP\/1\.1 200/g)?.length, 4);
+  assert.equal(maxActiveWrites, 1);
+  assert.equal(writes, 1, "later same-value requests must observe the first commit");
+  assert.deepEqual(state, { persistenceEnabled: false, revision: 4 });
+});
+
 test("shutdown is idempotent and stops accepting connections", async (t) => {
   const { server } = await startFixture(t);
 
@@ -673,4 +1149,152 @@ test("shutdown is idempotent and stops accepting connections", async (t) => {
   await server.close();
 
   await assert.rejects(request(server));
+});
+
+test("shutdown waits for an active persistence commit before closing sockets", async (t) => {
+  let releaseCommit;
+  let markCommitStarted;
+  const commitStarted = new Promise((resolve) => {
+    markCommitStarted = resolve;
+  });
+  const commitGate = new Promise((resolve) => {
+    releaseCommit = resolve;
+  });
+  t.after(() => releaseCommit());
+  const { server } = await startFixture(t, {
+    setPersistence: async ({ expectedRevision, enabled }) => {
+      markCommitStarted();
+      await commitGate;
+      return { persistenceEnabled: enabled, revision: expectedRevision + 1 };
+    },
+  });
+
+  const responsePromise = request(server);
+  await commitStarted;
+  let closeSettled = false;
+  const closePromise = server.close().then(() => {
+    closeSettled = true;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+
+  assert.equal(closeSettled, false, "close must drain the commit before resolving");
+  await assert.rejects(request(server), "close must reject newly arriving work immediately");
+  releaseCommit();
+
+  const [response] = await Promise.all([responsePromise, closePromise]);
+  assert.equal(response.status, 200);
+  assert.deepEqual(responseJson(response), {
+    ok: true,
+    persistenceEnabled: false,
+    revision: 4,
+  });
+  await assert.rejects(request(server));
+});
+
+test("shutdown cancels queued persistence work without cancelling the active commit", async (t) => {
+  let releaseCommit;
+  let markCommitStarted;
+  let readCalls = 0;
+  const commitStarted = new Promise((resolve) => {
+    markCommitStarted = resolve;
+  });
+  const commitGate = new Promise((resolve) => {
+    releaseCommit = resolve;
+  });
+  t.after(() => releaseCommit());
+  const { server } = await startFixture(t, {
+    maxPendingRequests: 2,
+    readState: async () => {
+      readCalls += 1;
+      return { persistenceEnabled: true, revision: 3 };
+    },
+    setPersistence: async ({ expectedRevision, enabled }) => {
+      markCommitStarted();
+      await commitGate;
+      return { persistenceEnabled: enabled, revision: expectedRevision + 1 };
+    },
+  });
+
+  const activeResponse = request(server);
+  await commitStarted;
+  const queuedResponse = request(server);
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(readCalls, 1, "the second request must be queued behind the active commit");
+
+  let closeSettled = false;
+  const closePromise = server.close().then(() => {
+    closeSettled = true;
+  });
+  let queueTimer;
+  let cancelledResponse;
+  try {
+    cancelledResponse = await Promise.race([
+      queuedResponse,
+      new Promise((_, reject) => {
+        queueTimer = setTimeout(
+          () => reject(new Error("QUEUED_REQUEST_NOT_CANCELLED_BY_CLOSE")),
+          100,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(queueTimer);
+  }
+
+  assert.equal(cancelledResponse.status, 503);
+  assert.deepEqual(responseJson(cancelledResponse), {
+    ok: false,
+    code: "CONTROL_UNAVAILABLE",
+    message: "控制服务暂时不可用，请重试",
+  });
+  assert.equal(closeSettled, false);
+  assert.equal(readCalls, 1, "cancelled queued work must never read state");
+
+  releaseCommit();
+  const [active] = await Promise.all([activeResponse, closePromise]);
+  assert.equal(active.status, 200);
+});
+
+test("shutdown cancels an active precommit read without waiting for its promise", async (t) => {
+  let markReadStarted;
+  let writes = 0;
+  const readStarted = new Promise((resolve) => {
+    markReadStarted = resolve;
+  });
+  const { server } = await startFixture(t, {
+    readState: async () => {
+      markReadStarted();
+      return new Promise(() => {});
+    },
+    setPersistence: async () => {
+      writes += 1;
+      return { persistenceEnabled: false, revision: 4 };
+    },
+  });
+
+  const responsePromise = request(server);
+  await readStarted;
+  let drainTimer;
+  let result;
+  try {
+    result = await Promise.race([
+      Promise.all([responsePromise, server.close()]),
+      new Promise((_, reject) => {
+        drainTimer = setTimeout(
+          () => reject(new Error("PRECOMMIT_READ_NOT_CANCELLED_BY_CLOSE")),
+          200,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(drainTimer);
+  }
+
+  assert.equal(result[0].status, 503);
+  assert.deepEqual(responseJson(result[0]), {
+    ok: false,
+    code: "CONTROL_UNAVAILABLE",
+    message: "控制服务暂时不可用，请重试",
+  });
+  assert.equal(writes, 0);
 });
