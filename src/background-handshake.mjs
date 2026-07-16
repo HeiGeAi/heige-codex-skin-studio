@@ -578,3 +578,85 @@ export async function waitForBackgroundHandshake({
   error.code = "BACKGROUND_HANDSHAKE_TIMEOUT";
   throw error;
 }
+
+export async function consumeBackgroundHandshake({
+  stateRoot,
+  expected,
+  forbiddenPid,
+  notBefore,
+  readProcessIdentity,
+  clock = Date.now,
+} = {}, { nonce = randomUUID } = {}) {
+  validateExpected(expected);
+  if (!Number.isSafeInteger(forbiddenPid) || forbiddenPid <= 0) {
+    throw new Error("foreground PID is invalid");
+  }
+  if (!Number.isFinite(notBefore)) throw new Error("handshake notBefore is invalid");
+  if (expected.outcome === "ready" && typeof readProcessIdentity !== "function") {
+    throw new Error("readProcessIdentity is required for a ready handshake");
+  }
+  const path = backgroundHandshakePath(stateRoot);
+  await ensurePrivateStateRoot(stateRoot);
+  let before;
+  try {
+    before = await lstat(path);
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      const missing = new Error("background handshake is no longer available");
+      missing.code = "BACKGROUND_HANDSHAKE_MISSING";
+      throw missing;
+    }
+    throw error;
+  }
+  requirePrivateFile(before);
+  const claimedPath = join(stateRoot, `.${BACKGROUND_HANDSHAKE_FILE}.${nonce()}.claim`);
+  try {
+    await rename(path, claimedPath);
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      const missing = new Error("background handshake was already consumed");
+      missing.code = "BACKGROUND_HANDSHAKE_MISSING";
+      throw missing;
+    }
+    throw error;
+  }
+  await syncDirectory(stateRoot);
+  try {
+    const claimed = await lstat(claimedPath);
+    requirePrivateFile(claimed);
+    if (!sameFile(before, claimed)) {
+      throw new Error("background handshake changed while it was claimed");
+    }
+    const document = await readPrivateDocument({
+      stateRoot,
+      path: claimedPath,
+      validate: validateHandshake,
+      description: "background handshake",
+    });
+    exactExpected(document, expected);
+    const createdAt = Date.parse(document.createdAt);
+    if (createdAt < notBefore) throw new Error("background handshake createdAt is stale");
+    if (createdAt > clock() + 30_000) {
+      throw new Error("background handshake createdAt is from the future");
+    }
+    if (document.pid === forbiddenPid) {
+      throw new Error("background handshake PID belongs to the requesting foreground process");
+    }
+    if (expected.outcome === "ready") {
+      const observed = await readProcessIdentity(document.pid);
+      if (
+        !isRecord(observed) ||
+        observed.pid !== document.pid ||
+        observed.startedAt !== document.startedAt
+      ) {
+        throw new Error("background handshake process identity is no longer live and exact");
+      }
+    }
+    return document;
+  } finally {
+    await unlink(claimedPath).catch((error) => {
+      if (error?.code !== "ENOENT") throw error;
+    });
+    await syncDirectory(stateRoot);
+  }
+}

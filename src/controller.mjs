@@ -739,10 +739,14 @@ export function createSkinController(input) {
       : undefined);
   };
 
-  const runSafe = async (operation, action, { includeHealthCount = false } = {}) => {
+  const runSafe = async (
+    operation,
+    action,
+    { includeHealthCount = false, startupHandshake = null } = {},
+  ) => {
     if (stopped) return result("error", "error", lastKnownState);
     try {
-      return await deps.withLease(operation, action);
+      return await deps.withLease(operation, action, { startupHandshake });
     } catch (error) {
       if (includeHealthCount) consecutiveFailures += 1;
       await safeLog(deps.logger, "error", "controller_failure", error);
@@ -752,14 +756,14 @@ export function createSkinController(input) {
     }
   };
 
-  const start = () => runSafe("controller:start", async (lease) => {
+  const start = ({ startupHandshake = null } = {}) => runSafe("controller:start", async (lease) => {
     const processIdentity = await probeProcess();
     const recovered = await deps.recoverTransition({ currentProcess: processIdentity }, lease);
     if (recovered?.state !== null && recovered?.state !== undefined) {
       lastKnownState = validateControlState(recovered.state);
     }
     return reconcile({ lease, recovered: recovered?.recovered === true });
-  });
+  }, { startupHandshake });
 
   const tick = () => runSafe(
     "controller:tick",

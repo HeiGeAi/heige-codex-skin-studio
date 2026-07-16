@@ -618,6 +618,68 @@ export async function migrateLegacyState({
   });
 }
 
+function sameStudioStateIdentity(left, right) {
+  return left.schemaVersion === right.schemaVersion &&
+    left.selectedThemeId === right.selectedThemeId &&
+    left.lastNonNativeThemeId === right.lastNonNativeThemeId &&
+    left.controlToken === right.controlToken;
+}
+
+export async function rollbackLegacyStateMigration({
+  statePath,
+  lease,
+  beforeState = null,
+  expectedControlToken,
+}) {
+  statePath = await mutationPath(lease, statePath, STATE_FILE_NAME);
+  expectedControlToken = validateControlToken(expectedControlToken);
+  const validatedBefore = beforeState === null ? null : validateStudioState(beforeState);
+  return commitWithOperationLease(lease, async () => {
+    const current = await readStudioState(statePath);
+    if (validatedBefore === null) {
+      if (current === null) return { rolledBack: false, state: null };
+      const exactPrepared = current.controlToken === expectedControlToken && (
+        (
+          current.persistenceEnabled === false &&
+          current.revision === 0 &&
+          current.lastTransitionNonce === null
+        ) ||
+        (
+          current.persistenceEnabled === true &&
+          current.revision === 1 &&
+          current.lastTransitionNonce === null
+        ) ||
+        (
+          current.persistenceEnabled === false &&
+          current.revision === 2 &&
+          current.lastTransitionNonce !== null
+        )
+      );
+      if (!exactPrepared) {
+        throw new Error("legacy state participant changed before rollback");
+      }
+      await unlink(statePath);
+      await syncDirectory(dirname(statePath));
+      return { rolledBack: true, state: null };
+    }
+
+    if (current === null || current.controlToken !== expectedControlToken) {
+      throw new Error("legacy state participant disappeared or changed identity before rollback");
+    }
+    const exactBefore = JSON.stringify(current) === JSON.stringify(validatedBefore);
+    const exactControllerCompensation = sameStudioStateIdentity(current, validatedBefore) &&
+      validatedBefore.persistenceEnabled === true &&
+      current.persistenceEnabled === false &&
+      current.revision === validatedBefore.revision + 1 &&
+      current.lastTransitionNonce !== null;
+    if (!exactBefore && !exactControllerCompensation) {
+      throw new Error("legacy state participant revision changed before rollback");
+    }
+    if (!exactBefore) await atomicWriteJson(statePath, validatedBefore);
+    return { rolledBack: !exactBefore, state: validatedBefore };
+  });
+}
+
 export function validateSessionState(value) {
   if (!isRecord(value)) throw new Error("session 状态必须是对象");
   if (value.schemaVersion !== 1) {

@@ -26,6 +26,7 @@ import {
   readStudioState,
   readTransitionJournal,
   recoverStateTransition,
+  rollbackLegacyStateMigration,
   validateSessionState,
   validateStudioState,
   writeSessionState,
@@ -256,6 +257,62 @@ test("a loaded legacy watchdog and valid theme migrate enabled exactly once", as
   assert.equal(second.migratedFrom, null);
   assert.deepEqual(second.state, result.state);
   assert.equal(randomCalls, 1);
+});
+
+test("legacy state rollback removes the exact prepared state and its controller compensation", async (t) => {
+  for (const compensated of [false, true]) {
+    const { statePath, legacyThemePath } = await fixture(t);
+    const lease = await acquireStateLease(t, statePath, `legacy-rollback-${compensated}`);
+    await writeFile(legacyThemePath, `${DEFAULT_THEME_ID}\n`);
+    const token = Buffer.alloc(32, compensated ? 19 : 18).toString("base64url");
+    await migrateLegacyState({
+      statePath,
+      lease,
+      legacyThemePath,
+      legacyAgentLoaded: true,
+      themeExists: async () => true,
+      randomBytes: () => Buffer.from(token, "base64url"),
+    });
+    if (compensated) {
+      await compareAndUpdateStudioState(statePath, {
+        lease,
+        expectedRevision: 1,
+        mutate: (current) => ({
+          ...current,
+          persistenceEnabled: false,
+          lastTransitionNonce: "controller-compensation",
+        }),
+      });
+    }
+    assert.deepEqual(await rollbackLegacyStateMigration({
+      statePath,
+      lease,
+      beforeState: null,
+      expectedControlToken: token,
+    }), { rolledBack: true, state: null });
+    assert.equal(await readStudioState(statePath), null);
+  }
+});
+
+test("legacy state rollback removes an uncommitted state-only default", async (t) => {
+  const { statePath, legacyThemePath } = await fixture(t);
+  const lease = await acquireStateLease(t, statePath, "legacy-default-rollback");
+  const token = Buffer.alloc(32, 20).toString("base64url");
+  await migrateLegacyState({
+    statePath,
+    lease,
+    legacyThemePath,
+    legacyAgentLoaded: false,
+    themeExists: async () => true,
+    randomBytes: () => Buffer.from(token, "base64url"),
+  });
+  await rollbackLegacyStateMigration({
+    statePath,
+    lease,
+    beforeState: null,
+    expectedControlToken: token,
+  });
+  assert.equal(await readStudioState(statePath), null);
 });
 
 test("new installs default off while invalid loaded legacy state fails closed", async (t) => {

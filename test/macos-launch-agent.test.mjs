@@ -9,10 +9,16 @@ import test from "node:test";
 import { promisify } from "node:util";
 
 import {
+  createStableServiceFreezeDescriptor,
+  finalizeStableServiceFreeze,
+  finalizeLegacyWatchdogMigration,
   inspectLaunchAgent,
   migrateLegacyWatchdog,
+  prepareStableServiceFreeze,
   registerControllerAgent,
   renderControllerPlist,
+  rollbackLegacyWatchdogMigration,
+  rollbackStableServiceFreeze,
   unregisterControllerAgent,
   wakeControllerAgent,
 } from "../src/macos-launch-agent.mjs";
@@ -274,7 +280,13 @@ async function fixture(t, overrides = {}) {
     if (file !== "/bin/launchctl") throw new Error(`unexpected command: ${file}`);
     if (args[0] === "print") {
       const label = args[1].split("/").at(-1);
-      if (loaded.has(label)) return { stdout: `service = ${label}\n`, stderr: "" };
+      if (loaded.has(label)) {
+        const pid = overrides.printPid?.(label);
+        return {
+          stdout: `service = ${label}\n${pid === undefined ? "" : `pid = ${pid}\n`}`,
+          stderr: "",
+        };
+      }
       if (overrides.printError) throw overrides.printError({ label, target: args[1] });
       const stderr = `Bad request.\nCould not find service "${label}" in domain for user gui: ${UID}\n`;
       const error = new Error(`Command failed: /bin/launchctl print ${args[1]}\n${stderr}`);
@@ -339,6 +351,8 @@ async function fixture(t, overrides = {}) {
     faultAt: overrides.faultAt,
     hardCrashAt: overrides.hardCrashAt,
     rollbackFaultAt: overrides.rollbackFaultAt,
+    processExists: overrides.processExists,
+    wait: overrides.wait,
   };
 }
 
@@ -386,6 +400,45 @@ async function installKnownHermesController(deps, {
     return originalExecFile(file, args);
   };
   return { bytes, hermesNode, mode };
+}
+
+async function outerMigrationJournal(deps, { decision = "undecided" } = {}) {
+  const transactionId = randomUUID();
+  const journalPath = join(deps.stateDir, `outer-migration-${transactionId}.json`);
+  await fsPromises.mkdir(deps.stateDir, { recursive: true });
+  let document = {
+    schemaVersion: 1,
+    product: "heige-codex-skin-studio",
+    operation: "legacy-migration",
+    transactionId,
+    revision: 0,
+    nonce: randomUUID(),
+    previousNonce: null,
+    decision,
+    phase: decision === "commit" ? "commit-decided" : "prepared",
+    createdAt: new Date().toISOString(),
+    stateParticipant: null,
+    serviceParticipant: null,
+  };
+  const write = async () => {
+    await writeFile(journalPath, `${JSON.stringify(document)}\n`, { mode: 0o600 });
+    await fsPromises.chmod(journalPath, 0o600);
+  };
+  await write();
+  return {
+    outerTransaction: { transactionId, journalPath },
+    async decide(nextDecision) {
+      document = {
+        ...document,
+        previousNonce: document.nonce,
+        nonce: randomUUID(),
+        revision: document.revision + 1,
+        decision: nextDecision,
+        phase: `${nextDecision}-decided`,
+      };
+      await write();
+    },
+  };
 }
 
 test("test mode refuses both production labels", async (t) => {
@@ -1092,6 +1145,215 @@ test("legacy migration removes only a fully attributed old plist", async (t) => 
   );
   const firstWritableOpen = deps.openCalls.find(([, flags]) => /[wax+]/.test(String(flags)));
   assert.deepEqual(firstWritableOpen?.slice(0, 2), [deps.journalPath, "wx"]);
+});
+
+test("deferred legacy migration keeps recovery material until the outer commit", async (t) => {
+  const deps = await fixture(t);
+  const outer = await outerMigrationJournal(deps);
+  const result = await migrateLegacyWatchdog({
+    ...deps,
+    deferCommit: true,
+    outerTransaction: outer.outerTransaction,
+  });
+
+  assert.equal(result.legacyFound, true);
+  assert.equal(result.legacyLoadedBefore, true);
+  assert.equal(typeof result.transaction, "object");
+  assert.equal(await pathExists(deps.journalPath), true);
+  assert.equal(result.legacyRemoved, false);
+  assert.equal(await pathExists(deps.oldPlistPath), true);
+  assert.equal(deps.loaded.has(deps.oldLabel), true);
+  assert.equal(deps.loaded.has(deps.label), true);
+
+  await outer.decide("commit");
+  await finalizeLegacyWatchdogMigration(
+    JSON.parse(JSON.stringify(result.transaction)),
+    deps,
+  );
+  assert.equal(await pathExists(deps.journalPath), false);
+  assert.equal(await pathExists(deps.oldPlistPath), false);
+  assert.equal(deps.loaded.has(deps.label), true);
+});
+
+test("deferred legacy migration rollback restores both services exactly", async (t) => {
+  const deps = await fixture(t);
+  const outer = await outerMigrationJournal(deps);
+  const result = await migrateLegacyWatchdog({
+    ...deps,
+    deferCommit: true,
+    outerTransaction: outer.outerTransaction,
+  });
+
+  await rollbackLegacyWatchdogMigration(
+    JSON.parse(JSON.stringify(result.transaction)),
+    deps,
+  );
+
+  assert.equal(await pathExists(deps.journalPath), false);
+  assert.deepEqual(await readFile(deps.oldPlistPath), deps.originalPlistBytes);
+  assert.equal((await stat(deps.oldPlistPath)).mode & 0o777, 0o640);
+  assert.equal(deps.loaded.has(deps.oldLabel), true);
+  assert.equal(await pathExists(deps.controllerPlistPath), false);
+  assert.equal(deps.loaded.has(deps.label), false);
+});
+
+test("a durable outer commit decision rolls forward after a crash before participant finalize", async (t) => {
+  const deps = await fixture(t);
+  const outer = await outerMigrationJournal(deps);
+  await migrateLegacyWatchdog({
+    ...deps,
+    deferCommit: true,
+    outerTransaction: outer.outerTransaction,
+  });
+  await outer.decide("commit");
+
+  const recovered = await migrateLegacyWatchdog(deps);
+
+  assert.deepEqual(recovered, {
+    legacyFound: false,
+    legacyRemoved: false,
+    controllerRegistered: false,
+  });
+  assert.equal(await pathExists(deps.journalPath), false);
+  assert.equal(await pathExists(deps.oldPlistPath), false);
+  assert.equal(deps.loaded.has(deps.oldLabel), false);
+  assert.equal(await pathExists(deps.controllerPlistPath), true);
+  assert.equal(deps.loaded.has(deps.label), true);
+});
+
+test("register is inode-stable when the exact fixed controller is already loaded", async (t) => {
+  const deps = await fixture(t);
+  deps.loaded.clear();
+  await registerControllerAgent(deps);
+  const before = await stat(deps.controllerPlistPath);
+  deps.commands.length = 0;
+
+  await registerControllerAgent(deps);
+
+  const after = await stat(deps.controllerPlistPath);
+  assert.equal(after.ino, before.ino);
+  assert.equal(deps.commands.some((command) => ["bootstrap", "bootout"].includes(command[1])), false);
+});
+
+test("stable service freeze stops both attributed jobs and rollback restores their exact prestate", async (t) => {
+  const deps = await fixture(t);
+  await registerControllerAgent(deps);
+  const controllerBytes = await readFile(deps.controllerPlistPath);
+  const outer = await outerMigrationJournal(deps);
+  const descriptor = await createStableServiceFreezeDescriptor({
+    ...deps,
+    outerTransaction: outer.outerTransaction,
+  });
+  const frozen = await prepareStableServiceFreeze({
+    ...deps,
+    outerTransaction: outer.outerTransaction,
+  });
+
+  assert.deepEqual(frozen.transaction, descriptor);
+  assert.equal(frozen.servicesFrozen, 2);
+  assert.equal(deps.loaded.has(deps.label), false);
+  assert.equal(deps.loaded.has(deps.oldLabel), false);
+  assert.deepEqual(await readFile(deps.controllerPlistPath), controllerBytes);
+  assert.deepEqual(await readFile(deps.oldPlistPath), deps.originalPlistBytes);
+
+  await outer.decide("rollback");
+  await rollbackStableServiceFreeze(JSON.parse(JSON.stringify(descriptor)), deps);
+  assert.equal(deps.loaded.has(deps.label), true);
+  assert.equal(deps.loaded.has(deps.oldLabel), true);
+  assert.deepEqual(await readFile(deps.controllerPlistPath), controllerBytes);
+  assert.deepEqual(await readFile(deps.oldPlistPath), deps.originalPlistBytes);
+  assert.equal(await pathExists(join(deps.stateDir, "stable-service-freeze.json")), false);
+});
+
+test("stable service freeze hard crash restores both old jobs only after outer rollback", async (t) => {
+  const deps = await fixture(t);
+  await registerControllerAgent(deps);
+  const outer = await outerMigrationJournal(deps);
+  const descriptor = await createStableServiceFreezeDescriptor({
+    ...deps,
+    outerTransaction: outer.outerTransaction,
+  });
+  await assert.rejects(
+    prepareStableServiceFreeze({
+      ...deps,
+      hardCrashAt: "after-controller-freeze",
+      outerTransaction: outer.outerTransaction,
+    }),
+    /SIMULATED_HARD_CRASH/,
+  );
+  assert.equal(deps.loaded.has(deps.label), false);
+  assert.equal(deps.loaded.has(deps.oldLabel), true);
+
+  await outer.decide("rollback");
+  await rollbackStableServiceFreeze(JSON.parse(JSON.stringify(descriptor)), deps);
+  assert.equal(deps.loaded.has(deps.label), true);
+  assert.equal(deps.loaded.has(deps.oldLabel), true);
+});
+
+test("stable service freeze waits for every captured launchd PID to exit", async (t) => {
+  const probes = new Map();
+  const deps = await fixture(t, {
+    printPid: (label) => label.includes("controller") ? 8101 : 8102,
+    processExists: (pid) => {
+      const count = probes.get(pid) ?? 0;
+      probes.set(pid, count + 1);
+      return count === 0;
+    },
+    wait: async () => {},
+  });
+  await registerControllerAgent(deps);
+  const outer = await outerMigrationJournal(deps);
+  await prepareStableServiceFreeze({
+    ...deps,
+    outerTransaction: outer.outerTransaction,
+  });
+  assert.equal(probes.get(8101), 2);
+  assert.equal(probes.get(8102), 2);
+});
+
+test("stable service freeze finalize never revives the old watchdog after outer commit", async (t) => {
+  const deps = await fixture(t);
+  await registerControllerAgent(deps);
+  const outer = await outerMigrationJournal(deps);
+  const frozen = await prepareStableServiceFreeze({
+    ...deps,
+    outerTransaction: outer.outerTransaction,
+  });
+  deps.loaded.add(deps.label);
+  await outer.decide("commit");
+  await finalizeStableServiceFreeze(
+    JSON.parse(JSON.stringify(frozen.transaction)),
+    deps,
+  );
+  assert.equal(deps.loaded.has(deps.label), true, "the committed new controller remains running");
+  assert.equal(deps.loaded.has(deps.oldLabel), false, "the old watchdog is never revived");
+  assert.equal(await pathExists(join(deps.stateDir, "stable-service-freeze.json")), false);
+});
+
+test("stable service freeze refuses a foreign loaded controller before stopping either job", async (t) => {
+  const deps = await fixture(t);
+  const foreign = renderControllerPlist({
+    label: deps.label,
+    programArguments: ["/foreign/node", "/foreign/cli.mjs", "controller"],
+    stateDir: deps.stateDir,
+  });
+  await writeFile(deps.controllerPlistPath, foreign, { mode: 0o600 });
+  deps.loaded.add(deps.label);
+  const outer = await outerMigrationJournal(deps);
+
+  await assert.rejects(
+    prepareStableServiceFreeze({
+      ...deps,
+      outerTransaction: outer.outerTransaction,
+    }),
+    (error) => error.code === "CONTROLLER_PRESTATE_INVALID",
+  );
+  assert.equal(deps.loaded.has(deps.label), true);
+  assert.equal(deps.loaded.has(deps.oldLabel), true);
+  assert.equal(
+    deps.commands.some((command) => command[1] === "bootout"),
+    false,
+  );
 });
 
 test("migration fails closed when the legacy label is loaded without its canonical plist", async (t) => {

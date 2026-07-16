@@ -92,6 +92,7 @@ function fixture(overrides = {}) {
   let health = overrides.health ?? { healthy: true };
   const calls = {
     lease: [],
+    leaseContext: [],
     server: [],
     close: 0,
     launch: [],
@@ -113,8 +114,9 @@ function fixture(overrides = {}) {
 
   const deps = {
     backgroundProcess: overrides.backgroundProcess === true,
-    withLease: async (operation, action) => {
+    withLease: async (operation, action, context) => {
       calls.lease.push(operation);
+      calls.leaseContext.push(clone(context));
       if (overrides.lockFailure) throw new Error("LOCK_NOT_OWNED");
       const value = await action(Object.freeze({ operation }));
       if (overrides.releaseFailureAfterEnable && operation === "controller:set-persistence") {
@@ -305,6 +307,20 @@ test("new default-off boot unregisters without launching injecting or opening a 
   assert.equal(fx.calls.inject.length, 0);
   assert.equal(fx.calls.launch.length, 0);
   assert.equal(fx.calls.unregister.length, 1);
+});
+
+test("controller start forwards the claimed one-shot request to the operation-lease gate", async () => {
+  const fx = fixture({ session: nativeSession() });
+  const startupHandshake = {
+    schemaVersion: 1,
+    revision: 1,
+    transitionNonce: "migration-ready",
+    platform: "darwin",
+    backgroundIdentity: "com.heige.codex-skin-controller",
+    createdAt: "2026-07-17T08:00:01.000Z",
+  };
+  await createSkinController(fx.deps).start({ startupHandshake });
+  assert.deepEqual(fx.calls.leaseContext[0], { startupHandshake });
 });
 
 test("legacy-on state starts one exact-origin endpoint and injects with a narrow descriptor", async () => {

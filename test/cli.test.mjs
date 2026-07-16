@@ -3,7 +3,11 @@ import test from "node:test";
 
 import {
   controllerInjectionPreference,
+  createBackgroundReadinessVerifier,
+  enforceLegacyMigrationFence,
+  migrateLegacyLifecycle,
   normalizeWindowsBackgroundStatus,
+  offlineDisablePersistence,
   probeWindowsCdpProcess,
   runCli,
   runControllerProcess,
@@ -26,7 +30,7 @@ function deps(overrides = {}) {
 }
 
 function lifecycleDeps(overrides = {}) {
-  let state = {
+  let state = overrides.initialState ?? {
     schemaVersion: 2,
     persistenceEnabled: false,
     selectedThemeId: "miku-488137",
@@ -39,6 +43,7 @@ function lifecycleDeps(overrides = {}) {
     controller: [],
     createController: [],
     detached: [],
+    offlineDisable: [],
     migrate: [],
     preflight: [],
     registerEphemeral: [],
@@ -88,6 +93,18 @@ function lifecycleDeps(overrides = {}) {
       calls.detached.push(structuredClone(input));
       return { queued: true };
     },
+    offlineDisablePersistence: async (input) => {
+      calls.offlineDisable.push(structuredClone(input));
+      if (state.persistenceEnabled) {
+        state = {
+          ...state,
+          persistenceEnabled: false,
+          lastTransitionNonce: "offline-disable",
+          revision: state.revision + 1,
+        };
+      }
+      return { persistenceEnabled: false, revision: state.revision };
+    },
     migrateLegacy: async (input) => {
       calls.migrate.push(structuredClone(input));
       return { migratedFrom: "watchdog", persistenceEnabled: true };
@@ -100,6 +117,150 @@ function lifecycleDeps(overrides = {}) {
     controller,
     get state() { return structuredClone(state); },
   };
+}
+
+function legacyMigrationHarness(overrides = {}) {
+  const events = [];
+  const token = Buffer.alloc(32, 13).toString("base64url");
+  let state = null;
+  let coordinator = null;
+  let stateLeaseActive = false;
+  let oldWatchdogIntact = true;
+  let legacyChecks = 0;
+  const dependencies = {
+    randomBytes: () => Buffer.alloc(32, 13),
+    randomUUID: () => "123e4567-e89b-42d3-a456-426614174000",
+    legacyLoaded: async () => {
+      legacyChecks += 1;
+      return true;
+    },
+    readState: async () => structuredClone(state),
+    withCoordinatorLease: async (action) => {
+      events.push("coordinator-lock:begin");
+      try {
+        return await action();
+      } finally {
+        events.push("coordinator-lock:end");
+      }
+    },
+    withStateLease: async (operation, action) => {
+      assert.equal(stateLeaseActive, false, `nested state lease at ${operation}`);
+      stateLeaseActive = true;
+      events.push(`${operation}:begin`);
+      try {
+        return await action({ operation });
+      } finally {
+        events.push(`${operation}:end`);
+        stateLeaseActive = false;
+      }
+    },
+    readCoordinator: async () => {
+      assert.equal(stateLeaseActive, true);
+      return structuredClone(coordinator);
+    },
+    createCoordinator: async ({ stateParticipant, transactionId }) => {
+      assert.equal(stateLeaseActive, true);
+      coordinator = {
+        transactionId,
+        decision: "undecided",
+        phase: "prepared",
+        stateParticipant: structuredClone(stateParticipant),
+        serviceParticipant: null,
+      };
+      events.push("coordinator:create");
+      return structuredClone(coordinator);
+    },
+    updateCoordinator: async (_path, current, changes) => {
+      assert.equal(stateLeaseActive, true);
+      assert.equal(current.transactionId, coordinator.transactionId);
+      coordinator = { ...coordinator, ...structuredClone(changes) };
+      events.push(`coordinator:${coordinator.decision}:${coordinator.phase}`);
+      return structuredClone(coordinator);
+    },
+    clearCoordinator: async () => {
+      assert.equal(stateLeaseActive, true);
+      events.push("coordinator:clear");
+      coordinator = null;
+    },
+    migrateState: async ({ legacyAgentLoaded }) => {
+      assert.equal(stateLeaseActive, true);
+      assert.equal(legacyAgentLoaded, true);
+      state = {
+        schemaVersion: 2,
+        persistenceEnabled: true,
+        selectedThemeId: "miku-488137",
+        lastNonNativeThemeId: "miku-488137",
+        controlToken: token,
+        lastTransitionNonce: null,
+        revision: 1,
+      };
+      events.push("state:prepared");
+      return { state: structuredClone(state), migratedFrom: "watchdog" };
+    },
+    rollbackState: async ({ expectedControlToken }) => {
+      assert.equal(stateLeaseActive, true);
+      assert.equal(state?.controlToken, expectedControlToken);
+      assert.equal([1, 2].includes(state?.revision), true);
+      state = null;
+      events.push("state:rolled-back");
+    },
+    migrateService: async () => {
+      assert.equal(stateLeaseActive, false, "service bootstrap must run outside the common lease");
+      assert.equal(oldWatchdogIntact, true);
+      events.push("service:prepared-old-intact");
+      return {
+        legacyFound: true,
+        controllerRegistered: true,
+        transaction: { operation: "test-service-participant" },
+      };
+    },
+    awaitExactReady: async ({ expectedState }) => {
+      assert.equal(stateLeaseActive, false, "wake and exact ACK must run outside the common lease");
+      assert.equal(oldWatchdogIntact, true, "old watchdog must survive until the exact ACK");
+      events.push("ready:exact-ack");
+      return {
+        persistenceEnabled: true,
+        revision: expectedState.revision,
+      };
+    },
+    finalizeService: async () => {
+      assert.equal(stateLeaseActive, false, "service finalize must run outside the common lease");
+      assert.equal(coordinator.decision, "commit");
+      oldWatchdogIntact = false;
+      events.push("service:committed");
+    },
+    recoverService: async () => {
+      assert.equal(stateLeaseActive, false, "service recovery must run outside the common lease");
+      if (coordinator?.decision === "commit") {
+        oldWatchdogIntact = false;
+        events.push("service:recovered-forward");
+      } else {
+        oldWatchdogIntact = true;
+        events.push("service:recovered-rollback");
+      }
+    },
+    themeExists: async () => true,
+    ...overrides,
+  };
+  return {
+    dependencies,
+    events,
+    get coordinator() { return structuredClone(coordinator); },
+    get legacyChecks() { return legacyChecks; },
+    get oldWatchdogIntact() { return oldWatchdogIntact; },
+    get state() { return structuredClone(state); },
+    set state(value) { state = structuredClone(value); },
+  };
+}
+
+function runLegacyMigration(harness) {
+  return migrateLegacyLifecycle({
+    port: 9341,
+    statePath: "/private/state/state.json",
+    journalPath: "/private/state/legacy-migration.json",
+    legacyThemePath: "/private/legacy/theme",
+    dependencies: harness.dependencies,
+  });
 }
 
 test("lists the bundled Miku preset by default", async () => {
@@ -201,6 +362,37 @@ test("explicit apply ignores an older renderer theme while background repair may
   assert.equal(controllerInjectionPreference({ ephemeral: false, preferStored: false }), false);
 });
 
+test("apply prefer-stored uses authoritative lastNonNative only when Theme is omitted", async () => {
+  const baseState = {
+    schemaVersion: 2,
+    persistenceEnabled: false,
+    selectedThemeId: "miku-488137",
+    lastNonNativeThemeId: "genshin-night",
+    controlToken: Buffer.alloc(32, 31).toString("base64url"),
+    lastTransitionNonce: null,
+    revision: 9,
+  };
+  const make = () => lifecycleDeps({
+    initialState: structuredClone(baseState),
+    listThemes: async () => [
+      { id: "miku-488137", name: "Miku", path: "/bundle/themes/miku-488137" },
+      { id: "genshin-night", name: "Genshin", path: "/user/themes/genshin-night" },
+    ],
+  });
+
+  const stored = make();
+  await runCli(["apply", "--prefer-stored"], stored.deps);
+  assert.equal(stored.calls.registerEphemeral[0].themeId, "genshin-night");
+
+  const ordinary = make();
+  await runCli(["apply"], ordinary.deps);
+  assert.equal(ordinary.calls.registerEphemeral[0].themeId, "miku-488137");
+
+  const explicit = make();
+  await runCli(["apply", "--prefer-stored", "--theme", "miku-488137"], explicit.deps);
+  assert.equal(explicit.calls.registerEphemeral[0].themeId, "miku-488137");
+});
+
 test("apply confirmation rejects a partial multi-window status result", async () => {
   const partial = {
     statuses: [{ installed: true, themeId: "miku-488137" }],
@@ -282,8 +474,366 @@ test("pause resume restore and enable-skin remain distinct lifecycle operations"
   assert.deepEqual(await runCli(["enable-skin"], fx.deps), { mode: "active", persistenceEnabled: true });
   assert.deepEqual(await runCli(["set-persistence", "false"], fx.deps), { persistenceEnabled: false, revision: 7 });
   assert.deepEqual(await runCli(["migrate-legacy"], fx.deps), { migratedFrom: "watchdog", persistenceEnabled: true });
-  assert.equal(fx.calls.detached.length, 2, "restore and enable-skin each queue one detached restart");
+  assert.equal(fx.calls.detached.length, 1, "an existing CDP enable must not restart Codex");
   assert.equal(fx.calls.detached[0].port, 9341, "restore helper must verify the old CDP port was released");
+});
+
+test("legacy migration releases the common lease for service bootstrap and exact readiness ACK", async () => {
+  const harness = legacyMigrationHarness();
+  assert.deepEqual(await runLegacyMigration(harness), {
+    migratedFrom: "watchdog",
+    persistenceEnabled: true,
+  });
+  assert.equal(harness.coordinator, null);
+  assert.equal(harness.oldWatchdogIntact, false);
+  assert.deepEqual(harness.state, {
+    schemaVersion: 2,
+    persistenceEnabled: true,
+    selectedThemeId: "miku-488137",
+    lastNonNativeThemeId: "miku-488137",
+    controlToken: Buffer.alloc(32, 13).toString("base64url"),
+    lastTransitionNonce: null,
+    revision: 1,
+  });
+  assert.ok(
+    harness.events.indexOf("ready:exact-ack") <
+      harness.events.indexOf("coordinator:commit:commit-decided"),
+    "the global commit decision must follow the exact ACK",
+  );
+  assert.ok(
+    harness.events.indexOf("coordinator:commit:commit-decided") <
+      harness.events.indexOf("service:committed"),
+    "the old watchdog may be removed only after the durable global commit",
+  );
+});
+
+test("legacy migration readiness failure durably decides rollback before restoring service and state", async () => {
+  const harness = legacyMigrationHarness();
+  harness.dependencies.awaitExactReady = async () => {
+    assert.equal(harness.oldWatchdogIntact, true);
+    harness.state = {
+      ...harness.state,
+      persistenceEnabled: false,
+      lastTransitionNonce: "controller-compensation",
+      revision: 2,
+    };
+    throw new Error("EXACT_ACK_FAILED");
+  };
+
+  await assert.rejects(runLegacyMigration(harness), /EXACT_ACK_FAILED/);
+  assert.equal(harness.coordinator, null);
+  assert.equal(harness.state, null);
+  assert.equal(harness.oldWatchdogIntact, true);
+  assert.ok(
+    harness.events.indexOf("coordinator:rollback:rollback-decided") <
+      harness.events.indexOf("service:recovered-rollback"),
+    "the rollback decision must be durable before service recovery",
+  );
+  assert.ok(
+    harness.events.indexOf("service:recovered-rollback") <
+      harness.events.indexOf("state:rolled-back"),
+    "service recovery precedes removal of the prepared state",
+  );
+});
+
+test("legacy migration recovers a precommit hard crash by restoring the old service and deleting prepared state", async () => {
+  const harness = legacyMigrationHarness();
+  const hardCrash = new Error("SIMULATED_HARD_CRASH");
+  hardCrash.simulatedHardCrash = true;
+  harness.dependencies.migrateService = async () => {
+    assert.equal(harness.oldWatchdogIntact, true);
+    throw hardCrash;
+  };
+
+  await assert.rejects(runLegacyMigration(harness), /SIMULATED_HARD_CRASH/);
+  assert.equal(harness.coordinator.decision, "undecided");
+  assert.equal(harness.state.persistenceEnabled, true);
+
+  harness.dependencies.legacyLoaded = async () => {
+    throw new Error("STOP_AFTER_RECOVERY");
+  };
+  await assert.rejects(runLegacyMigration(harness), /STOP_AFTER_RECOVERY/);
+  assert.equal(harness.coordinator, null);
+  assert.equal(harness.state, null);
+  assert.equal(harness.oldWatchdogIntact, true);
+  assert.ok(harness.events.includes("service:recovered-rollback"));
+  assert.ok(harness.events.includes("state:rolled-back"));
+});
+
+test("legacy migration rolls forward after a crash between global commit and participant finalize", async () => {
+  const harness = legacyMigrationHarness();
+  const hardCrash = new Error("SIMULATED_HARD_CRASH");
+  hardCrash.simulatedHardCrash = true;
+  harness.dependencies.finalizeService = async () => {
+    assert.equal(harness.coordinator.decision, "commit");
+    throw hardCrash;
+  };
+
+  await assert.rejects(runLegacyMigration(harness), /SIMULATED_HARD_CRASH/);
+  assert.equal(harness.coordinator.decision, "commit");
+  assert.equal(harness.oldWatchdogIntact, true);
+
+  harness.dependencies.finalizeService = async () => {
+    throw new Error("a recovered transaction must not be finalized twice");
+  };
+  assert.deepEqual(await runLegacyMigration(harness), {
+    migratedFrom: null,
+    persistenceEnabled: true,
+  });
+  assert.equal(harness.coordinator, null);
+  assert.equal(harness.oldWatchdogIntact, false);
+  assert.equal(
+    harness.events.filter((event) => event === "service:recovered-forward").length,
+    1,
+  );
+});
+
+test("legacy migration commit recovery keeps its journal when the committed state disappeared", async () => {
+  const harness = legacyMigrationHarness();
+  const hardCrash = new Error("SIMULATED_HARD_CRASH");
+  hardCrash.simulatedHardCrash = true;
+  harness.dependencies.finalizeService = async () => {
+    throw hardCrash;
+  };
+  await assert.rejects(runLegacyMigration(harness), /SIMULATED_HARD_CRASH/);
+  harness.state = null;
+
+  await assert.rejects(
+    runLegacyMigration(harness),
+    (error) => error.code === "LEGACY_MIGRATION_RECOVERY_FAILED",
+  );
+  assert.equal(harness.coordinator.decision, "commit");
+  assert.equal(harness.state, null);
+});
+
+test("legacy migration rollback recovery preserves its journal on a foreign state identity", async () => {
+  const harness = legacyMigrationHarness();
+  const hardCrash = new Error("SIMULATED_HARD_CRASH");
+  hardCrash.simulatedHardCrash = true;
+  harness.dependencies.migrateService = async () => {
+    throw hardCrash;
+  };
+  await assert.rejects(runLegacyMigration(harness), /SIMULATED_HARD_CRASH/);
+  harness.state = {
+    ...harness.state,
+    controlToken: Buffer.alloc(32, 41).toString("base64url"),
+  };
+
+  await assert.rejects(
+    runLegacyMigration(harness),
+    (error) => error.code === "LEGACY_MIGRATION_RECOVERY_FAILED",
+  );
+  assert.equal(harness.coordinator.decision, "rollback");
+  assert.equal(harness.state.controlToken, Buffer.alloc(32, 41).toString("base64url"));
+});
+
+test("legacy migration fence rejects every unrelated mutation and admits only its exact foreground and one-shot background", async () => {
+  const state = {
+    schemaVersion: 2,
+    persistenceEnabled: true,
+    selectedThemeId: "miku-488137",
+    lastNonNativeThemeId: "miku-488137",
+    controlToken: Buffer.alloc(32, 29).toString("base64url"),
+    lastTransitionNonce: null,
+    revision: 1,
+  };
+  const coordinator = {
+    transactionId: "123e4567-e89b-42d3-a456-426614174000",
+    decision: "undecided",
+    phase: "service-prepared",
+    createdAt: "2026-07-17T08:00:00.000Z",
+    serviceParticipant: { operation: "migrate-legacy-watchdog" },
+    stateParticipant: { afterState: state },
+  };
+  let transition = null;
+  const dependencies = {
+    readCoordinator: async () => structuredClone(coordinator),
+    readState: async () => structuredClone(state),
+    readTransition: async () => structuredClone(transition),
+  };
+  const base = {
+    journalPath: "/private/state/legacy-migration.json",
+    statePath: "/private/state/state.json",
+    transitionPath: "/private/state/transition.json",
+    lease: { genuine: true },
+    dependencies,
+  };
+
+  for (const operation of [
+    "cli:prepare-state",
+    "cli:disable-persistence-offline",
+    "controller:set-persistence",
+    "controller:restore",
+    "controller:tick",
+    "controller:start",
+  ]) {
+    await assert.rejects(
+      enforceLegacyMigrationFence({ ...base, operation }),
+      (error) => error.code === "LEGACY_MIGRATION_IN_PROGRESS",
+      operation,
+    );
+  }
+
+  const authorization = {
+    role: "migration-ready-foreground",
+    transactionId: coordinator.transactionId,
+    journalPath: base.journalPath,
+    expectedRevision: state.revision,
+    expectedControlToken: state.controlToken,
+  };
+  for (const operation of ["controller:set-persistence", "controller:finalize-enable"]) {
+    assert.equal((await enforceLegacyMigrationFence({
+      ...base,
+      operation,
+      authorization,
+    })).role, "migration-ready-foreground");
+  }
+  assert.equal((await enforceLegacyMigrationFence({
+    ...base,
+    operation: "controller:start",
+    startupHandshake: {
+      revision: 1,
+      createdAt: "2026-07-17T08:00:01.000Z",
+    },
+  })).role, "migration-ready-background");
+  await assert.rejects(
+    enforceLegacyMigrationFence({
+      ...base,
+      operation: "controller:start",
+      startupHandshake: {
+        revision: 1,
+        createdAt: "2026-07-17T07:59:59.000Z",
+      },
+    }),
+    (error) => error.code === "LEGACY_MIGRATION_IN_PROGRESS",
+  );
+
+  transition = { operation: "foreign-transition" };
+  await assert.rejects(
+    enforceLegacyMigrationFence({
+      ...base,
+      operation: "controller:set-persistence",
+      authorization,
+    }),
+    (error) => error.code === "LEGACY_MIGRATION_IN_PROGRESS",
+  );
+});
+
+test("production readiness verifier preserves the real handshake through wait then consumes it exactly once", async (t) => {
+  const { mkdtemp, mkdir, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const {
+    publishBackgroundHandshake,
+    readBackgroundHandshake,
+  } = await import("../src/background-handshake.mjs");
+  const parent = await mkdtemp(join(tmpdir(), "heige-production-ready-"));
+  const stateRoot = join(parent, "state");
+  await mkdir(stateRoot, { mode: 0o700 });
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  const startedAt = "Fri Jul 17 16:00:00 2026";
+  const published = await publishBackgroundHandshake({
+    stateRoot,
+    revision: 7,
+    transitionNonce: "migration-ready-7",
+    pid: 73001,
+    startedAt,
+    platform: "darwin",
+    backgroundIdentity: "com.heige.codex-skin-controller",
+    outcome: "ready",
+  });
+  const verifier = createBackgroundReadinessVerifier({
+    stateRoot,
+    platform: "darwin",
+    backgroundIdentity: "com.heige.codex-skin-controller",
+    forbiddenPid: 1000,
+    readIdentity: async () => ({ pid: 73001, startedAt }),
+  });
+  const expected = {
+    revision: 7,
+    transitionNonce: "migration-ready-7",
+    handshakeRequest: { notBefore: Date.parse(published.createdAt) },
+  };
+  assert.equal(await verifier.verify(expected), true);
+  assert.notEqual(await readBackgroundHandshake({ stateRoot }), null);
+  assert.equal(await verifier.consume(expected), true);
+  assert.equal(await readBackgroundHandshake({ stateRoot }), null);
+  assert.equal(await verifier.consume(expected), false);
+});
+
+test("offline disable commits authority and a non-retained native session before unregister verification", async () => {
+  const events = [];
+  let leaseActive = false;
+  let state = {
+    schemaVersion: 2,
+    persistenceEnabled: true,
+    selectedThemeId: "miku-488137",
+    lastNonNativeThemeId: "miku-488137",
+    controlToken: Buffer.alloc(32, 23).toString("base64url"),
+    lastTransitionNonce: null,
+    revision: 8,
+  };
+  let session = null;
+  const result = await offlineDisablePersistence({
+    statePath: "/private/state/state.json",
+    sessionPath: "/private/state/session.json",
+    transitionPath: "/private/state/transition.json",
+    expectedRevision: 8,
+    dependencies: {
+      withStateLease: async (_operation, action) => {
+        leaseActive = true;
+        try {
+          return await action({ genuine: true });
+        } finally {
+          leaseActive = false;
+        }
+      },
+      recoverTransition: async () => {
+        assert.equal(leaseActive, true);
+        events.push("transition:recovered");
+      },
+      readState: async () => structuredClone(state),
+      compareState: async (_path, { expectedRevision, mutate }) => {
+        assert.equal(leaseActive, true);
+        assert.equal(expectedRevision, state.revision);
+        state = { ...mutate(state), revision: state.revision + 1 };
+        events.push("state:false");
+        return structuredClone(state);
+      },
+      writeSession: async (_path, value) => {
+        assert.equal(leaseActive, true);
+        session = structuredClone(value);
+        events.push("session:not-retained");
+      },
+      newTransitionNonce: () => "offline-disable-nonce",
+      unregisterBackground: async () => {
+        assert.equal(leaseActive, true);
+        assert.equal(state.persistenceEnabled, false);
+        assert.equal(session.keepUntilProcessExit, false);
+        events.push("background:unregistered");
+      },
+      inspectBackground: async () => {
+        assert.equal(leaseActive, true);
+        events.push("background:verified");
+        return { registered: false };
+      },
+    },
+  });
+  assert.deepEqual(result, { persistenceEnabled: false, revision: 9 });
+  assert.deepEqual(session, {
+    schemaVersion: 1,
+    mode: "native",
+    process: null,
+    activeThemeId: null,
+    keepUntilProcessExit: false,
+  });
+  assert.deepEqual(events, [
+    "transition:recovered",
+    "state:false",
+    "session:not-retained",
+    "background:unregistered",
+    "background:verified",
+  ]);
 });
 
 test("enable-skin from a native process defers the state transition until the verified CDP restart", async () => {
@@ -336,6 +886,67 @@ test("enable-skin starts a fully closed Codex and completes enable only after la
   });
   assert.equal(fx.calls.detached[0].preflight.process, null);
   assert.equal(fx.calls.detached[0].afterLaunch.command, "enable-after-restart");
+});
+
+test("set-persistence false uses the offline path when Codex is native without CDP", async () => {
+  const fx = lifecycleDeps({
+    preflightLifecycle: async (input) => {
+      if (input.requirePort) {
+        const error = new Error("当前 Codex 尚未启用 CDP");
+        error.code = "CDP_NOT_OWNED";
+        throw error;
+      }
+      return {
+        appPath: "/Applications/ChatGPT.app",
+        nodePath: "/trusted/node",
+        process: {
+          pid: 4242,
+          executablePath: "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
+          startedAt: "Fri Jul 17 11:00:00 2026",
+        },
+      };
+    },
+  });
+  assert.deepEqual(await runCli(["set-persistence", "false"], fx.deps), {
+    persistenceEnabled: false,
+    revision: 5,
+  });
+  assert.deepEqual(fx.calls.offlineDisable, [{ port: 9341, expectedRevision: 5 }]);
+  assert.deepEqual(fx.calls.controller, []);
+  assert.deepEqual(fx.calls.detached, []);
+});
+
+test("offline restore keeps a closed Codex closed and a native Codex native", async () => {
+  for (const process of [
+    null,
+    {
+      pid: 4242,
+      executablePath: "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
+      startedAt: "Fri Jul 17 11:00:00 2026",
+    },
+  ]) {
+    const fx = lifecycleDeps({
+      preflightLifecycle: async (input) => {
+        if (input.requirePort) {
+          const error = new Error("当前没有 CDP owner");
+          error.code = "CDP_NOT_OWNED";
+          throw error;
+        }
+        return {
+          appPath: "/Applications/ChatGPT.app",
+          nodePath: "/trusted/node",
+          process,
+        };
+      },
+    });
+    assert.deepEqual(await runCli(["restore"], fx.deps), {
+      mode: process === null ? "closed" : "native",
+      persistenceEnabled: false,
+    });
+    assert.deepEqual(fx.calls.offlineDisable, [{ port: 9341 }]);
+    assert.deepEqual(fx.calls.controller, []);
+    assert.deepEqual(fx.calls.detached, []);
+  }
 });
 
 test("restore validates every dependency before Codex can be quit", async () => {
@@ -421,7 +1032,8 @@ test("background controller claims one start request before start and publishes 
     createdAt: "2026-07-17T08:00:00.000Z",
   };
   const result = await runControllerProcess({
-    start: async () => {
+    start: async (options) => {
+      assert.deepEqual(options, { startupHandshake: request });
       events.push("start");
       return {
         action: "idle",
@@ -467,7 +1079,8 @@ test("background controller claims one start request before start and publishes 
 test("background login with no one-shot request follows the latest revision without forging an ACK", async () => {
   const events = [];
   const result = await runControllerProcess({
-    start: async () => {
+    start: async (options) => {
+      assert.deepEqual(options, { startupHandshake: null });
       events.push("start");
       return {
         action: "idle",

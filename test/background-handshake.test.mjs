@@ -17,6 +17,7 @@ import {
   BACKGROUND_START_REQUEST_FILE,
   backgroundStartRequestPath,
   claimBackgroundStartRequest,
+  consumeBackgroundHandshake,
   backgroundHandshakePath,
   publishBackgroundHandshake,
   publishBackgroundStartRequest,
@@ -247,6 +248,34 @@ test("handshake wait accepts only the exact fresh request and a live non-foregro
     clock: () => NOW.getTime(),
   });
   assert.equal(observed.pid, 73001);
+});
+
+test("an exact handshake is atomically consumed once after wait verification", async () => {
+  const stateRoot = await privateRoot();
+  await publishBackgroundHandshake({ stateRoot, ...handshake() }, { now: () => NOW });
+  const input = {
+    stateRoot,
+    expected: {
+      revision: 6,
+      transitionNonce: "controller-transition-7",
+      platform: "darwin",
+      backgroundIdentity: "com.heige.codex-skin-controller",
+      outcome: "ready",
+    },
+    forbiddenPid: 1000,
+    notBefore: NOW.getTime(),
+    readProcessIdentity: async () => ({
+      pid: 73001,
+      startedAt: "Fri Jul 17 16:00:00 2026",
+    }),
+    clock: () => NOW.getTime(),
+  };
+  assert.equal((await consumeBackgroundHandshake(input)).pid, 73001);
+  assert.equal(await readBackgroundHandshake({ stateRoot }), null);
+  await assert.rejects(
+    consumeBackgroundHandshake(input),
+    (error) => error.code === "BACKGROUND_HANDSHAKE_MISSING",
+  );
 });
 
 test("an old controller handshake is rejected while a later exact process may replace it", async () => {

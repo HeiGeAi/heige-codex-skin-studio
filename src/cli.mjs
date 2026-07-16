@@ -8,9 +8,9 @@ import { promisify } from "node:util";
 
 import {
   claimBackgroundStartRequest,
+  consumeBackgroundHandshake,
   publishBackgroundHandshake,
   publishBackgroundStartRequest,
-  readBackgroundHandshake,
   removeBackgroundHandshake,
   removeBackgroundStartRequest,
   waitForBackgroundHandshake,
@@ -37,19 +37,32 @@ import {
 } from "./lifecycle-helper.mjs";
 import {
   CONTROLLER_LAUNCH_AGENT_LABEL,
+  finalizeLegacyWatchdogMigration,
   inspectLaunchAgent,
   migrateLegacyWatchdog,
+  recoverLegacyWatchdogMigration,
   registerControllerAgent,
+  rollbackLegacyWatchdogMigration,
   unregisterControllerAgent,
   wakeControllerAgent,
 } from "./macos-launch-agent.mjs";
+import {
+  clearLegacyMigrationCoordinator,
+  createLegacyMigrationCoordinator,
+  legacyMigrationJournalPath,
+  readLegacyMigrationCoordinator,
+  updateLegacyMigrationCoordinator,
+} from "./legacy-migration-coordinator.mjs";
 import { withOperationLock } from "./operation-lock.mjs";
 import { installPet } from "./pet-installer.mjs";
 import {
   compareAndUpdateStudioState,
   createDefaultStudioState,
   migrateLegacyState,
+  readTransitionJournal,
   readStudioState,
+  recoverStateTransition,
+  rollbackLegacyStateMigration,
   writeSessionState,
   writeStudioState,
 } from "./state-store.mjs";
@@ -473,9 +486,106 @@ async function productionPreflight({ port, requirePort = true } = {}) {
   };
 }
 
+function migrationFenceError(operation) {
+  const error = new Error(
+    `legacy migration is in progress; ${operation} must wait for recovery or completion`,
+  );
+  error.code = "LEGACY_MIGRATION_IN_PROGRESS";
+  return error;
+}
+
+export async function enforceLegacyMigrationFence({
+  journalPath,
+  statePath,
+  transitionPath,
+  lease,
+  operation,
+  authorization = null,
+  startupHandshake = null,
+  dependencies = {},
+}) {
+  const readCoordinator = dependencies.readCoordinator ?? readLegacyMigrationCoordinator;
+  const readState = dependencies.readState ?? readStudioState;
+  const readTransition = dependencies.readTransition ?? readTransitionJournal;
+  const coordinator = await readCoordinator(journalPath, { lease });
+  if (coordinator === null) return { allowed: true, transactionId: null };
+  if (
+    coordinator.decision !== "undecided" ||
+    coordinator.phase !== "service-prepared" ||
+    coordinator.serviceParticipant === null ||
+    coordinator.stateParticipant.afterState === null
+  ) {
+    throw migrationFenceError(operation);
+  }
+  const expectedState = coordinator.stateParticipant.afterState;
+  const currentState = await readState(statePath);
+  if (!sameStudioState(currentState, expectedState)) {
+    throw migrationFenceError(operation);
+  }
+  if (await readTransition(transitionPath) !== null) {
+    throw migrationFenceError(operation);
+  }
+
+  const foregroundAllowed =
+    authorization !== null &&
+    typeof authorization === "object" &&
+    !Array.isArray(authorization) &&
+    authorization.role === "migration-ready-foreground" &&
+    authorization.transactionId === coordinator.transactionId &&
+    authorization.journalPath === journalPath &&
+    authorization.expectedRevision === expectedState.revision &&
+    authorization.expectedControlToken === expectedState.controlToken &&
+    ["controller:set-persistence", "controller:finalize-enable"].includes(operation);
+  if (foregroundAllowed) {
+    return { allowed: true, transactionId: coordinator.transactionId, role: authorization.role };
+  }
+
+  const requestCreatedAt = Date.parse(startupHandshake?.createdAt);
+  const backgroundAllowed =
+    operation === "controller:start" &&
+    startupHandshake !== null &&
+    typeof startupHandshake === "object" &&
+    startupHandshake.revision === expectedState.revision &&
+    Number.isFinite(requestCreatedAt) &&
+    requestCreatedAt >= Date.parse(coordinator.createdAt);
+  if (backgroundAllowed) {
+    return {
+      allowed: true,
+      transactionId: coordinator.transactionId,
+      role: "migration-ready-background",
+    };
+  }
+  throw migrationFenceError(operation);
+}
+
+async function withProductionStateLease({
+  paths,
+  options,
+  operation,
+  authorization = null,
+  startupHandshake = null,
+}, action) {
+  return withOperationLock({ ...options, operation }, async (lease) => {
+    await enforceLegacyMigrationFence({
+      journalPath: legacyMigrationJournalPath(paths.stateRoot),
+      statePath: paths.statePath,
+      transitionPath: paths.transitionPath,
+      lease,
+      operation,
+      authorization,
+      startupHandshake,
+    });
+    return action(lease);
+  });
+}
+
 async function ensureProductionState({ paths, themeId, process: processIdentity, keepUntilProcessExit }) {
   const options = await lockOptions(paths);
-  return withOperationLock({ ...options, operation: "cli:prepare-state" }, async (lease) => {
+  return withProductionStateLease({
+    paths,
+    options,
+    operation: "cli:prepare-state",
+  }, async (lease) => {
     let state = await readStudioState(paths.statePath);
     if (state === null) {
       state = createDefaultStudioState({
@@ -601,37 +711,64 @@ export function normalizeWindowsBackgroundStatus(value) {
   };
 }
 
-async function exactReadyHandshake({
+export function createBackgroundReadinessVerifier({
   stateRoot,
-  expected,
   platform,
   backgroundIdentity,
+  forbiddenPid = process.pid,
+  readIdentity = (pid) => readProcessIdentity(pid, platform),
+  wait = waitForBackgroundHandshake,
+  consume = consumeBackgroundHandshake,
 }) {
-  if (
-    !Number.isSafeInteger(expected?.revision) ||
-    typeof expected?.transitionNonce !== "string"
-  ) {
-    return false;
-  }
-  try {
-    const document = await readBackgroundHandshake({ stateRoot });
-    if (
-      document === null ||
-      document.revision !== expected.revision ||
-      document.transitionNonce !== expected.transitionNonce ||
-      document.platform !== platform ||
-      document.backgroundIdentity !== backgroundIdentity ||
-      document.outcome !== "ready"
-    ) {
-      return false;
-    }
-    const identity = await readProcessIdentity(document.pid, platform);
-    return identity !== null &&
-      identity.pid === document.pid &&
-      identity.startedAt === document.startedAt;
-  } catch {
-    return false;
-  }
+  let verified = null;
+  const expected = ({ revision, transitionNonce }) => ({
+    revision,
+    transitionNonce,
+    platform,
+    backgroundIdentity,
+    outcome: "ready",
+  });
+  return Object.freeze({
+    async verify({ revision, transitionNonce, handshakeRequest }) {
+      verified = null;
+      const notBefore = handshakeRequest?.notBefore;
+      const observed = await wait({
+        stateRoot,
+        expected: expected({ revision, transitionNonce }),
+        forbiddenPid,
+        notBefore,
+        readProcessIdentity: readIdentity,
+      });
+      verified = { revision, transitionNonce, notBefore };
+      return observed.outcome === "ready";
+    },
+    async consume({ revision, transitionNonce } = {}) {
+      if (
+        verified === null ||
+        verified.revision !== revision ||
+        verified.transitionNonce !== transitionNonce
+      ) {
+        return false;
+      }
+      const claim = verified;
+      verified = null;
+      try {
+        const observed = await consume({
+          stateRoot,
+          expected: expected(claim),
+          forbiddenPid,
+          notBefore: claim.notBefore,
+          readProcessIdentity: readIdentity,
+        });
+        return observed.outcome === "ready";
+      } catch {
+        return false;
+      }
+    },
+    discard() {
+      verified = null;
+    },
+  });
 }
 
 async function productionController({
@@ -645,6 +782,7 @@ async function productionController({
   taskName,
   startupHandshake = null,
   background = false,
+  migrationAuthorization = null,
 }) {
   const injectionPreferStored = controllerInjectionPreference({ ephemeral, preferStored });
   const backgroundIdentity = controllerBackgroundIdentity(
@@ -666,12 +804,23 @@ async function productionController({
     path: paths.logPath,
     token: initial?.controlToken ?? "",
   });
+  const readiness = createBackgroundReadinessVerifier({
+    stateRoot: paths.stateRoot,
+    platform,
+    backgroundIdentity,
+  });
   return createSkinController({
     backgroundProcess: background,
     statePath: paths.statePath,
     sessionPath: paths.sessionPath,
     transitionPath: paths.transitionPath,
-    lockOptions: lock,
+    withLease: (operation, action, context = {}) => withProductionStateLease({
+      paths,
+      options: lock,
+      operation,
+      authorization: migrationAuthorization,
+      startupHandshake: context.startupHandshake ?? null,
+    }, action),
     probeCurrentProcess: probe,
     validatePortOwner: async (candidate) => {
       const current = await probe();
@@ -695,6 +844,7 @@ async function productionController({
     },
     removeSkin: () => deps.removeSkin({ port }),
     prepareBackgroundHandshake: async ({ revision, transitionNonce }) => {
+      readiness.discard();
       await removeBackgroundHandshake({ stateRoot: paths.stateRoot });
       const request = await publishBackgroundStartRequest({
         stateRoot: paths.stateRoot,
@@ -720,6 +870,7 @@ async function productionController({
         registered: value.Registered === true || value.Exists === true,
       })),
     unregisterBackground: async () => {
+      readiness.discard();
       if (platform === "darwin") {
         const value = await unregisterControllerAgent();
         await removeBackgroundStartRequest({ stateRoot: paths.stateRoot }).catch((error) => {
@@ -771,12 +922,7 @@ async function productionController({
       }
       const loaded = status.registered === true &&
         status.running === true &&
-        await exactReadyHandshake({
-          stateRoot: paths.stateRoot,
-          expected,
-          platform,
-          backgroundIdentity,
-        });
+        await readiness.consume(expected);
       return { ...status, loaded };
     },
     wakeBackground: (request) => platform === "darwin"
@@ -789,23 +935,7 @@ async function productionController({
         revision: request.revision,
         transitionNonce: request.transitionNonce,
       }),
-    verifyBackgroundHandshake: async ({ revision, transitionNonce, handshakeRequest }) => {
-      const observed = await waitForBackgroundHandshake({
-        stateRoot: paths.stateRoot,
-        expected: {
-          revision,
-          transitionNonce,
-          platform,
-          backgroundIdentity,
-          outcome: "ready",
-        },
-        forbiddenPid: process.pid,
-        notBefore: handshakeRequest?.notBefore,
-        readProcessIdentity: (pid) => readProcessIdentity(pid, platform),
-      });
-      await removeBackgroundHandshake({ stateRoot: paths.stateRoot });
-      return observed.outcome === "ready";
-    },
+    verifyBackgroundHandshake: (input) => readiness.verify(input),
     preflightEnable: async () => true,
     logger,
   });
@@ -840,7 +970,7 @@ export async function runControllerProcess(controller, {
       backgroundIdentity: backgroundRuntime.backgroundIdentity,
     });
   }
-  let result = await controller.start();
+  let result = await controller.start({ startupHandshake: activeHandshake });
   if (activeHandshake !== null) {
     try {
       if (result?.action === "error" || result?.mode === "error") {
@@ -984,36 +1114,473 @@ async function legacyLoaded() {
   }
 }
 
-async function productionMigrateLegacy({ deps, paths, roots }) {
-  const existing = await readStudioState(paths.statePath);
-  if (existing !== null) {
+function sameStudioState(left, right) {
+  if (left === null || right === null || typeof left !== "object" || typeof right !== "object") {
+    return false;
+  }
+  return [
+    "schemaVersion",
+    "persistenceEnabled",
+    "selectedThemeId",
+    "lastNonNativeThemeId",
+    "controlToken",
+    "lastTransitionNonce",
+    "revision",
+  ].every((key) => left[key] === right[key]);
+}
+
+function publicMigrationResult(state, migratedFrom = null) {
+  return {
+    migratedFrom,
+    persistenceEnabled: state.persistenceEnabled,
+  };
+}
+
+async function recoverLegacyLifecycle({ journalPath, dependencies }) {
+  let coordinator = await dependencies.withStateLease(
+    "cli:migrate-legacy:inspect-recovery",
+    (lease) => dependencies.readCoordinator(journalPath, { lease }),
+  );
+  if (coordinator === null) return { recovered: false };
+
+  if (coordinator.decision === "undecided") {
+    coordinator = await dependencies.withStateLease(
+      "cli:migrate-legacy:decide-rollback",
+      (lease) => dependencies.updateCoordinator(
+        journalPath,
+        coordinator,
+        { decision: "rollback", phase: "rollback-decided" },
+        { lease },
+      ),
+    );
+  }
+
+  const recoveryErrors = [];
+  try {
+    await dependencies.recoverService();
+  } catch (error) {
+    recoveryErrors.push(error);
+  }
+
+  if (coordinator.decision === "rollback") {
+    try {
+      await dependencies.withStateLease(
+        "cli:migrate-legacy:rollback-state",
+        async (lease) => {
+          await dependencies.rollbackState({
+            ...coordinator.stateParticipant,
+            lease,
+          });
+          const restored = await dependencies.readState(
+            coordinator.stateParticipant.statePath,
+          );
+          const before = coordinator.stateParticipant.beforeState;
+          if (
+            (before === null && restored !== null) ||
+            (before !== null && !sameStudioState(restored, before))
+          ) {
+            throw new Error("legacy migration rollback did not restore the exact state precondition");
+          }
+        },
+      );
+    } catch (error) {
+      recoveryErrors.push(error);
+    }
+  } else if (coordinator.decision === "commit") {
+    try {
+      await dependencies.withStateLease(
+        "cli:migrate-legacy:verify-committed-state",
+        async () => {
+          const committed = await dependencies.readState(
+            coordinator.stateParticipant.statePath,
+          );
+          if (!sameStudioState(committed, coordinator.stateParticipant.afterState)) {
+            throw new Error("legacy migration committed state is missing or changed");
+          }
+        },
+      );
+    } catch (error) {
+      recoveryErrors.push(error);
+    }
+  }
+
+  if (recoveryErrors.length > 0) {
+    const error = new AggregateError(
+      recoveryErrors,
+      `legacy migration ${coordinator.decision} recovery did not finish`,
+    );
+    error.code = "LEGACY_MIGRATION_RECOVERY_FAILED";
+    throw error;
+  }
+
+  await dependencies.withStateLease(
+    "cli:migrate-legacy:clear-recovery",
+    async (lease) => {
+      const observed = await dependencies.readCoordinator(journalPath, { lease });
+      if (observed === null || observed.transactionId !== coordinator.transactionId) {
+        throw new Error("legacy migration coordinator changed before recovery cleanup");
+      }
+      await dependencies.clearCoordinator(journalPath, observed, { lease });
+    },
+  );
+  return { recovered: true, decision: coordinator.decision };
+}
+
+export async function migrateLegacyLifecycle({
+  port,
+  statePath,
+  journalPath,
+  legacyThemePath,
+  dependencies,
+}) {
+  if (!Number.isSafeInteger(port) || port < 1 || port > 65535) {
+    throw new Error("legacy migration port is invalid");
+  }
+  return dependencies.withCoordinatorLease(async () => {
+    await recoverLegacyLifecycle({ journalPath, dependencies });
+    const existing = await dependencies.readState(statePath);
+    if (existing !== null) return publicMigrationResult(existing);
+
+    const legacyAgentLoaded = await dependencies.legacyLoaded();
+    const transactionId = dependencies.randomUUID();
+    const tokenBytes = dependencies.randomBytes(32);
+    const expectedControlToken = Buffer.from(tokenBytes).toString("base64url");
+    let coordinator = null;
+    let migrated = null;
+    try {
+      let racedState = null;
+      await dependencies.withStateLease(
+        "cli:migrate-legacy:prepare-state",
+        async (lease) => {
+          const beforeState = await dependencies.readState(statePath);
+          if (beforeState !== null) {
+            racedState = beforeState;
+            return;
+          }
+          coordinator = await dependencies.createCoordinator({
+            journalPath,
+            transactionId,
+            lease,
+            stateParticipant: {
+              statePath,
+              beforeState,
+              afterState: null,
+              expectedControlToken,
+            },
+          });
+          migrated = await dependencies.migrateState({
+            statePath,
+            lease,
+            legacyThemePath,
+            legacyAgentLoaded,
+            themeExists: dependencies.themeExists,
+            randomBytes: (size) => {
+              if (size !== 32) throw new Error("legacy migration requested an invalid token size");
+              return Buffer.from(tokenBytes);
+            },
+          });
+          coordinator = await dependencies.updateCoordinator(
+            journalPath,
+            coordinator,
+            {
+              phase: "state-prepared",
+              stateParticipant: {
+                ...coordinator.stateParticipant,
+                afterState: migrated.state,
+              },
+            },
+            { lease },
+          );
+        },
+      );
+      if (racedState !== null) return publicMigrationResult(racedState);
+
+      if (!legacyAgentLoaded) {
+        await dependencies.withStateLease(
+          "cli:migrate-legacy:commit-state-only",
+          async (lease) => {
+            const authoritative = await dependencies.readState(statePath);
+            if (!sameStudioState(authoritative, migrated.state)) {
+              throw new Error("legacy migration state changed before commit");
+            }
+            coordinator = await dependencies.updateCoordinator(
+              journalPath,
+              coordinator,
+              { decision: "commit", phase: "commit-decided" },
+              { lease },
+            );
+          },
+        );
+      } else {
+        const service = await dependencies.migrateService({
+          deferCommit: true,
+          outerTransaction: { journalPath, transactionId },
+        });
+        if (
+          service?.legacyFound !== true ||
+          service?.controllerRegistered !== true ||
+          service?.transaction === null ||
+          typeof service?.transaction !== "object"
+        ) {
+          throw new Error("legacy watchdog changed before its service participant was prepared");
+        }
+        await dependencies.withStateLease(
+          "cli:migrate-legacy:record-service",
+          async (lease) => {
+            coordinator = await dependencies.updateCoordinator(
+              journalPath,
+              coordinator,
+              {
+                phase: "service-prepared",
+                serviceParticipant: service.transaction,
+              },
+              { lease },
+            );
+          },
+        );
+
+        const ready = await dependencies.awaitExactReady({
+          port,
+          expectedState: migrated.state,
+          outerTransaction: { journalPath, transactionId },
+        });
+        if (
+          ready?.persistenceEnabled !== true ||
+          ready?.revision !== migrated.state.revision
+        ) {
+          throw new Error("legacy migration did not receive the exact background readiness ACK");
+        }
+
+        await dependencies.withStateLease(
+          "cli:migrate-legacy:decide-commit",
+          async (lease) => {
+            const authoritative = await dependencies.readState(statePath);
+            if (!sameStudioState(authoritative, migrated.state)) {
+              throw new Error("legacy migration state changed after readiness ACK");
+            }
+            coordinator = await dependencies.updateCoordinator(
+              journalPath,
+              coordinator,
+              { phase: "ready-acked" },
+              { lease },
+            );
+            coordinator = await dependencies.updateCoordinator(
+              journalPath,
+              coordinator,
+              { decision: "commit", phase: "commit-decided" },
+              { lease },
+            );
+          },
+        );
+        await dependencies.finalizeService(service.transaction);
+      }
+
+      await dependencies.withStateLease(
+        "cli:migrate-legacy:clear-commit",
+        async (lease) => dependencies.clearCoordinator(journalPath, coordinator, { lease }),
+      );
+      return publicMigrationResult(migrated.state, migrated.migratedFrom);
+    } catch (primaryError) {
+      if (primaryError?.simulatedHardCrash === true) throw primaryError;
+      if (coordinator === null) throw primaryError;
+      const recoveryErrors = [];
+      try {
+        await recoverLegacyLifecycle({ journalPath, dependencies });
+      } catch (error) {
+        recoveryErrors.push(error);
+      }
+      if (recoveryErrors.length === 0) throw primaryError;
+      const error = new AggregateError(
+        [primaryError, ...recoveryErrors],
+        `legacy migration failed and rollback did not finish: ${primaryError.message}`,
+      );
+      error.code = "LEGACY_MIGRATION_ROLLBACK_FAILED";
+      throw error;
+    }
+  });
+}
+
+async function productionMigrateLegacy({ deps, paths, roots, port }) {
+  const stateLock = await lockOptions(paths);
+  const coordinatorStateRoot = join(paths.stateRoot, "legacy-migration-operation");
+  const coordinatorLock = {
+    ...stateLock,
+    stateRoot: coordinatorStateRoot,
+    lockPath: join(coordinatorStateRoot, "operation.lock"),
+  };
+  const journalPath = legacyMigrationJournalPath(paths.stateRoot);
+  const dependencies = {
+    randomBytes,
+    randomUUID,
+    legacyLoaded,
+    readState: readStudioState,
+    withCoordinatorLease: (action) => withOperationLock({
+      ...coordinatorLock,
+      operation: "cli:migrate-legacy-coordinator",
+    }, action),
+    withStateLease: (operation, action) => withOperationLock({
+      ...stateLock,
+      operation,
+    }, action),
+    readCoordinator: readLegacyMigrationCoordinator,
+    createCoordinator: createLegacyMigrationCoordinator,
+    updateCoordinator: updateLegacyMigrationCoordinator,
+    clearCoordinator: clearLegacyMigrationCoordinator,
+    migrateState: migrateLegacyState,
+    rollbackState: rollbackLegacyStateMigration,
+    migrateService: migrateLegacyWatchdog,
+    finalizeService: finalizeLegacyWatchdogMigration,
+    recoverService: recoverLegacyWatchdogMigration,
+    themeExists: async (themeId) => {
+      const themes = await deps.listThemes({ roots });
+      return themes.some((theme) => theme.id === themeId);
+    },
+    awaitExactReady: async ({ port: selectedPort, expectedState, outerTransaction }) => {
+      const controller = await lifecycleController(deps, {
+        port: selectedPort,
+        preferStored: true,
+        migrationAuthorization: {
+          role: "migration-ready-foreground",
+          transactionId: outerTransaction.transactionId,
+          journalPath: outerTransaction.journalPath,
+          expectedRevision: expectedState.revision,
+          expectedControlToken: expectedState.controlToken,
+        },
+      });
+      return withStoppedController(controller, () => controller.setPersistence({
+        expectedRevision: expectedState.revision,
+        enabled: true,
+      }));
+    },
+  };
+  return migrateLegacyLifecycle({
+    port,
+    statePath: paths.statePath,
+    journalPath,
+    legacyThemePath: join(process.env.HOME, ".codex", "heige-codex-skin-persist", "theme"),
+    dependencies,
+  });
+}
+
+export async function offlineDisablePersistence({
+  statePath,
+  sessionPath,
+  transitionPath,
+  expectedRevision,
+  dependencies,
+}) {
+  if (
+    expectedRevision !== undefined &&
+    (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0)
+  ) {
+    throw new Error("expectedRevision must be a non-negative safe integer");
+  }
+  return dependencies.withStateLease(
+    "cli:disable-persistence-offline",
+    async (lease) => {
+      await dependencies.recoverTransition({
+        statePath,
+        sessionPath,
+        transitionPath,
+        lease,
+        currentProcess: null,
+      });
+      let state = await dependencies.readState(statePath);
+      if (state === null) throw new Error("状态文件不存在，请先运行 apply");
+      if (state.persistenceEnabled === true) {
+        const revision = expectedRevision ?? state.revision;
+        state = await dependencies.compareState(statePath, {
+          lease,
+          expectedRevision: revision,
+          mutate: (current) => ({
+            ...current,
+            persistenceEnabled: false,
+            lastTransitionNonce: dependencies.newTransitionNonce(),
+          }),
+        });
+      }
+      await dependencies.writeSession(sessionPath, {
+        schemaVersion: 1,
+        mode: "native",
+        process: null,
+        activeThemeId: null,
+        keepUntilProcessExit: false,
+      }, { lease });
+      await dependencies.unregisterBackground();
+      const background = await dependencies.inspectBackground();
+      if (background?.registered !== false) {
+        throw new Error("常驻已关闭，但后台控制器仍保持注册");
+      }
+      return {
+        persistenceEnabled: false,
+        revision: state.revision,
+      };
+    },
+  );
+}
+
+async function productionUnregisterBackground({ paths, platform, port }) {
+  if (platform === "darwin") {
+    await unregisterControllerAgent();
+  } else if (platform === "win32") {
+    await runWindowsControllerAction({
+      action: "unregister",
+      taskName: WINDOWS_PRODUCTION_TASK,
+      port,
+      stateRoot: paths.stateRoot,
+    });
+  } else {
+    throw new Error(`不支持的平台：${platform}`);
+  }
+  await removeBackgroundStartRequest({ stateRoot: paths.stateRoot }).catch((error) => {
+    if (error?.code !== "ENOENT") throw error;
+  });
+  await removeBackgroundHandshake({ stateRoot: paths.stateRoot }).catch((error) => {
+    if (error?.code !== "ENOENT") throw error;
+  });
+}
+
+async function productionInspectBackground({ platform, paths, port }) {
+  if (platform === "darwin") {
+    const value = await inspectLaunchAgent();
     return {
-      migratedFrom: null,
-      persistenceEnabled: existing.persistenceEnabled,
+      ...value,
+      registered: value.plistExists === true && value.loaded === true,
     };
   }
-  const loaded = await legacyLoaded();
-  const options = await lockOptions(paths);
-  return withOperationLock({ ...options, operation: "cli:migrate-legacy" }, async (lease) => {
-    const current = await readStudioState(paths.statePath);
-    if (current !== null) {
-      return { migratedFrom: null, persistenceEnabled: current.persistenceEnabled };
-    }
-    if (loaded) await migrateLegacyWatchdog();
-    const migrated = await migrateLegacyState({
-      statePath: paths.statePath,
-      lease,
-      legacyThemePath: join(process.env.HOME, ".codex", "heige-codex-skin-persist", "theme"),
-      legacyAgentLoaded: loaded,
-      themeExists: async (themeId) => {
-        const themes = await deps.listThemes({ roots });
-        return themes.some((theme) => theme.id === themeId);
-      },
+  if (platform === "win32") {
+    const value = await runWindowsControllerAction({
+      action: "status",
+      taskName: WINDOWS_PRODUCTION_TASK,
+      port,
+      stateRoot: paths.stateRoot,
     });
-    return {
-      migratedFrom: migrated.migratedFrom,
-      persistenceEnabled: migrated.state.persistenceEnabled,
-    };
+    return { ...value, ...normalizeWindowsBackgroundStatus(value) };
+  }
+  throw new Error(`不支持的平台：${platform}`);
+}
+
+async function productionOfflineDisable({ paths, platform, port, expectedRevision }) {
+  const stateLock = await lockOptions(paths, platform);
+  return offlineDisablePersistence({
+    statePath: paths.statePath,
+    sessionPath: paths.sessionPath,
+    transitionPath: paths.transitionPath,
+    expectedRevision,
+    dependencies: {
+      withStateLease: (operation, action) => withProductionStateLease({
+        paths,
+        options: stateLock,
+        operation,
+      }, action),
+      readState: readStudioState,
+      compareState: compareAndUpdateStudioState,
+      writeSession: writeSessionState,
+      recoverTransition: recoverStateTransition,
+      newTransitionNonce: randomUUID,
+      unregisterBackground: () => productionUnregisterBackground({ paths, platform, port }),
+      inspectBackground: () => productionInspectBackground({ paths, platform, port }),
+    },
   });
 }
 
@@ -1081,6 +1648,12 @@ function defaults(overrides, { paths: selectedPaths, platform = process.platform
     })));
   merged.restartDetached = overrides.restartDetached ?? ((input) =>
     productionRestartDetached({ ...input, paths: merged.paths }));
+  merged.offlineDisablePersistence = overrides.offlineDisablePersistence ?? ((input) =>
+    productionOfflineDisable({
+      ...input,
+      paths: merged.paths,
+      platform,
+    }));
   merged.migrateLegacy = overrides.migrateLegacy ?? ((input) =>
     productionMigrateLegacy({ ...input, deps: merged, paths: merged.paths, roots: merged.roots }));
   return merged;
@@ -1229,14 +1802,18 @@ export async function runCli(argv, overrides = {}) {
     return { created, applied };
   }
   if (command === "apply") {
-    const themeId = args.theme ?? DEFAULT_THEME_ID;
+    const preferStored = Boolean(args["prefer-stored"]);
+    const stored = preferStored && args.theme === undefined
+      ? await deps.readState()
+      : null;
+    const themeId = args.theme ?? stored?.lastNonNativeThemeId ?? DEFAULT_THEME_ID;
     const port = portFrom(args.port);
     return applySelectedTheme({
       deps,
       roots,
       command,
       port,
-      preferStored: Boolean(args["prefer-stored"]),
+      preferStored,
       themeId,
     });
   }
@@ -1273,9 +1850,6 @@ export async function runCli(argv, overrides = {}) {
       expectedRevision: state.revision,
       enabled: true,
     }));
-    if (command === "enable-skin") {
-      await deps.restartDetached({ launchMode: "cdp", port, preflight, themeId });
-    }
     return { mode: "active", persistenceEnabled: true };
   }
   if (command === "set-persistence") {
@@ -1283,21 +1857,45 @@ export async function runCli(argv, overrides = {}) {
     const port = portFrom(args.port);
     const state = await deps.readState();
     if (state === null) throw new Error("状态文件不存在，请先运行 apply");
-    const preflight = await deps.preflightLifecycle({ command, port, requirePort: true });
+    const expectedRevision = revisionFrom(args.revision, state.revision);
+    const { preflight, restartRequired } = enabled
+      ? {
+        preflight: await deps.preflightLifecycle({ command, port, requirePort: true }),
+        restartRequired: false,
+      }
+      : await preflightWithNativeFallback(deps, { command, port });
+    if (restartRequired) {
+      return deps.offlineDisablePersistence({ port, expectedRevision });
+    }
     const controller = await lifecycleController(deps, { port, preflight });
     return withStoppedController(controller, () => controller.setPersistence({
-      expectedRevision: revisionFrom(args.revision, state.revision),
+      expectedRevision,
       enabled,
     }));
   }
-  if (command === "pause" || command === "resume" || command === "restore") {
+  if (command === "restore") {
+    const port = portFrom(args.port);
+    const { preflight, restartRequired } = await preflightWithNativeFallback(deps, {
+      command,
+      port,
+    });
+    if (restartRequired) {
+      await deps.offlineDisablePersistence({ port });
+      return {
+        mode: preflight.process === null ? "closed" : "native",
+        persistenceEnabled: false,
+      };
+    }
+    const controller = await lifecycleController(deps, { port, preflight });
+    const result = await withStoppedController(controller, () => controller.restore());
+    await deps.restartDetached({ launchMode: "native", port, preflight });
+    return result;
+  }
+  if (command === "pause" || command === "resume") {
     const port = portFrom(args.port);
     const preflight = await deps.preflightLifecycle({ command, port, requirePort: true });
     const controller = await lifecycleController(deps, { port, preflight });
     const result = await withStoppedController(controller, () => controller[command]());
-    if (command === "restore") {
-      await deps.restartDetached({ launchMode: "native", port, preflight });
-    }
     return result;
   }
   if (command === "controller") {
