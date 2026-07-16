@@ -57,16 +57,6 @@ test("packages only to a temporary output and installs a self-contained distribu
   const home = await realpath(await mkdtemp(join(tmpdir(), "heige-skin-skill-")));
   t.after(() => rm(home, { recursive: true, force: true }));
 
-  await assert.rejects(
-    execFileAsync(packageScript, [], {
-      env: { ...process.env, HEIGE_SKILL_OUTPUT: "" },
-    }),
-    (error) => {
-      assert.match(String(error.stderr), /HEIGE_SKILL_OUTPUT must not be empty/);
-      return true;
-    },
-  );
-
   await execFileAsync(packageScript, [], {
     env: { ...process.env, HEIGE_SKILL_OUTPUT: archive },
   });
@@ -86,6 +76,16 @@ test("packages only to a temporary output and installs a self-contained distribu
     {
       trackedSha256,
       temporaryArchiveExists: true,
+    },
+  );
+
+  await assert.rejects(
+    execFileAsync(packageScript, [], {
+      env: { ...process.env, HEIGE_SKILL_OUTPUT: "" },
+    }),
+    (error) => {
+      assert.match(String(error.stderr), /HEIGE_SKILL_OUTPUT must not be empty/);
+      return true;
     },
   );
 
