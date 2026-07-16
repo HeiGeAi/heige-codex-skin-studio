@@ -574,6 +574,16 @@ test("pause survives ticks and resume restores the same verified process", async
   assert.deepEqual(fx.session.process, CURRENT_PROCESS);
 });
 
+test("pause does not publish paused state before skin removal succeeds", async () => {
+  const fx = fixture({ removeFailure: true });
+  const before = fx.session;
+
+  await assert.rejects(createSkinController(fx.deps).pause(), /remove failed/);
+
+  assert.deepEqual(fx.session, before);
+  assert.equal(fx.session.mode, "active");
+});
+
 test("resume rejects a replaced process without injecting", async () => {
   const fx = fixture({
     session: activeSession({ mode: "paused", activeThemeId: null }),
@@ -1158,6 +1168,21 @@ test("restore disables persistence removes skin unregisters and closes the endpo
   assert.equal(fx.calls.remove.length, 1);
   assert.equal(fx.calls.unregister.length, 1);
   assert.equal(fx.calls.close, 1);
+});
+
+test("restore keeps a retryable retained session when skin removal fails", async () => {
+  const fx = fixture({ removeFailure: true });
+  const controller = createSkinController(fx.deps);
+  await controller.start();
+
+  await assert.rejects(controller.restore(), /remove failed/);
+
+  assert.equal(fx.state.persistenceEnabled, false);
+  assert.equal(fx.session.mode, "active");
+  assert.equal(fx.session.keepUntilProcessExit, true);
+  assert.deepEqual(fx.session.process, CURRENT_PROCESS);
+  assert.equal(fx.calls.unregister.length, 0);
+  assert.equal(fx.calls.close, 0);
 });
 
 test("stop is idempotent and closes the control endpoint exactly once", async () => {

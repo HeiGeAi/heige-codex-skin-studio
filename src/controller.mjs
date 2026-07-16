@@ -1149,8 +1149,8 @@ export function createSkinController(input) {
       activeThemeId: null,
       keepUntilProcessExit: !state.persistenceEnabled,
     };
-    await deps.writeSession(session, lease);
     await deps.removeSkin({ process: processIdentity });
+    await deps.writeSession(session, lease);
     return { mode: "paused" };
   });
 
@@ -1189,8 +1189,8 @@ export function createSkinController(input) {
     if (state.persistenceEnabled) {
       state = (await disableTransition({ lease, state, processIdentity })).state;
     }
-    await deps.writeSession(restoringSession(processIdentity), lease);
     await deps.removeSkin({ process: processIdentity });
+    await deps.writeSession(restoringSession(processIdentity), lease);
     await unregisterAndVerify();
     await closeServer();
     return { mode: "restoring", persistenceEnabled: false };
