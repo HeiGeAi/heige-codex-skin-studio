@@ -82,13 +82,17 @@ test("uses only PNG slots outside core chat and pet spritesheets", () => {
   }
 });
 
-test("detects every process running from the Codex app bundle", () => {
+test("detects live Codex UI processes but ignores persistent bundle helpers", () => {
   const processList = `
     101 /Applications/ChatGPT.app/Contents/MacOS/ChatGPT
-    102 /Applications/ChatGPT.app/Contents/Frameworks/Codex Helper.app/Contents/MacOS/Codex Helper
-    103 /usr/bin/node test/theme-patch.test.mjs
+    102 /Applications/ChatGPT.app/Contents/Frameworks/Codex Framework.framework/Versions/150/Helpers/Codex (Renderer).app/Contents/MacOS/Codex (Renderer) --type=renderer
+    103 /Applications/ChatGPT.app/Contents/Frameworks/Codex Framework.framework/Versions/150/Helpers/Codex (Service).app/Contents/MacOS/Codex (Service) --type=gpu-process
+    104 /Applications/ChatGPT.app/Contents/Frameworks/Codex Framework.framework/Versions/150/Helpers/browser_crashpad_handler --monitor-self
+    105 /Applications/ChatGPT.app/Contents/Resources/codex app-server
+    106 /Applications/ChatGPT.app/Contents/Resources/native/bare-modifier-monitor
+    107 /usr/bin/node test/theme-patch.test.mjs
   `;
-  assert.deepEqual(findActiveCodexPids(processList), [101, 102]);
+  assert.deepEqual(findActiveCodexPids(processList), [101, 102, 103]);
 });
 
 test("check validates the supported Codex build before an install is queued", async () => {
@@ -136,7 +140,10 @@ test("the real v5 CSS fits the Codex inline slot and keeps static startup layout
   assert.ok(Buffer.byteLength(compiled) + 2 <= 8003);
   assert.match(compiled, /@layer theme,base,components,utilities/);
   assert.match(compiled, /html,body\{width:100%;height:100%;margin:0/);
-  assert.match(compiled, /#root\{position:relative;width:100%;height:100%/);
+  assert.match(
+    compiled,
+    /#root:has\(\.app-shell-left-panel\)\{position:relative;width:100%;height:100%/,
+  );
   assert.match(compiled, /\.startup-loader\{display:flex;width:100%;height:100%;align-items:center;justify-content:center/);
   assert.match(compiled, /\.startup-loader__logo\{position:relative;width:56px;height:56px/);
 });

@@ -41,15 +41,15 @@ body {
   width: 100%;
   height: 100%;
   margin: 0;
+  background: transparent !important;
+}
+
+body:has(.app-shell-left-panel) {
   background: #d2dafb !important;
   color: var(--miku-ink) !important;
 }
 
-body {
-  outline: none;
-}
-
-#root {
+#root:has(.app-shell-left-panel) {
   position: relative;
   width: 100%;
   height: 100%;
@@ -58,41 +58,25 @@ body {
   background:
     radial-gradient(circle, #fff 0 1px, transparent 1.6px) 0 0 / 31px 31px,
     radial-gradient(circle, #19c9e566 0 1px, transparent 1.7px) 15px 18px / 37px 37px,
-    linear-gradient(90deg, #e9f3fcdf 0 19.8%, #ffffff38 19.8% 100%),
-    url("./assets/page-artwork-allow-host-CPm7eJR2.png") 74% 7% / 46% auto no-repeat,
+    linear-gradient(90deg, #e9f3fcdf 0 20%, #ffffff38 20% 100%),
     linear-gradient(135deg, #f5f6fc 0%, #dbf4fc 46%, #e7dbf5 76%, #d2dafb 100%) !important;
 }
 
-#root::before {
+#root:has(.app-shell-left-panel)::before {
   position: fixed;
   inset: 52px 26px auto auto;
   z-index: 20;
   pointer-events: none;
-  content: "✦  ♡  ♪  ☆  MIKU  ✧  ♫  ♡";
+  content: "✦  ♡  MIKU  ♫  ☆";
   color: #ed6ec1;
-  font-size: clamp(12px, 1.1vw, 20px);
-  font-weight: 800;
-  letter-spacing: .2em;
-  text-shadow: 0 0 5px #fff, 0 0 13px #f397e0, 0 0 20px #7ed9eb;
-}
-
-#root::after {
-  position: fixed;
-  inset: auto 28px 24px auto;
-  z-index: 20;
-  padding: 7px 14px;
-  pointer-events: none;
-  content: "MIKU 488137  ♡";
-  color: #0e438d;
-  font: 800 11px/1.2 ui-monospace, monospace;
-  letter-spacing: .16em;
-  border: 1px solid #ed6ec1b8;
-  border-radius: 999px;
-  background: #fafaffc9;
-  box-shadow: 0 0 0 2px #fff9, 0 0 18px #f397e066;
+  font: 800 15px/1 sans-serif;
+  text-shadow: 0 0 5px #fff, 0 0 13px #f397e0;
 }
 
 .app-shell-left-panel {
+  position: relative;
+  width: clamp(280px, 20vw, 412px) !important;
+  min-width: clamp(280px, 20vw, 412px) !important;
   background:
     linear-gradient(180deg, #eef8fcec, #cdf5fce5 64%, #e7dbf5df),
     url("./assets/page-artwork-waiting-pzj85BPm.png") 100% 24% / auto 72% no-repeat !important;
@@ -101,9 +85,20 @@ body {
   backdrop-filter: blur(16px) saturate(1.15);
 }
 
+.app-shell-left-panel::before {
+  position: absolute;
+  inset: 50px 14px auto 20px;
+  z-index: 8;
+  pointer-events: none;
+  content: "Miku Codex ✧";
+  color: #078ec8;
+  font: italic 800 24px/46px "Segoe Print", cursive;
+  text-shadow: 0 1px #fff, 0 0 14px #7ed9eb;
+  background: url("./assets/page-artwork-allow-host-CPm7eJR2.png") right center / 64px 40px no-repeat;
+}
+
 [data-app-action-sidebar-scroll] {
-  padding: 4px 7px 12px !important;
-  scrollbar-color: #19c9e566 transparent;
+  padding: 66px 8px 12px !important;
 }
 
 [data-app-action-sidebar-section] {
@@ -142,7 +137,6 @@ body {
   color: #244f79 !important;
   border: 1px solid transparent;
   border-radius: 13px !important;
-  transition: background-color .14s ease, border-color .14s ease;
 }
 
 [data-app-action-sidebar-thread-row]:hover,
@@ -161,7 +155,6 @@ body {
 
 [data-app-action-sidebar-project-label],
 [data-app-action-sidebar-thread-title] {
-  letter-spacing: .01em;
   text-shadow: 0 1px #fff;
 }
 
@@ -182,8 +175,8 @@ body {
   min-height: 100%;
   background:
     url("./assets/dialog-artwork-waiting-phone-UTYmfLHs.png") right 18px bottom 18px / 190px auto no-repeat,
-    linear-gradient(180deg, #ffffff08 0 29%, #f8f8fc68 46%, #dbf4fcb8 68%, #e7dbf5d9 100%),
-    url("./assets/dialog-artwork-connected-NZKCls7p.png") center / 100% 100% no-repeat,
+    linear-gradient(180deg, #ffffff20 0 36%, #f8f8fc5e 51%, #dbf4fcd6 72%, #e7dbf5ef 100%),
+    url("./assets/dialog-artwork-connected-NZKCls7p.png") center top / 100% auto no-repeat,
     linear-gradient(135deg, #dbf4fc, #f5f6fc 52%, #e7dbf5) !important;
   border: 2px solid #7ed9ebb8 !important;
   border-radius: 22px 0 0 0 !important;
@@ -191,15 +184,24 @@ body {
   backdrop-filter: blur(16px) saturate(1.15);
 }
 
+.main-surface .max-w-3xl,
+.browser-main-surface .max-w-3xl {
+  max-width: 84% !important;
+}
+
+.main-surface button[class*="min-h-26"][class*="rounded-2xl"] {
+  min-height: 128px !important;
+  border: 2px solid #7ed9ebcc !important;
+  border-radius: 22px !important;
+  background: #fafaffe0 !important;
+  box-shadow: 0 0 0 2px #fff9 inset, 0 10px 25px #1c99cd2e, 0 0 20px #f397e02b !important;
+  backdrop-filter: blur(16px) saturate(1.16);
+}
+
 .app-header-tint {
   background: linear-gradient(90deg, #f8f8fcf2, #bfd7fbeb 58%, #e7dbf5e5) !important;
   border-bottom: 1px solid #90b3fa70 !important;
   backdrop-filter: blur(16px) saturate(1.15);
-}
-
-.app-header-divider {
-  background: linear-gradient(90deg, transparent, #4bc2e0, #ed6ec1, transparent) !important;
-  opacity: .7;
 }
 
 [data-thread-title] {
@@ -209,6 +211,7 @@ body {
 }
 
 .composer-surface-chrome {
+  max-width: none !important;
   background: #fafaffed !important;
   border: 2px solid #7ed9eb !important;
   border-radius: 22px !important;
@@ -234,6 +237,7 @@ body {
   backdrop-filter: blur(14px) saturate(1.12);
 }
 
+._cssMaterial_wdtwh_1,
 [data-codex-approval-surface],
 [data-mcp-app-card],
 [data-composer-attachment-pill],
@@ -252,38 +256,25 @@ body {
   color: #122c60 !important;
   border-color: #7ed9eb99 !important;
   background: #fafafff2 !important;
-  box-shadow: 0 14px 38px #1c99cd29, 0 0 24px #f397e029 !important;
-  backdrop-filter: blur(20px) saturate(1.15);
+  box-shadow: 0 14px 38px #1c99cd29 !important;
 }
 
-textarea,
-input,
-[contenteditable="true"] {
+body:has(.app-shell-left-panel) *:is(textarea, input, [contenteditable="true"]) {
   color: #122c60 !important;
   caret-color: #19c9e5 !important;
 }
 
-button:focus-visible,
-a:focus-visible,
-[tabindex]:focus-visible {
+body:has(.app-shell-left-panel) *:is(button, a, [tabindex]):focus-visible {
   outline: 2px solid #ed6ec1 !important;
   outline-offset: 2px !important;
 }
 
-pre,
-.monaco-editor,
-.xterm {
-  border: 1px solid #4bc2e052 !important;
-  border-radius: 14px !important;
-  box-shadow: 0 8px 18px #102c4a1a !important;
-}
-
-::selection {
+body:has(.app-shell-left-panel) ::selection {
   color: #122c60;
   background: #f397e070;
 }
 
-::-webkit-scrollbar-thumb {
+body:has(.app-shell-left-panel) ::-webkit-scrollbar-thumb {
   border: 3px solid transparent;
   border-radius: 999px;
   background: linear-gradient(#19c9e5, #90b3fa, #ad7ed5, #ed6ec1) padding-box !important;
@@ -296,24 +287,10 @@ pre,
   align-items: center;
   justify-content: center;
   background: linear-gradient(135deg, #f5f6fc, #dbf4fc 52%, #e7dbf5) !important;
-  -webkit-app-region: drag;
 }
 
 .startup-loader__logo {
   position: relative;
   width: 56px;
   height: 56px;
-}
-
-.startup-loader__base,
-.startup-loader__overlay {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-}
-
-.startup-loader__base {
-  color: #19c9e5 !important;
-  filter: drop-shadow(0 0 16px #ed6ec166);
 }

@@ -6,7 +6,7 @@ import test from "node:test";
 import { THEME_ASSETS } from "../src/theme-patch.mjs";
 
 const expectedAssets = [
-  ["hero", "miku-full-canvas.png", 1240, 889],
+  ["hero", "miku-full-canvas.png", 1240, 698],
   ["character", "miku-character.png", 608, 375],
   ["sidebar", "miku-sidebar-wash.png", 98, 644],
   ["polaroid", "miku-polaroid.png", 228, 230],
@@ -15,6 +15,15 @@ const expectedAssets = [
 function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
 }
+
+test("does not package the known damaged idle wink revision", async () => {
+  const bytes = await readFile(new URL("../custom-pet/miku-future/spritesheet.webp", import.meta.url));
+  assert.notEqual(
+    sha256(bytes),
+    "e2c260173fe2e36b1342ded65d219f677603eb182b0d9451f1c285504f2bb727",
+    "this revision contains a malformed one-eye wink and an almost-empty idle frame",
+  );
+});
 
 test("maps four deterministic crops to distinct low-frequency PNG slots", () => {
   assert.equal(THEME_ASSETS.length, expectedAssets.length);
@@ -63,6 +72,14 @@ test("keeps every crop valid, non-empty, and at its specified geometry", async (
     assert.ok(["ui", "portrait"].includes(crop.source), `${role} crop source is missing`);
     assert.equal(sha256(bytes), crop.sha256, `${role} crop hash drifted`);
   }
+
+  const hero = manifest.crops.find((candidate) => candidate.role === "hero");
+  assert.equal(hero.source, "portrait", "hero must use clean portrait art, not baked UI");
+  assert.equal(
+    hero.sha256,
+    "291ae75b07f133da9ad46a9716023cd0a23183a0070216b9ce9194193f8df292",
+    "clean 488137 hero revision drifted",
+  );
 });
 
 test("packages a native v2 custom pet for Codex Desktop", async () => {
@@ -81,10 +98,11 @@ test("packages a native v2 custom pet for Codex Desktop", async () => {
   const crops = JSON.parse(
     await readFile(new URL("../assets/miku-crops.json", import.meta.url), "utf8"),
   );
+  assert.equal(crops.pet.layout, "8 columns x 11 animation rows");
   assert.ok(bytes.length > 100_000, "pet spritesheet is unexpectedly empty");
   assert.equal(
     sha256(bytes),
-    "3452954a055640cc6b116f4d4c99c0dbf8928674899900ccb238bc2601ba41ec",
+    "3fc484a68dad02dc44fd354dbcac21ae78814d29351eebf4d200e30298da5c62",
     "the packaged pet must match the latest local Miku Future revision",
   );
   assert.equal(sha256(bytes), crops.pet.sha256, "pet manifest hash drifted");

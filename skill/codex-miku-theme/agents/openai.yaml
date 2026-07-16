@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex 初音未来主题"
+  short_description: "一键安装、检查、安全恢复 Codex 初音未来主题与配套动画宠物"
+  default_prompt: "使用 $codex-miku-theme 安装初音未来主题和配套宠物。"

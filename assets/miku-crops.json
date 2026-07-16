@@ -16,16 +16,16 @@
   "crops": [
     {
       "role": "hero",
-      "source": "ui",
+      "source": "portrait",
       "file": "miku-full-canvas.png",
-      "x": 1247,
-      "y": 170,
-      "sourceWidth": 4050,
-      "sourceHeight": 2903,
+      "x": 0,
+      "y": 0,
+      "sourceWidth": 5460,
+      "sourceHeight": 3073,
       "width": 1240,
-      "height": 889,
-      "filter": "scale=lanczos,eq=saturation=1.12:contrast=1.02,pngquant=256 colors",
-      "sha256": "e96290213fdd1fd374d3a360b63efca8b5078fb9489001b07f95e633a503b6bd"
+      "height": 698,
+      "filter": "scale=lanczos,eq=saturation=1.08:contrast=1.02,pngquant=256 colors",
+      "sha256": "291ae75b07f133da9ad46a9716023cd0a23183a0070216b9ce9194193f8df292"
     },
     {
       "role": "character",
@@ -68,10 +68,10 @@
     }
   ],
   "pet": {
-    "file": "miku-pet-spritesheet.webp",
+    "file": "../custom-pet/miku-future/spritesheet.webp",
     "width": 1536,
     "height": 2288,
-    "layout": "8 columns x 10 animation rows",
-    "sha256": "3452954a055640cc6b116f4d4c99c0dbf8928674899900ccb238bc2601ba41ec"
+    "layout": "8 columns x 11 animation rows",
+    "sha256": "3fc484a68dad02dc44fd354dbcac21ae78814d29351eebf4d200e30298da5c62"
   }
 }

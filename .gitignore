@@ -3,3 +3,4 @@ pet/
 output/*
 !output/codex-miku-theme.skill
 .worktrees/
+custom-pet/**/spritesheet.webp.before-*

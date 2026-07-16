@@ -27,6 +27,10 @@ const DEFAULT_ASAR = "/Applications/ChatGPT.app/Contents/Resources/app.asar";
 const INFO_PLIST = "/Applications/ChatGPT.app/Contents/Info.plist";
 const SUPPORTED_APP_VERSION = "26.707.72221";
 const SUPPORTED_APP_BUILD = "5307";
+export const SUPPORTED_BASE_ARCHIVE_SHA256 = Object.freeze([
+  "b5da51e5df6e996076e4cb19045cec46dd4c08cf61c19cdbc5cb426b8413b73c",
+  "e9f0c1defb583c414e14ac81c301f15abb533dea080501ddd329846b1a67d239",
+]);
 const PROJECT_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const THEME_PATH = join(PROJECT_ROOT, "src", "theme.css");
 const STATE_DIR = join(homedir(), "Library", "Application Support", "Codex Miku Theme");
@@ -71,6 +75,28 @@ const APP_ASSETS = THEME_ASSETS;
 
 function digest(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
+}
+
+export function validateSupportedArchiveFingerprint({
+  archiveSha256,
+  asarPath,
+  currentHtml,
+  state,
+}) {
+  if (SUPPORTED_BASE_ARCHIVE_SHA256.includes(archiveSha256)) {
+    return archiveSha256;
+  }
+  if (
+    currentHtml.includes("CODEX_MIKU_THEME") &&
+    state?.appAsar === asarPath &&
+    state.themedArchiveSha256 === archiveSha256 &&
+    SUPPORTED_BASE_ARCHIVE_SHA256.includes(state.originalArchiveSha256)
+  ) {
+    return state.originalArchiveSha256;
+  }
+  throw new Error(
+    `Unsupported Codex resource fingerprint ${archiveSha256}; the plist version alone is not a safe compatibility boundary`,
+  );
 }
 
 export function minifyThemeCss(source) {
@@ -457,14 +483,39 @@ async function assertSupportedAppVersion(asarPath) {
   return { appBuild, appVersion };
 }
 
+async function assertSupportedAppArchive(asarPath, context) {
+  if (asarPath !== DEFAULT_ASAR) return null;
+  const archiveSha256 = digest(context.archive);
+  let state = null;
+  if (!SUPPORTED_BASE_ARCHIVE_SHA256.includes(archiveSha256)) {
+    try {
+      state = JSON.parse(await readFile(STATE_PATH, "utf8"));
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+  }
+  const baseArchiveSha256 = validateSupportedArchiveFingerprint({
+    archiveSha256,
+    asarPath,
+    currentHtml: context.originalHtml,
+    state,
+  });
+  return { archiveSha256, baseArchiveSha256 };
+}
+
 export function findActiveCodexPids(processList) {
   return processList
     .split("\n")
     .map((line) => line.match(/^\s*(\d+)\s+(.+)$/))
-    .filter(
-      (match) =>
-        match && match[2].includes("/Applications/ChatGPT.app/Contents/"),
-    )
+    .filter((match) => {
+      if (!match) return false;
+      const command = match[2];
+      return (
+        command.includes("/Applications/ChatGPT.app/Contents/MacOS/ChatGPT") ||
+        command.includes("/Helpers/Codex (Renderer).app/Contents/MacOS/Codex (Renderer)") ||
+        command.includes("/Helpers/Codex (Service).app/Contents/MacOS/Codex (Service)")
+      );
+    })
     .map((match) => Number(match[1]));
 }
 
@@ -482,8 +533,10 @@ async function assertCodexStopped(asarPath) {
 async function check(asarPath) {
   await assertSupportedAppVersion(asarPath);
   const context = await loadContext(asarPath);
+  const archiveIdentity = await assertSupportedAppArchive(asarPath, context);
   const hasMarker = context.originalHtml.includes(THEME_MARKER);
   const result = {
+    ...(archiveIdentity ?? {}),
     appAsar: asarPath,
     archiveBytes: context.archive.length,
     artworks: context.assets.map(({ entry, installed, role, source }) => ({
@@ -516,6 +569,7 @@ async function install(asarPath) {
   await assertCodexStopped(asarPath);
   const appIdentity = await assertSupportedAppVersion(asarPath);
   const context = await loadContext(asarPath);
+  const archiveIdentity = await assertSupportedAppArchive(asarPath, context);
   const { patchedArchive, patchedHtml } = buildThemedArchive(context);
   const backupDir = join(STATE_DIR, "backups");
   await mkdir(backupDir, { recursive: true });
@@ -564,6 +618,7 @@ async function install(asarPath) {
   const nextState = {
     ...baseState,
     ...(appIdentity ?? {}),
+    ...(archiveIdentity ?? {}),
     appAsar: asarPath,
     archiveBytes: patchedArchive.length,
     assets: context.assets.map(({ entry, entryPath, padded, role, source }) => ({
@@ -597,6 +652,14 @@ async function restore(asarPath) {
   }
 
   const [current, backup] = await Promise.all([readFile(asarPath), readFile(state.backupPath)]);
+  if (asarPath === DEFAULT_ASAR) {
+    validateSupportedArchiveFingerprint({
+      archiveSha256: digest(current),
+      asarPath,
+      currentHtml: readEntry(current, ENTRY_PATH).toString("utf8"),
+      state,
+    });
+  }
   if (current.length !== state.archiveBytes || backup.length !== state.archiveBytes) {
     throw new Error("Refusing restore after an app update changed the archive size");
   }

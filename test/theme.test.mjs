@@ -85,7 +85,7 @@ test("builds the reference sidebar hierarchy and interaction states", async () =
   assert.match(css, /data-app-action-sidebar-thread-row[^}]*:hover/s);
 });
 
-test("uses all four deterministic Miku crops and maximal decorative layers", async () => {
+test("uses clean hero art, supporting crops, and main-window-only decorative layers", async () => {
   const css = await readFile(themePath, "utf8");
 
   for (const asset of [
@@ -97,12 +97,26 @@ test("uses all four deterministic Miku crops and maximal decorative layers", asy
     assert.ok(css.includes(asset), `missing embedded artwork: ${asset}`);
   }
 
-  assert.match(css, /#root\s*\{/);
-  assert.match(css, /#root::before/);
-  assert.match(css, /#root::after/);
+  assert.match(css, /#root:has\(\.app-shell-left-panel\)\s*\{/);
+  assert.match(css, /#root:has\(\.app-shell-left-panel\)::before/);
+  assert.doesNotMatch(css, /(?:^|\n)#root(?:\s*\{|::)/);
+  assert.doesNotMatch(
+    css.match(/\.main-surface,[\s\S]*?\.browser-main-surface\s*\{([\s\S]*?)\}/)?.[1] ?? "",
+    /page-artwork-allow-host-CPm7eJR2\.png/,
+    "the full hero and character crop must not be stacked on the same surface",
+  );
   assert.match(css, /[✦♡♪☆]/u);
   assert.match(css, /saturate\(/);
   assert.match(css, /backdrop-filter/);
+});
+
+test("widens the branded sidebar, home cards, and conversation canvas", async () => {
+  const css = await readFile(themePath, "utf8");
+
+  assert.match(css, /\.app-shell-left-panel[\s\S]*?width:\s*clamp\([^;]*20vw/);
+  assert.match(css, /\.app-shell-left-panel::before[\s\S]*?Miku Codex/);
+  assert.match(css, /\.main-surface \.max-w-3xl/);
+  assert.match(css, /min-h-26/);
 });
 
 test("keeps the full chat canvas themed below the hero artwork", async () => {
