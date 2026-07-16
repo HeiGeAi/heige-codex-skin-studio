@@ -54,8 +54,8 @@ function heartbeatPath(lockPath, nonce) {
   return `${lockPath}.heartbeat.${nonce}`;
 }
 
-function stagingPath(lockPath, nonce) {
-  return `${lockPath}.staging.${nonce}`;
+function stagingPath(lockPath, identity, nonce) {
+  return `${lockPath}.staging.${identity.pid}.${nonce}`;
 }
 
 function successorPath(lockPath, nonce) {
@@ -64,6 +64,10 @@ function successorPath(lockPath, nonce) {
 
 function releasePath(lockPath, nonce) {
   return `${lockPath}.released.${nonce}`;
+}
+
+function heartbeatTempPath(lockPath, nonce, temporaryNonce = "temporary") {
+  return `${lockPath}.heartbeat.${nonce}.tmp.${temporaryNonce}`;
 }
 
 async function readTail(lockPath) {
@@ -399,16 +403,16 @@ test("concurrent acquisition has exactly one winner", async (t) => {
   await winners[0].value.release();
 });
 
-test("startup conservatively preserves orphan staging files", async (t) => {
+test("startup removes only strict staging files whose exact process identity is gone", async (t) => {
   const { lockPath } = await fixture(t);
   await mkdir(join(lockPath, ".."), { recursive: true, mode: 0o700 });
   const live = { pid: 51_001, startedAt: "2026-07-17T03:00:00.000Z" };
   const reused = { pid: 51_002, startedAt: "2026-07-17T03:00:01.000Z" };
   const dead = { pid: 51_003, startedAt: "2026-07-17T03:00:02.000Z" };
-  const livePath = stagingPath(lockPath, "live");
-  const reusedPath = stagingPath(lockPath, "reused");
-  const deadPath = stagingPath(lockPath, "dead");
-  const malformedPath = stagingPath(lockPath, "malformed");
+  const livePath = stagingPath(lockPath, live, "live");
+  const reusedPath = stagingPath(lockPath, reused, "reused");
+  const deadPath = stagingPath(lockPath, dead, "dead");
+  const malformedPath = stagingPath(lockPath, { pid: 51_004 }, "malformed");
   await writePrivateJson(livePath, ownerRecord({ identity: live, nonce: "live" }));
   await writePrivateJson(reusedPath, ownerRecord({ identity: reused, nonce: "reused" }));
   await writePrivateJson(deadPath, ownerRecord({ identity: dead, nonce: "dead" }));
@@ -428,8 +432,8 @@ test("startup conservatively preserves orphan staging files", async (t) => {
   t.after(() => lease.release());
 
   assert.equal(await exists(livePath), true, "live staging ownership must be preserved");
-  assert.equal(await exists(reusedPath), true, "PID-reused staging stays inert");
-  assert.equal(await exists(deadPath), true, "dead staging stays inert");
+  assert.equal(await exists(reusedPath), false, "PID-reused staging may be removed");
+  assert.equal(await exists(deadPath), false, "dead staging may be removed");
   assert.equal(await exists(malformedPath), true, "unprovable staging must be preserved");
 });
 
@@ -723,6 +727,64 @@ test("foreign heartbeat temporary files are preserved conservatively", async (t)
   t.after(() => lease.release());
 
   assert.equal(await exists(orphan), true);
+});
+
+test("heartbeat temporary cleanup requires a strict released claim binding", async (t) => {
+  const { lockPath } = await fixture(t);
+  const releasedLease = await acquireOperationLock(acquisitionOptions(lockPath));
+  const claimMetadata = await stat(lockPath);
+  await releasedLease.release();
+  const releasedTemp = heartbeatTempPath(lockPath, releasedLease.nonce);
+  await writePrivateJson(releasedTemp, {
+    schemaVersion: 2,
+    nonce: releasedLease.nonce,
+    pid: releasedLease.owner.pid,
+    startedAt: releasedLease.owner.startedAt,
+    claim: {
+      dev: String(claimMetadata.dev),
+      ino: String(claimMetadata.ino),
+    },
+    heartbeat: CREATED_AT,
+  });
+
+  const next = await acquireOperationLock(acquisitionOptions(lockPath));
+  t.after(() => next.release());
+  assert.equal(await exists(releasedTemp), false);
+});
+
+test("heartbeat temporary cleanup preserves a strict live claim", async (t) => {
+  const { lockPath } = await fixture(t);
+  const liveLease = await acquireOperationLock(acquisitionOptions(lockPath));
+  t.after(() => liveLease.release());
+  const claimMetadata = await stat(lockPath);
+  const liveTemp = heartbeatTempPath(lockPath, liveLease.nonce);
+  await writePrivateJson(liveTemp, {
+    schemaVersion: 2,
+    nonce: liveLease.nonce,
+    pid: liveLease.owner.pid,
+    startedAt: liveLease.owner.startedAt,
+    claim: {
+      dev: String(claimMetadata.dev),
+      ino: String(claimMetadata.ino),
+    },
+    heartbeat: CREATED_AT,
+  });
+
+  await assert.rejects(
+    acquireOperationLock(
+      acquisitionOptions(lockPath, {
+        readProcessIdentity: async (pid) =>
+          pid === liveLease.owner.pid
+            ? {
+                pid: liveLease.owner.pid,
+                startedAt: liveLease.owner.startedAt,
+              }
+            : null,
+      }),
+    ),
+    (error) => error.code === "LOCK_HELD",
+  );
+  assert.equal(await exists(liveTemp), true);
 });
 
 test("a low compaction threshold keeps repeated short leases bounded", async (t) => {

@@ -5,6 +5,7 @@ import {
   mkdir,
   open,
   readFile,
+  readdir,
   rename,
   unlink,
 } from "node:fs/promises";
@@ -650,6 +651,253 @@ async function findTail(lockPath) {
   throw lockError("LOCK_CHAIN_CORRUPT", "operation-lock chain traversal failed");
 }
 
+function parseStagingArtifactName(lockPath, name) {
+  const prefix = `${basename(lockPath)}.staging.`;
+  if (!name.startsWith(prefix)) return null;
+  const parts = name.slice(prefix.length).split(".");
+  if (parts.length !== 2 || !/^[1-9][0-9]*$/u.test(parts[0])) return null;
+  const pid = Number(parts[0]);
+  if (
+    !Number.isSafeInteger(pid) ||
+    pid <= 0 ||
+    !NONCE_PATTERN.test(parts[1])
+  ) {
+    return null;
+  }
+  return { nonce: parts[1], pid };
+}
+
+async function readStagingArtifact(path, expected) {
+  try {
+    const record = await readJsonFile(path, {
+      allowMissing: true,
+      malformedCode: "LOCK_STAGING_MALFORMED",
+      permissionsCode: "LOCK_STAGING_PERMISSIONS",
+      description: "lock staging artifact",
+    });
+    if (record === null) return null;
+    const owner = validateOwnerRecord(record.value, "LOCK_STAGING_MALFORMED");
+    if (owner.pid !== expected.pid || owner.nonce !== expected.nonce) return null;
+    return { ...record, owner };
+  } catch {
+    return null;
+  }
+}
+
+async function cleanupProvenDeadStaging({
+  lockPath,
+  parentPath,
+  readProcessIdentity,
+  durability,
+}) {
+  let entries;
+  try {
+    entries = await readdir(parentPath, { withFileTypes: true });
+  } catch (error) {
+    throw lockError(
+      "LOCK_ARTIFACT_SCAN_FAILED",
+      `could not scan lock artifacts in ${parentPath}`,
+      error,
+    );
+  }
+
+  let changed = false;
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    const expected = parseStagingArtifactName(lockPath, entry.name);
+    if (expected === null) continue;
+    const path = join(parentPath, entry.name);
+    const initial = await readStagingArtifact(path, expected);
+    if (initial === null) continue;
+
+    let current;
+    try {
+      current = await probeOwner(initial.owner, readProcessIdentity);
+    } catch {
+      continue;
+    }
+    if (processStillOwnsRecord(initial.owner, current)) continue;
+
+    const confirmed = await readStagingArtifact(path, expected);
+    if (confirmed === null || !sameClaim(initial, confirmed)) continue;
+    try {
+      changed = (await unlinkIfPresent(path)) || changed;
+    } catch (error) {
+      throw lockError(
+        "LOCK_ARTIFACT_CLEANUP_FAILED",
+        `could not remove proven-dead staging artifact ${path}`,
+        error,
+      );
+    }
+  }
+  if (changed) await durability.syncDirectory(parentPath);
+}
+
+function parseHeartbeatTemporaryName(lockPath, name) {
+  const prefix = `${basename(lockPath)}.heartbeat.`;
+  if (!name.startsWith(prefix)) return null;
+  const remainder = name.slice(prefix.length);
+  const marker = ".tmp.";
+  const markerIndex = remainder.indexOf(marker);
+  if (
+    markerIndex <= 0 ||
+    markerIndex !== remainder.lastIndexOf(marker)
+  ) {
+    return null;
+  }
+  const nonce = remainder.slice(0, markerIndex);
+  const temporaryNonce = remainder.slice(markerIndex + marker.length);
+  if (!NONCE_PATTERN.test(nonce) || !NONCE_PATTERN.test(temporaryNonce)) {
+    return null;
+  }
+  return { nonce };
+}
+
+function validateHeartbeatRecord(value, expectedNonce) {
+  const code = "LOCK_HEARTBEAT_MALFORMED";
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    !exactKeys(value, [
+      "claim",
+      "heartbeat",
+      "nonce",
+      "pid",
+      "schemaVersion",
+      "startedAt",
+    ]) ||
+    value.schemaVersion !== LOCK_SCHEMA_VERSION ||
+    value.nonce !== expectedNonce ||
+    value.claim === null ||
+    typeof value.claim !== "object" ||
+    Array.isArray(value.claim) ||
+    !exactKeys(value.claim, ["dev", "ino"]) ||
+    typeof value.claim.dev !== "string" ||
+    value.claim.dev.length === 0 ||
+    typeof value.claim.ino !== "string" ||
+    value.claim.ino.length === 0
+  ) {
+    throw lockError(code, "heartbeat artifact has an invalid claim binding");
+  }
+  validateIdentity(value, code);
+  validateTimestamp(value.heartbeat, "heartbeat", code);
+  return value;
+}
+
+async function readHeartbeatTemporary(path, expected) {
+  try {
+    const record = await readJsonFile(path, {
+      allowMissing: true,
+      malformedCode: "LOCK_HEARTBEAT_MALFORMED",
+      permissionsCode: "LOCK_HEARTBEAT_PERMISSIONS",
+      description: "lock heartbeat temporary artifact",
+    });
+    if (record === null) return null;
+    const heartbeat = validateHeartbeatRecord(record.value, expected.nonce);
+    return { ...record, heartbeat };
+  } catch {
+    return null;
+  }
+}
+
+function heartbeatMatchesClaim(heartbeat, claim) {
+  return (
+    heartbeat.nonce === claim.owner.nonce &&
+    heartbeat.pid === claim.owner.pid &&
+    heartbeat.startedAt === claim.owner.startedAt &&
+    heartbeat.claim.dev === String(claim.metadata.dev) &&
+    heartbeat.claim.ino === String(claim.metadata.ino)
+  );
+}
+
+function sameHeartbeatSnapshot(left, right) {
+  return (
+    left.raw === right.raw &&
+    left.metadata.dev === right.metadata.dev &&
+    left.metadata.ino === right.metadata.ino
+  );
+}
+
+async function heartbeatIsProvenOrphan({
+  lockPath,
+  artifact,
+  chain,
+  readProcessIdentity,
+}) {
+  const claim = chain.claims.find((candidate) =>
+    heartbeatMatchesClaim(artifact.heartbeat, candidate),
+  );
+  if (claim !== undefined) {
+    if (claim !== chain.tail) return true;
+    if ((await readReleaseMarker(lockPath, claim)) !== null) return true;
+  }
+
+  let current;
+  try {
+    current = await probeOwner(artifact.heartbeat, readProcessIdentity);
+  } catch {
+    return false;
+  }
+  if (processStillOwnsRecord(artifact.heartbeat, current)) return false;
+  return claim === undefined || claim === chain.tail;
+}
+
+async function cleanupProvenOrphanHeartbeats({
+  lockPath,
+  parentPath,
+  readProcessIdentity,
+  durability,
+}) {
+  let entries;
+  try {
+    entries = await readdir(parentPath, { withFileTypes: true });
+  } catch (error) {
+    throw lockError(
+      "LOCK_ARTIFACT_SCAN_FAILED",
+      `could not scan lock artifacts in ${parentPath}`,
+      error,
+    );
+  }
+  const chain = await findTail(lockPath);
+  let changed = false;
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    const expected = parseHeartbeatTemporaryName(lockPath, entry.name);
+    if (expected === null) continue;
+    const path = join(parentPath, entry.name);
+    const initial = await readHeartbeatTemporary(path, expected);
+    if (initial === null) continue;
+    if (
+      !(await heartbeatIsProvenOrphan({
+        lockPath,
+        artifact: initial,
+        chain,
+        readProcessIdentity,
+      }))
+    ) {
+      continue;
+    }
+    const confirmed = await readHeartbeatTemporary(path, expected);
+    if (
+      confirmed === null ||
+      !sameHeartbeatSnapshot(initial, confirmed)
+    ) {
+      continue;
+    }
+    try {
+      changed = (await unlinkIfPresent(path)) || changed;
+    } catch (error) {
+      throw lockError(
+        "LOCK_ARTIFACT_CLEANUP_FAILED",
+        `could not remove proven-orphan heartbeat artifact ${path}`,
+        error,
+      );
+    }
+  }
+  if (changed) await durability.syncDirectory(parentPath);
+}
+
 async function probeOwner(owner, readProcessIdentity) {
   if (typeof readProcessIdentity !== "function") {
     throw lockError(
@@ -1095,6 +1343,18 @@ export async function acquireOperationLock(options) {
 
   const parentPath = dirname(lockPath);
   await prepareTrustedParent({ stateRoot, parentPath, durability });
+  await cleanupProvenDeadStaging({
+    lockPath,
+    parentPath,
+    readProcessIdentity,
+    durability,
+  });
+  await cleanupProvenOrphanHeartbeats({
+    lockPath,
+    parentPath,
+    readProcessIdentity,
+    durability,
+  });
 
   for (let attempt = 0; attempt < MAX_ACQUIRE_ATTEMPTS; attempt += 1) {
     const chain = await findTail(lockPath);
