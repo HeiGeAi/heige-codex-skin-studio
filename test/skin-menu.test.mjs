@@ -50,6 +50,8 @@ test("ships the custom upload flow with the sentinel css template", () => {
   assert.match(script, /HEIGEHEROSENTINEL/, "css template must ride along for client-side builds");
   assert.match(script, /extractPalette/, "palette extraction must ship");
   assert.match(script, /__heigeCodexSkin/, "scriptable hook must be exposed");
+  assert.match(script, /deleteCustom/, "custom theme must be deletable");
+  assert.match(script, /removeItem/, "delete must clear persisted storage");
 });
 
 test("rejects empty menus and unknown active themes", () => {
