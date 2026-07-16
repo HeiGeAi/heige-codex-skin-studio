@@ -16,7 +16,7 @@ const SHAPES = Object.freeze({
   },
   "legacy-migration": {
     keys: [
-      "createdAt", "decision", "nonce", "operation", "phase", "previousNonce",
+      "ack", "createdAt", "decision", "nonce", "operation", "phase", "previousNonce",
       "product", "revision", "schemaVersion", "serviceParticipant",
       "stateParticipant", "transactionId",
     ],
@@ -49,6 +49,18 @@ function isRecord(value) {
 function exactKeys(value, keys) {
   return isRecord(value) &&
     Object.keys(value).sort().join("\0") === [...keys].sort().join("\0");
+}
+
+function validExactAck(value) {
+  return exactKeys(value, ["persistenceEnabled", "processIdentity", "revision"]) &&
+    value.persistenceEnabled === true &&
+    Number.isSafeInteger(value.revision) &&
+    value.revision >= 0 &&
+    exactKeys(value.processIdentity, ["pid", "startedAt"]) &&
+    Number.isSafeInteger(value.processIdentity.pid) &&
+    value.processIdentity.pid > 0 &&
+    typeof value.processIdentity.startedAt === "string" &&
+    value.processIdentity.startedAt.length > 0;
 }
 
 function conflict(message) {
@@ -86,6 +98,12 @@ export function validateKnownOuterTransactionDocument(document, {
   }
   if (transactionId !== null && document.transactionId !== transactionId) {
     throw conflict("outer transaction id does not match the participant");
+  }
+  if (
+    document.operation === "legacy-migration" &&
+    !(document.ack === null || validExactAck(document.ack))
+  ) {
+    throw new Error("outer legacy migration exact ACK schema is invalid");
   }
   if (participant !== null) {
     if (!isRecord(participant) || participant.transactionId !== document.transactionId) {

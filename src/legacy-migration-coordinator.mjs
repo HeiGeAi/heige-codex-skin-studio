@@ -186,7 +186,9 @@ function validateDocument(value, expectedPath = null) {
       ack.revision !== stateParticipant.afterState.revision
     )
   ) throw new Error("legacy migration persistent commit is missing its exact ACK");
-  if (!persistentServiceCommit && ack !== null) {
+  const ackAllowed = ["ready-acked", "commit-decided", "rollback-decided"].includes(value.phase) &&
+    serviceParticipant !== null;
+  if (!ackAllowed && ack !== null) {
     throw new Error("legacy migration ACK is invalid for its phase");
   }
   return { ...value, ack, serviceParticipant, stateParticipant };

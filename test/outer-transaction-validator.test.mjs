@@ -113,3 +113,59 @@ test("outer decision validator rejects unknown top-level authority fields", () =
     /schema/i,
   );
 });
+
+test("outer decision validator accepts exact ACK legacy commit and precommit rollback documents", () => {
+  const transactionId = randomUUID();
+  const base = {
+    schemaVersion: 1,
+    product: "heige-codex-skin-studio",
+    operation: "legacy-migration",
+    transactionId,
+    revision: 3,
+    nonce: randomUUID(),
+    previousNonce: randomUUID(),
+    createdAt: new Date().toISOString(),
+    stateParticipant: {},
+    serviceParticipant: null,
+  };
+  const commit = {
+    ...base,
+    decision: "commit",
+    phase: "commit-decided",
+    ack: {
+      persistenceEnabled: true,
+      revision: 1,
+      processIdentity: { pid: 8301, startedAt: "Fri Jul 17 16:50:00 2026" },
+    },
+  };
+  assert.equal(validateKnownOuterTransactionDocument(commit).decision, "commit");
+  assert.equal(validateKnownOuterTransactionDocument({
+    ...base,
+    decision: "rollback",
+    phase: "rollback-decided",
+    ack: null,
+  }).decision, "rollback");
+});
+
+test("outer decision validator rejects missing or malformed legacy ACK authority fields", () => {
+  const transactionId = randomUUID();
+  const document = {
+    schemaVersion: 1,
+    product: "heige-codex-skin-studio",
+    operation: "legacy-migration",
+    transactionId,
+    revision: 3,
+    nonce: randomUUID(),
+    previousNonce: randomUUID(),
+    decision: "commit",
+    phase: "commit-decided",
+    createdAt: new Date().toISOString(),
+    stateParticipant: {},
+    serviceParticipant: null,
+  };
+  assert.throws(() => validateKnownOuterTransactionDocument(document), /schema/i);
+  assert.throws(() => validateKnownOuterTransactionDocument({
+    ...document,
+    ack: { persistenceEnabled: true, revision: 1 },
+  }), /ACK schema/i);
+});

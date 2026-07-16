@@ -420,6 +420,11 @@ async function outerMigrationJournal(deps, { decision = "undecided" } = {}) {
     decision,
     phase: decision === "commit" ? "commit-decided" : "prepared",
     createdAt: new Date().toISOString(),
+    ack: decision === "commit" ? {
+      persistenceEnabled: true,
+      revision: 1,
+      processIdentity: { pid: 8301, startedAt: "Fri Jul 17 16:50:00 2026" },
+    } : null,
     stateParticipant: null,
     serviceParticipant: null,
   };
@@ -441,6 +446,21 @@ async function outerMigrationJournal(deps, { decision = "undecided" } = {}) {
       };
       await write();
     },
+    async acknowledge() {
+      document = {
+        ...document,
+        previousNonce: document.nonce,
+        nonce: randomUUID(),
+        revision: document.revision + 1,
+        phase: "ready-acked",
+        ack: {
+          persistenceEnabled: true,
+          revision: 1,
+          processIdentity: { pid: 8301, startedAt: "Fri Jul 17 16:50:00 2026" },
+        },
+      };
+      await write();
+    },
     async decide(nextDecision) {
       document = {
         ...document,
@@ -449,6 +469,11 @@ async function outerMigrationJournal(deps, { decision = "undecided" } = {}) {
         revision: document.revision + 1,
         decision: nextDecision,
         phase: `${nextDecision}-decided`,
+        ack: nextDecision === "commit" ? {
+          persistenceEnabled: true,
+          revision: 1,
+          processIdentity: { pid: 8301, startedAt: "Fri Jul 17 16:50:00 2026" },
+        } : document.ack,
       };
       await write();
     },
@@ -1255,7 +1280,7 @@ test("legacy migration removes only a fully attributed old plist", async (t) => 
   assert.deepEqual(firstWritableOpen?.slice(0, 2), [deps.journalPath, "wx"]);
 });
 
-test("deferred legacy migration keeps recovery material until the outer commit", async (t) => {
+test("deferred legacy migration consumes the exact-ACK outer schema before commit", async (t) => {
   const deps = await fixture(t);
   const outer = await outerMigrationJournal(deps);
   const result = await migrateLegacyWatchdog({
@@ -1284,7 +1309,7 @@ test("deferred legacy migration keeps recovery material until the outer commit",
   assert.equal(deps.loaded.has(deps.label), true);
 });
 
-test("deferred legacy migration rollback restores both services exactly", async (t) => {
+test("deferred legacy migration rollback accepts the ACK-bearing outer rollback schema", async (t) => {
   const deps = await fixture(t);
   const outer = await outerMigrationJournal(deps);
   const result = await migrateLegacyWatchdog({
@@ -1294,6 +1319,8 @@ test("deferred legacy migration rollback restores both services exactly", async 
   });
 
   await outer.bind(result.transaction);
+  await outer.acknowledge();
+  await outer.decide("rollback");
   await rollbackLegacyWatchdogMigration(
     JSON.parse(JSON.stringify(result.transaction)),
     deps,
