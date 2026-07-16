@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "wuthering-tide",
+  "name": "鸣潮 · 声骸",
+  "hero": "hero.webp",
+  "colors": {
+    "accent": "#3fd6d0",
+    "secondary": "#9aa8b0",
+    "surface": "#0d1418",
+    "text": "#d8eef0"
+  }
+}

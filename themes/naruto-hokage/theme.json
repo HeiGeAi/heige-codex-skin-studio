@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "naruto-hokage",
+  "name": "火影 · 鸣人",
+  "hero": "hero.webp",
+  "colors": {
+    "accent": "#f2801e",
+    "secondary": "#ffd166",
+    "surface": "#17110b",
+    "text": "#ffe3c2"
+  }
+}

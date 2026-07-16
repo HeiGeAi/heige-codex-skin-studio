@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "genshin-dawn",
+  "name": "原神 · 晨曦",
+  "hero": "hero.webp",
+  "colors": {
+    "accent": "#5b7fd6",
+    "secondary": "#e0aa3e",
+    "surface": "#f2f1fb",
+    "text": "#2c3a6b"
+  }
+}

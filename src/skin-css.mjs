@@ -54,7 +54,7 @@ export function buildSkinCss({ theme, heroDataUrl }) {
   z-index: 20;
   top: 76px;
   left: max(380px, 24vw);
-  content: ${copy(theme.copy?.brand, theme.name)};
+  content: ${copy(theme.copy?.brand)};
   color: var(--heige-accent);
   font: 800 clamp(16px, 2vw, 30px)/1.2 ui-rounded, system-ui;
   text-shadow: 0 2px 10px white;

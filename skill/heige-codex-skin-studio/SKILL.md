@@ -42,11 +42,16 @@ open "$HOME/.codex/heige-codex-skin-studio/scripts/apply.command" --args "主题
 
 图片生成不可用时，直接请用户给一张本地图片，不要要求额外 API Key。
 
-## 默认初音未来预设
+## 内置预设
+
+默认预设是高精度定制的 `miku-488137`，另有 8 个轻量预设（配色 + 背景底图）：
+`genshin-dawn`、`genshin-night`、`wuthering-tide`、`wuthering-echo`、`naruto-hokage`、`naruto-sasuke`、`deepspace-dawn`、`deepspace-star`。
 
 ```bash
 open "$HOME/.codex/heige-codex-skin-studio/scripts/apply.command" --args "miku-488137"
 ```
+
+应用任意一个后，其余预设都在右上角 🎨 菜单里一键切换。
 
 ## 界面内切换菜单
 

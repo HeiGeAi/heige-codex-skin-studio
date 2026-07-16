@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "genshin-night",
+  "name": "原神 · 星夜",
+  "hero": "hero.webp",
+  "colors": {
+    "accent": "#e0b458",
+    "secondary": "#7a86d8",
+    "surface": "#171a2e",
+    "text": "#f0e6c8"
+  }
+}

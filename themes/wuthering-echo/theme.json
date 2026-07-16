@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "wuthering-echo",
+  "name": "鸣潮 · 共鸣",
+  "hero": "hero.webp",
+  "colors": {
+    "accent": "#56e0d8",
+    "secondary": "#a98fe8",
+    "surface": "#16121f",
+    "text": "#e4def2"
+  }
+}
