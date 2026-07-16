@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash, randomUUID } from "node:crypto";
 import * as fsPromises from "node:fs/promises";
 import { mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -77,10 +78,12 @@ async function fixture(t, overrides = {}) {
   const launchAgentsDir = join(home, "Library", "LaunchAgents");
   const stateDir = join(home, "Library", "Application Support", "HeiGeCodexSkinStudio");
   const stableInstallRoot = join(home, ".codex", "heige-codex-skin-studio");
+  const controllerLabel = overrides.label ?? `${CONTROLLER_LABEL}.test.${randomUUID()}`;
+  const oldLabel = overrides.oldLabel ?? `${LEGACY_LABEL}.test.${randomUUID()}`;
   const controllerPath = join(stableInstallRoot, "src", "cli.mjs");
   const nodePath = join(stableInstallRoot, "runtime", "node");
-  const oldPlistPath = join(launchAgentsDir, `${LEGACY_LABEL}.plist`);
-  const controllerPlistPath = join(launchAgentsDir, `${CONTROLLER_LABEL}.plist`);
+  const oldPlistPath = join(launchAgentsDir, `${oldLabel}.plist`);
+  const controllerPlistPath = join(launchAgentsDir, `${controllerLabel}.plist`);
   const journalPath = join(stateDir, "launch-agent-migration.json");
 
   await fsPromises.mkdir(join(stableInstallRoot, "scripts", "lib"), { recursive: true });
@@ -89,19 +92,23 @@ async function fixture(t, overrides = {}) {
   await fsPromises.mkdir(launchAgentsDir, { recursive: true });
   await writeFile(join(stableInstallRoot, "scripts", "lib", "skin-watchdog.zsh"), "#!/bin/zsh\n");
   await writeFile(controllerPath, "// controller\n");
-  await writeFile(nodePath, "node\n");
+  await writeFile(nodePath, "#!/bin/sh\n", { mode: overrides.nodeMode ?? 0o755 });
+  await fsPromises.chmod(nodePath, overrides.nodeMode ?? 0o755);
 
-  const oldPlist = overrides.oldPlist ?? legacyPlistObject({
+  const oldPlist = overrides.oldPlist ?? overrides.oldPlistFactory?.({ oldLabel }) ?? legacyPlistObject({
     root: stableInstallRoot,
+    label: oldLabel,
     environment: overrides.oldEnvironment,
   });
   const originalPlistBytes = overrides.originalPlistBytes ?? legacyPlistBytes(oldPlist);
   await writeFile(oldPlistPath, originalPlistBytes, { mode: 0o640 });
   await fsPromises.chmod(oldPlistPath, 0o640);
 
-  const loaded = new Set(overrides.oldLoaded === false ? [] : [LEGACY_LABEL]);
+  const loaded = new Set(overrides.oldLoaded === false ? [] : [oldLabel]);
   const commands = [];
   const touchedPaths = [];
+  const chmodPaths = [];
+  const openCalls = [];
   const deletedPaths = [];
   const parsedByPath = new Map([[oldPlistPath, oldPlist]]);
   let controllerBootstrapFailures = overrides.controllerBootstrapFailures ?? 0;
@@ -110,6 +117,7 @@ async function fixture(t, overrides = {}) {
     ...fsPromises,
     async chmod(path, ...args) {
       touchedPaths.push(String(path));
+      chmodPaths.push(String(path));
       return fsPromises.chmod(path, ...args);
     },
     async lstat(path, ...args) {
@@ -122,6 +130,7 @@ async function fixture(t, overrides = {}) {
     },
     async open(path, ...args) {
       touchedPaths.push(String(path));
+      openCalls.push([String(path), ...args]);
       return fsPromises.open(path, ...args);
     },
     async readFile(path, ...args) {
@@ -169,27 +178,38 @@ async function fixture(t, overrides = {}) {
 
   async function execFile(file, args) {
     commands.push([file, ...args]);
+    if (file === nodePath && args.length === 1 && args[0] === "--version") {
+      return { stdout: `${overrides.nodeVersion ?? "v22.17.0"}\n`, stderr: "" };
+    }
     if (file === "/usr/bin/plutil" && args[0] === "-lint") {
       if (overrides.lintFailure) throw new Error("lint failed");
+      if (overrides.swapStagedAfterLint) {
+        await writeFile(args.at(-1), "foreign staged plist\n");
+      }
       return { stdout: `${args.at(-1)}: OK\n`, stderr: "" };
     }
     if (file !== "/bin/launchctl") throw new Error(`unexpected command: ${file}`);
     if (args[0] === "print") {
       const label = args[1].split("/").at(-1);
       if (loaded.has(label)) return { stdout: `service = ${label}\n`, stderr: "" };
-      const error = new Error(`Could not find service ${label}`);
+      if (overrides.printError) throw overrides.printError({ label, target: args[1] });
+      const error = new Error(
+        `Command failed: launchctl print ${args[1]}\n` +
+        `Bad request.\nCould not find service "${label}" in domain for user gui: ${UID}`,
+      );
       error.code = 113;
+      error.stderr = `Bad request.\nCould not find service "${label}" in domain for user gui: ${UID}\n`;
       throw error;
     }
     if (args[0] === "bootstrap") {
       const path = args[2];
       const label = path === oldPlistPath
-        ? LEGACY_LABEL
+        ? oldLabel
         : renderedLabel(await readFile(path, "utf8"));
-      if (overrides.failOldBootstrap && label === LEGACY_LABEL) {
+      if (overrides.failOldBootstrap && label === oldLabel) {
         throw new Error("old bootstrap failed");
       }
-      if (label === CONTROLLER_LABEL && controllerBootstrapFailures > 0) {
+      if (label === controllerLabel && controllerBootstrapFailures > 0) {
         controllerBootstrapFailures -= 1;
         throw new Error("controller bootstrap failed");
       }
@@ -212,12 +232,13 @@ async function fixture(t, overrides = {}) {
     legacyRoots: [stableInstallRoot],
     controllerPath,
     nodePath,
-    label: CONTROLLER_LABEL,
-    oldLabel: LEGACY_LABEL,
+    label: controllerLabel,
+    oldLabel,
     oldPlistPath,
     controllerPlistPath,
     journalPath,
     processUid: UID,
+    testMode: true,
     fs: trackingFs,
     execFile,
     readPlist,
@@ -225,6 +246,8 @@ async function fixture(t, overrides = {}) {
     commands,
     loaded,
     touchedPaths,
+    chmodPaths,
+    openCalls,
     deletedPaths,
     faultAt: overrides.faultAt,
     rollbackFaultAt: overrides.rollbackFaultAt,
@@ -239,6 +262,10 @@ test("test mode refuses both production labels", async (t) => {
       /production label/i,
     );
   }
+  await assert.rejects(
+    inspectLaunchAgent({ ...deps, label: CONTROLLER_LABEL, testMode: true }),
+    /production label/i,
+  );
 });
 
 test("test mode accepts only a random isolated controller label", async (t) => {
@@ -247,6 +274,15 @@ test("test mode accepts only a random isolated controller label", async (t) => {
     registerControllerAgent({ ...deps, label: `${CONTROLLER_LABEL}.test.fixed`, testMode: true }),
     /random UUID/i,
   );
+});
+
+test("test-mode migration refuses to address the production legacy label", async (t) => {
+  const deps = await fixture(t);
+  await assert.rejects(
+    migrateLegacyWatchdog({ ...deps, oldLabel: LEGACY_LABEL }),
+    /test mode requires a random UUID legacy label/i,
+  );
+  assert.equal(deps.commands.some((command) => command[0] === "/bin/launchctl"), false);
 });
 
 test("controller plist is escaped and encodes a failure-only background job", () => {
@@ -284,36 +320,103 @@ test("controller plist rejects relative executable and log paths", () => {
   );
 });
 
-test("production registration cannot replace the stable controller entrypoint", async (t) => {
-  const deps = await fixture(t);
-  deps.loaded.clear();
+test("production registration cannot replace the stable controller entrypoint", async () => {
   await assert.rejects(
     registerControllerAgent({
-      ...deps,
       programArguments: ["/bin/sh", "/tmp/hostile-script"],
     }),
     /stable controller entrypoint/i,
   );
-  assert.equal(await pathExists(deps.controllerPlistPath), false);
 });
 
-test("production registration cannot redirect canonical plist or state locations", async (t) => {
-  const deps = await fixture(t);
-  deps.loaded.clear();
+test("production mode fixes homedir uid and platform dependencies to the current process", async () => {
   await assert.rejects(
     registerControllerAgent({
-      ...deps,
-      launchAgentsDir: join(deps.home, "redirected-agents"),
+      home: "/tmp/redirected-home",
+      nodePath: "/bin/sh",
+      controllerPath: "/tmp/controller.mjs",
     }),
-    /canonical production locations/i,
+    /production platform context cannot be overridden/i,
   );
   await assert.rejects(
     registerControllerAgent({
-      ...deps,
-      stateDir: join(deps.home, "redirected-state"),
+      processUid: 0,
+      nodePath: "/bin/sh",
+      controllerPath: "/tmp/controller.mjs",
     }),
-    /canonical production locations/i,
+    /production platform context cannot be overridden/i,
   );
+  await assert.rejects(
+    registerControllerAgent({
+      fs: fsPromises,
+      execFile: async () => ({ stdout: "", stderr: "" }),
+      nodePath: "/bin/sh",
+      controllerPath: "/tmp/controller.mjs",
+    }),
+    /production platform context cannot be overridden/i,
+  );
+});
+
+test("production mode requires explicit stable node and controller paths", async () => {
+  await assert.rejects(
+    registerControllerAgent(),
+    /explicit trusted nodePath and controllerPath/i,
+  );
+});
+
+test("runtime validation requires Node 22 plus regular canonical executable files", async (t) => {
+  await t.test("old Node", async (t) => {
+    const deps = await fixture(t, { nodeVersion: "v21.7.3" });
+    deps.loaded.clear();
+    await assert.rejects(registerControllerAgent(deps), /Node 22 or newer/i);
+    assert.equal(await pathExists(deps.controllerPlistPath), false);
+  });
+
+  await t.test("non-executable Node", async (t) => {
+    const deps = await fixture(t, { nodeMode: 0o644 });
+    deps.loaded.clear();
+    await assert.rejects(registerControllerAgent(deps), /regular executable/i);
+    assert.equal(await pathExists(deps.controllerPlistPath), false);
+  });
+
+  await t.test("controller symlink escape", async (t) => {
+    const deps = await fixture(t);
+    deps.loaded.clear();
+    const outside = join(deps.home, "outside-controller.mjs");
+    await writeFile(outside, "// foreign controller\n");
+    await rm(deps.controllerPath);
+    await symlink(outside, deps.controllerPath);
+    await assert.rejects(registerControllerAgent(deps), /stable controller entrypoint/i);
+    assert.equal(await pathExists(deps.controllerPlistPath), false);
+  });
+});
+
+test("launchctl not-found detection requires matching code target and native semantics", async (t) => {
+  for (const [name, printError] of [
+    ["permission denial", ({ target }) => Object.assign(
+      new Error(`Permission denied while printing ${target}`),
+      { code: 113, stderr: "Operation not permitted\n" },
+    )],
+    ["wrong label", () => Object.assign(
+      new Error("Could not find service \"example.foreign\" in domain for user gui: 501"),
+      { code: 113, stderr: "Could not find service \"example.foreign\" in domain for user gui: 501\n" },
+    )],
+    ["wrong domain", ({ label }) => Object.assign(
+      new Error(`Could not find service \"${label}\" in domain for user gui: 502`),
+      { code: 113, stderr: `Could not find service \"${label}\" in domain for user gui: 502\n` },
+    )],
+    ["semantic match with wrong code", ({ label }) => Object.assign(
+      new Error(`Could not find service \"${label}\" in domain for user gui: 501`),
+      { code: 77, stderr: `Could not find service \"${label}\" in domain for user gui: 501\n` },
+    )],
+  ]) {
+    await t.test(name, async (t) => {
+      const deps = await fixture(t, { printError });
+      deps.loaded.clear();
+      await assert.rejects(registerControllerAgent(deps), (error) => error.code !== undefined);
+      assert.equal(await pathExists(deps.controllerPlistPath), false);
+    });
+  }
 });
 
 test("register writes private files, lints, bootstraps and verifies gui uid state", async (t) => {
@@ -323,16 +426,16 @@ test("register writes private files, lints, bootstraps and verifies gui uid stat
   const result = await registerControllerAgent(deps);
 
   assert.deepEqual(result, {
-    label: CONTROLLER_LABEL,
+    label: deps.label,
     plistPath: deps.controllerPlistPath,
     loaded: true,
   });
   assert.equal((await stat(deps.stateDir)).mode & 0o777, 0o700);
   assert.equal((await stat(deps.controllerPlistPath)).mode & 0o777, 0o600);
   assert.deepEqual(deps.commands.filter(([file]) => file === "/bin/launchctl"), [
-    ["/bin/launchctl", "print", `gui/${UID}/${CONTROLLER_LABEL}`],
+    ["/bin/launchctl", "print", `gui/${UID}/${deps.label}`],
     ["/bin/launchctl", "bootstrap", `gui/${UID}`, deps.controllerPlistPath],
-    ["/bin/launchctl", "print", `gui/${UID}/${CONTROLLER_LABEL}`],
+    ["/bin/launchctl", "print", `gui/${UID}/${deps.label}`],
   ]);
   const lintIndex = deps.commands.findIndex((command) =>
     command[0] === "/usr/bin/plutil" && command[1] === "-lint"
@@ -345,50 +448,62 @@ test("register writes private files, lints, bootstraps and verifies gui uid stat
   ));
   assert.equal(lintIndex < bootstrapIndex, true, "lint must finish before publish/bootstrap");
   assert.equal(await pathExists(deps.commands[lintIndex][2]), false);
+  assert.equal(deps.chmodPaths.includes(deps.controllerPlistPath), false);
 });
 
 test("register leaves an existing loaded controller byte-for-byte intact when staged lint fails", async (t) => {
   const deps = await fixture(t, { lintFailure: true });
   const previous = Buffer.from(renderControllerPlist({
-    label: CONTROLLER_LABEL,
+    label: deps.label,
     programArguments: [deps.nodePath, deps.controllerPath, "controller"],
     stateDir: deps.stateDir,
   }));
   await writeFile(deps.controllerPlistPath, previous, { mode: 0o640 });
   await fsPromises.chmod(deps.controllerPlistPath, 0o640);
-  deps.loaded.add(CONTROLLER_LABEL);
+  deps.loaded.add(deps.label);
 
   await assert.rejects(registerControllerAgent(deps), /lint failed/);
   assert.deepEqual(await readFile(deps.controllerPlistPath), previous);
   assert.equal((await stat(deps.controllerPlistPath)).mode & 0o777, 0o640);
-  assert.equal(deps.loaded.has(CONTROLLER_LABEL), true);
+  assert.equal(deps.loaded.has(deps.label), true);
+});
+
+test("register refuses a staged plist swapped during lint", async (t) => {
+  const deps = await fixture(t, { swapStagedAfterLint: true });
+  deps.loaded.clear();
+  await assert.rejects(
+    registerControllerAgent(deps),
+    (error) => error.code === "FILE_CHANGED_DURING_VALIDATION",
+  );
+  assert.equal(await pathExists(deps.controllerPlistPath), false);
+  assert.equal(deps.commands.some((command) => command[1] === "bootstrap"), false);
 });
 
 test("register restores an existing loaded controller when replacement bootstrap fails", async (t) => {
   const deps = await fixture(t, { controllerBootstrapFailures: 1 });
   const previous = Buffer.from(renderControllerPlist({
-    label: CONTROLLER_LABEL,
+    label: deps.label,
     programArguments: [deps.nodePath, deps.controllerPath, "controller"],
     stateDir: deps.stateDir,
   }));
   await writeFile(deps.controllerPlistPath, previous, { mode: 0o640 });
   await fsPromises.chmod(deps.controllerPlistPath, 0o640);
-  deps.loaded.add(CONTROLLER_LABEL);
+  deps.loaded.add(deps.label);
 
   await assert.rejects(registerControllerAgent(deps), /controller bootstrap failed/);
   assert.deepEqual(await readFile(deps.controllerPlistPath), previous);
   assert.equal((await stat(deps.controllerPlistPath)).mode & 0o777, 0o640);
-  assert.equal(deps.loaded.has(CONTROLLER_LABEL), true);
+  assert.equal(deps.loaded.has(deps.label), true);
 });
 
 test("register fails closed when a loaded controller has no restorable canonical plist", async (t) => {
   const deps = await fixture(t);
-  deps.loaded.add(CONTROLLER_LABEL);
+  deps.loaded.add(deps.label);
   await assert.rejects(
     registerControllerAgent(deps),
     (error) => error.code === "CONTROLLER_PRESTATE_INVALID",
   );
-  assert.equal(deps.loaded.has(CONTROLLER_LABEL), true);
+  assert.equal(deps.loaded.has(deps.label), true);
   assert.equal(await pathExists(deps.controllerPlistPath), false);
 });
 
@@ -407,20 +522,45 @@ test("register refuses to overwrite a foreign plist at the canonical controller 
   assert.deepEqual(await readFile(deps.controllerPlistPath), foreign);
 });
 
+test("register does not roll back over a plist swapped after attribution", async (t) => {
+  const deps = await fixture(t);
+  const previous = Buffer.from(renderControllerPlist({
+    label: deps.label,
+    programArguments: [deps.nodePath, deps.controllerPath, "controller"],
+    stateDir: deps.stateDir,
+  }));
+  const foreign = Buffer.from("swapped foreign plist\n");
+  await writeFile(deps.controllerPlistPath, previous, { mode: 0o600 });
+  deps.loaded.add(deps.label);
+  const readPlist = async (path) => {
+    const parsed = await deps.readPlist(path);
+    if (path === deps.controllerPlistPath) await writeFile(path, foreign);
+    return parsed;
+  };
+
+  await assert.rejects(
+    registerControllerAgent({ ...deps, readPlist }),
+    (error) => error.code === "FILE_CHANGED_DURING_VALIDATION",
+  );
+  assert.deepEqual(await readFile(deps.controllerPlistPath), foreign);
+  assert.equal(deps.loaded.has(deps.label), true);
+  assert.equal(deps.commands.some((command) => command[1] === "bootout"), false);
+});
+
 test("inspect reports plist identity and verified launchctl state", async (t) => {
   const deps = await fixture(t);
   deps.loaded.clear();
   await registerControllerAgent(deps);
 
   const inspection = await inspectLaunchAgent(deps);
-  assert.equal(inspection.label, CONTROLLER_LABEL);
+  assert.equal(inspection.label, deps.label);
   assert.equal(inspection.plistPath, deps.controllerPlistPath);
   assert.equal(inspection.plistExists, true);
-  assert.equal(inspection.plistLabel, CONTROLLER_LABEL);
+  assert.equal(inspection.plistLabel, deps.label);
   assert.equal(inspection.loaded, true);
 });
 
-test("the production plist reader delegates parsing to plutil JSON conversion", async (t) => {
+test("the plist reader parses immutable snapshot bytes through plutil", async (t) => {
   const deps = await fixture(t);
   deps.loaded.clear();
   await registerControllerAgent(deps);
@@ -428,7 +568,7 @@ test("the production plist reader delegates parsing to plutil JSON conversion", 
   const execFile = async (file, args) => {
     if (file === "/usr/bin/plutil" && args[0] === "-convert") {
       deps.commands.push([file, ...args]);
-      return { stdout: JSON.stringify({ Label: CONTROLLER_LABEL }), stderr: "" };
+      return { stdout: JSON.stringify({ Label: deps.label }), stderr: "" };
     }
     return deps.execFile(file, args);
   };
@@ -438,15 +578,38 @@ test("the production plist reader delegates parsing to plutil JSON conversion", 
     execFile,
     readPlist: undefined,
   });
-  assert.equal(inspection.plistLabel, CONTROLLER_LABEL);
-  assert.deepEqual(deps.commands[0], [
+  assert.equal(inspection.plistLabel, deps.label);
+  assert.deepEqual(deps.commands[0].slice(0, 5), [
     "/usr/bin/plutil",
     "-convert",
     "json",
     "-o",
     "-",
-    deps.controllerPlistPath,
   ]);
+  assert.match(
+    deps.commands[0][5],
+    new RegExp(`^${deps.controllerPlistPath.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.validated\\.`),
+  );
+  assert.notEqual(deps.commands[0][5], deps.controllerPlistPath);
+  assert.equal(await pathExists(deps.commands[0][5]), false);
+});
+
+test("the plist reader rejects its immutable parse copy being swapped", async (t) => {
+  const deps = await fixture(t);
+  deps.loaded.clear();
+  await registerControllerAgent(deps);
+  const execFile = async (file, args) => {
+    if (file === "/usr/bin/plutil" && args[0] === "-convert") {
+      await writeFile(args.at(-1), "swapped parse copy\n");
+      return { stdout: JSON.stringify({ Label: deps.label }), stderr: "" };
+    }
+    return deps.execFile(file, args);
+  };
+
+  await assert.rejects(
+    inspectLaunchAgent({ ...deps, execFile, readPlist: undefined }),
+    (error) => error.code === "FILE_CHANGED_DURING_VALIDATION",
+  );
 });
 
 test("unregister verifies absence and deletes only its matching generated plist", async (t) => {
@@ -457,16 +620,16 @@ test("unregister verifies absence and deletes only its matching generated plist"
 
   const result = await unregisterControllerAgent(deps);
   assert.deepEqual(result, {
-    label: CONTROLLER_LABEL,
+    label: deps.label,
     plistPath: deps.controllerPlistPath,
     loaded: false,
     removed: true,
   });
   assert.equal(await pathExists(deps.controllerPlistPath), false);
   assert.deepEqual(deps.commands.filter(([file]) => file === "/bin/launchctl"), [
-    ["/bin/launchctl", "print", `gui/${UID}/${CONTROLLER_LABEL}`],
-    ["/bin/launchctl", "bootout", `gui/${UID}/${CONTROLLER_LABEL}`],
-    ["/bin/launchctl", "print", `gui/${UID}/${CONTROLLER_LABEL}`],
+    ["/bin/launchctl", "print", `gui/${UID}/${deps.label}`],
+    ["/bin/launchctl", "bootout", `gui/${UID}/${deps.label}`],
+    ["/bin/launchctl", "print", `gui/${UID}/${deps.label}`],
   ]);
 });
 
@@ -481,9 +644,65 @@ test("unregister refuses to delete a plist owned by another label", async (t) =>
 
   await assert.rejects(
     unregisterControllerAgent({ ...deps, readPlist }),
-    /does not own/i,
+    (error) => error.code === "CONTROLLER_PRESTATE_INVALID",
   );
   assert.equal(await pathExists(deps.controllerPlistPath), true);
+});
+
+test("unregister verifies the complete generated tuple before bootout or deletion", async (t) => {
+  const deps = await fixture(t);
+  const bytes = Buffer.from("same label but foreign tuple\n");
+  await writeFile(deps.controllerPlistPath, bytes, { mode: 0o600 });
+  deps.loaded.add(deps.label);
+  const readPlist = async (path) => path === deps.controllerPlistPath
+    ? {
+      Label: deps.label,
+      ProgramArguments: ["/bin/sh", "/tmp/foreign"],
+      RunAtLoad: true,
+      KeepAlive: { SuccessfulExit: false },
+      ProcessType: "Background",
+      StandardOutPath: join(deps.stateDir, "controller.log"),
+      StandardErrorPath: join(deps.stateDir, "controller.error.log"),
+    }
+    : deps.readPlist(path);
+
+  await assert.rejects(
+    unregisterControllerAgent({ ...deps, readPlist }),
+    (error) => error.code === "CONTROLLER_PRESTATE_INVALID",
+  );
+  assert.equal(deps.loaded.has(deps.label), true);
+  assert.deepEqual(await readFile(deps.controllerPlistPath), bytes);
+  assert.equal(deps.commands.some((command) => command[1] === "bootout"), false);
+});
+
+test("unregister fails closed when the label is loaded without a trusted canonical plist", async (t) => {
+  const deps = await fixture(t);
+  deps.loaded.add(deps.label);
+  await assert.rejects(
+    unregisterControllerAgent(deps),
+    (error) => error.code === "CONTROLLER_PRESTATE_INVALID",
+  );
+  assert.equal(deps.loaded.has(deps.label), true);
+  assert.equal(deps.commands.some((command) => command[1] === "bootout"), false);
+});
+
+test("unregister detects a canonical plist swap after attribution", async (t) => {
+  const deps = await fixture(t);
+  deps.loaded.clear();
+  await registerControllerAgent(deps);
+  const foreign = Buffer.from("swapped foreign plist\n");
+  const readPlist = async (path) => {
+    const parsed = await deps.readPlist(path);
+    if (path === deps.controllerPlistPath) await writeFile(path, foreign);
+    return parsed;
+  };
+
+  await assert.rejects(
+    unregisterControllerAgent({ ...deps, readPlist }),
+    (error) => error.code === "FILE_CHANGED_DURING_VALIDATION",
+  );
+  assert.equal(deps.loaded.has(deps.label), true);
+  assert.deepEqual(await readFile(deps.controllerPlistPath), foreign);
 });
 
 test("legacy migration removes only a fully attributed old plist", async (t) => {
@@ -495,8 +714,8 @@ test("legacy migration removes only a fully attributed old plist", async (t) => 
     legacyRemoved: true,
     controllerRegistered: true,
   });
-  assert.equal(deps.loaded.has(LEGACY_LABEL), false);
-  assert.equal(deps.loaded.has(CONTROLLER_LABEL), true);
+  assert.equal(deps.loaded.has(deps.oldLabel), false);
+  assert.equal(deps.loaded.has(deps.label), true);
   assert.equal(await pathExists(deps.oldPlistPath), false);
   assert.equal(await pathExists(deps.controllerPlistPath), true);
   assert.equal(await pathExists(deps.journalPath), false);
@@ -504,6 +723,50 @@ test("legacy migration removes only a fully attributed old plist", async (t) => 
     deps.deletedPaths.filter((path) => path === deps.oldPlistPath),
     [deps.oldPlistPath],
   );
+  const firstWritableOpen = deps.openCalls.find(([, flags]) => /[wax+]/.test(String(flags)));
+  assert.deepEqual(firstWritableOpen?.slice(0, 2), [deps.journalPath, "wx"]);
+});
+
+test("migration fails closed when the legacy label is loaded without its canonical plist", async (t) => {
+  const deps = await fixture(t);
+  await rm(deps.oldPlistPath);
+  await assert.rejects(
+    migrateLegacyWatchdog(deps),
+    (error) => error.code === "LEGACY_PRESTATE_INVALID",
+  );
+  assert.equal(deps.loaded.has(deps.oldLabel), true);
+  assert.equal(deps.loaded.has(deps.label), false);
+  assert.equal(deps.commands.some((command) => command[1] === "bootout"), false);
+});
+
+test("migration creates its recovery journal exclusively and never overwrites an unfinished one", async (t) => {
+  const deps = await fixture(t);
+  await fsPromises.mkdir(deps.stateDir, { recursive: true });
+  const unfinished = Buffer.from('{"schemaVersion":2,"phase":"rollback-failed"}\n');
+  await writeFile(deps.journalPath, unfinished, { mode: 0o600 });
+  deps.commands.length = 0;
+
+  await assert.rejects(
+    migrateLegacyWatchdog(deps),
+    (error) => error.code === "MIGRATION_INCOMPLETE",
+  );
+  assert.deepEqual(await readFile(deps.journalPath), unfinished);
+  assert.deepEqual(await readFile(deps.oldPlistPath), deps.originalPlistBytes);
+  assert.equal(deps.loaded.has(deps.oldLabel), true);
+  assert.equal(deps.loaded.has(deps.label), false);
+  assert.equal(deps.commands.some((command) => ["bootstrap", "bootout"].includes(command[1])), false);
+});
+
+test("migration refuses an oversized recovery snapshot before creating a journal", async (t) => {
+  const oversized = Buffer.alloc(256 * 1024 + 1, 0x61);
+  const deps = await fixture(t, { originalPlistBytes: oversized });
+  deps.commands.length = 0;
+  await assert.rejects(
+    migrateLegacyWatchdog(deps),
+    (error) => error.code === "PLIST_BACKUP_TOO_LARGE",
+  );
+  assert.equal(await pathExists(deps.journalPath), false);
+  assert.equal(deps.commands.some((command) => ["bootstrap", "bootout"].includes(command[1])), false);
 });
 
 test("polluted legacy state and log paths are never followed or deleted", async (t) => {
@@ -520,13 +783,19 @@ test("polluted legacy state and log paths are never followed or deleted", async 
 
 test("temporary or unapproved watchdog executable paths fail attribution closed", async (t) => {
   const temporary = await fixture(t, {
-    oldPlist: legacyPlistObject({ root: "/tmp/hostile-root" }),
+    oldPlistFactory: ({ oldLabel }) => legacyPlistObject({
+      root: "/tmp/hostile-root",
+      label: oldLabel,
+    }),
   });
   await assert.rejects(migrateLegacyWatchdog(temporary), /legacy attribution/i);
   assert.equal(await pathExists(temporary.oldPlistPath), true);
 
   const unknown = await fixture(t, {
-    oldPlist: legacyPlistObject({ root: "/Users/unknown/repository" }),
+    oldPlistFactory: ({ oldLabel }) => legacyPlistObject({
+      root: "/Users/unknown/repository",
+      label: oldLabel,
+    }),
   });
   await assert.rejects(migrateLegacyWatchdog(unknown), /legacy attribution/i);
   assert.equal(await pathExists(unknown.oldPlistPath), true);
@@ -540,7 +809,7 @@ test("legacy attribution rejects canonical plist and executable symlink escapes"
     await rm(deps.oldPlistPath);
     await symlink(backing, deps.oldPlistPath);
     await assert.rejects(migrateLegacyWatchdog(deps), /non-regular file|attribution/i);
-    assert.equal(deps.loaded.has(CONTROLLER_LABEL), false);
+    assert.equal(deps.loaded.has(deps.label), false);
   });
 
   await t.test("watchdog file symlink", async (t) => {
@@ -551,7 +820,7 @@ test("legacy attribution rejects canonical plist and executable symlink escapes"
     await rm(script);
     await symlink(outside, script);
     await assert.rejects(migrateLegacyWatchdog(deps), /legacy attribution/i);
-    assert.equal(deps.loaded.has(CONTROLLER_LABEL), false);
+    assert.equal(deps.loaded.has(deps.label), false);
   });
 
   await t.test("watchdog ancestor symlink", async (t) => {
@@ -563,7 +832,7 @@ test("legacy attribution rejects canonical plist and executable symlink escapes"
     await rm(scripts, { recursive: true });
     await symlink(outside, scripts);
     await assert.rejects(migrateLegacyWatchdog(deps), /legacy attribution/i);
-    assert.equal(deps.loaded.has(CONTROLLER_LABEL), false);
+    assert.equal(deps.loaded.has(deps.label), false);
   });
 });
 
@@ -595,8 +864,8 @@ for (const [field, value] of [
       migrateLegacyWatchdog({ ...deps, readPlist }),
       /legacy attribution/i,
     );
-    assert.equal(deps.loaded.has(LEGACY_LABEL), true);
-    assert.equal(deps.loaded.has(CONTROLLER_LABEL), false);
+    assert.equal(deps.loaded.has(deps.oldLabel), true);
+    assert.equal(deps.loaded.has(deps.label), false);
     assert.deepEqual(await readFile(deps.oldPlistPath), deps.originalPlistBytes);
   });
 }
@@ -621,8 +890,8 @@ for (const faultAt of MIGRATION_BOUNDARIES) {
       (error) => error.code === "INJECTED_MIGRATION_FAILURE" && error.phase === faultAt,
     );
 
-    assert.equal(deps.loaded.has(LEGACY_LABEL), true);
-    assert.equal(deps.loaded.has(CONTROLLER_LABEL), false);
+    assert.equal(deps.loaded.has(deps.oldLabel), true);
+    assert.equal(deps.loaded.has(deps.label), false);
     assert.deepEqual(await readFile(deps.oldPlistPath), deps.originalPlistBytes);
     assert.equal((await stat(deps.oldPlistPath)).mode & 0o777, 0o640);
     assert.equal(await pathExists(deps.controllerPlistPath), false);
@@ -633,27 +902,27 @@ for (const faultAt of MIGRATION_BOUNDARIES) {
 test("rollback restores an unloaded legacy job without loading it", async (t) => {
   const deps = await fixture(t, { faultAt: "after-old-remove", oldLoaded: false });
   await assert.rejects(migrateLegacyWatchdog(deps), /INJECTED_MIGRATION_FAILURE/);
-  assert.equal(deps.loaded.has(LEGACY_LABEL), false);
+  assert.equal(deps.loaded.has(deps.oldLabel), false);
   assert.deepEqual(await readFile(deps.oldPlistPath), deps.originalPlistBytes);
 });
 
 test("migration rollback restores an existing controller plist, mode, and loaded state", async (t) => {
   const deps = await fixture(t, { faultAt: "after-old-bootout" });
   const previous = Buffer.from(renderControllerPlist({
-    label: CONTROLLER_LABEL,
+    label: deps.label,
     programArguments: [deps.nodePath, deps.controllerPath, "controller"],
     stateDir: deps.stateDir,
   }));
   await writeFile(deps.controllerPlistPath, previous, { mode: 0o640 });
   await fsPromises.chmod(deps.controllerPlistPath, 0o640);
-  deps.loaded.add(CONTROLLER_LABEL);
+  deps.loaded.add(deps.label);
 
   await assert.rejects(migrateLegacyWatchdog(deps), /INJECTED_MIGRATION_FAILURE/);
   assert.deepEqual(await readFile(deps.controllerPlistPath), previous);
   assert.equal((await stat(deps.controllerPlistPath)).mode & 0o777, 0o640);
-  assert.equal(deps.loaded.has(CONTROLLER_LABEL), true);
+  assert.equal(deps.loaded.has(deps.label), true);
   assert.deepEqual(await readFile(deps.oldPlistPath), deps.originalPlistBytes);
-  assert.equal(deps.loaded.has(LEGACY_LABEL), true);
+  assert.equal(deps.loaded.has(deps.oldLabel), true);
 });
 
 test("migration refuses an existing controller plist whose fixed tuple is foreign", async (t) => {
@@ -662,7 +931,7 @@ test("migration refuses an existing controller plist whose fixed tuple is foreig
   await writeFile(deps.controllerPlistPath, previous, { mode: 0o600 });
   const readPlist = async (path) => path === deps.controllerPlistPath
     ? {
-      Label: CONTROLLER_LABEL,
+      Label: deps.label,
       ProgramArguments: ["/bin/sh", "/tmp/foreign"],
       RunAtLoad: true,
       KeepAlive: { SuccessfulExit: false },
@@ -675,18 +944,18 @@ test("migration refuses an existing controller plist whose fixed tuple is foreig
     /controller plist attribution failed/i,
   );
   assert.deepEqual(await readFile(deps.controllerPlistPath), previous);
-  assert.equal(deps.loaded.has(LEGACY_LABEL), true);
+  assert.equal(deps.loaded.has(deps.oldLabel), true);
 });
 
 test("the existing-controller bootout boundary is injectable and reversible", async (t) => {
   const deps = await fixture(t, { faultAt: "after-existing-new-bootout" });
   const previous = Buffer.from(renderControllerPlist({
-    label: CONTROLLER_LABEL,
+    label: deps.label,
     programArguments: [deps.nodePath, deps.controllerPath, "controller"],
     stateDir: deps.stateDir,
   }));
   await writeFile(deps.controllerPlistPath, previous, { mode: 0o600 });
-  deps.loaded.add(CONTROLLER_LABEL);
+  deps.loaded.add(deps.label);
 
   await assert.rejects(
     migrateLegacyWatchdog(deps),
@@ -694,9 +963,9 @@ test("the existing-controller bootout boundary is injectable and reversible", as
       error.phase === "after-existing-new-bootout",
   );
   assert.deepEqual(await readFile(deps.controllerPlistPath), previous);
-  assert.equal(deps.loaded.has(CONTROLLER_LABEL), true);
+  assert.equal(deps.loaded.has(deps.label), true);
   assert.deepEqual(await readFile(deps.oldPlistPath), deps.originalPlistBytes);
-  assert.equal(deps.loaded.has(LEGACY_LABEL), true);
+  assert.equal(deps.loaded.has(deps.oldLabel), true);
 });
 
 test("rollback reports primary and rollback failures and retains the journal", async (t) => {
@@ -717,9 +986,51 @@ test("rollback reports primary and rollback failures and retains the journal", a
   );
   assert.equal(await pathExists(deps.journalPath), true);
   const journal = JSON.parse(await readFile(deps.journalPath, "utf8"));
+  assert.equal(journal.schemaVersion, 2);
   assert.equal(journal.phase, "rollback-failed");
   assert.equal(journal.primaryError.code, "INJECTED_MIGRATION_FAILURE");
   assert.equal(journal.rollbackErrors.length > 0, true);
+  assert.equal(journal.oldBackup.path, deps.oldPlistPath);
+  assert.equal(journal.oldBackup.bytesBase64, deps.originalPlistBytes.toString("base64"));
+  assert.equal(
+    journal.oldBackup.sha256,
+    createHash("sha256").update(deps.originalPlistBytes).digest("hex"),
+  );
+  assert.equal(journal.oldBackup.mode, 0o640);
+  assert.equal(journal.oldBackup.loaded, true);
+  assert.equal(journal.newBackup.path, deps.controllerPlistPath);
+  assert.equal(journal.newBackup.existed, false);
+  assert.equal(journal.newBackup.bytesBase64, null);
+  assert.equal(journal.newBackup.sha256, null);
+});
+
+test("recovery journal durably embeds an existing controller pre-state", async (t) => {
+  const deps = await fixture(t, {
+    faultAt: "after-old-bootout",
+    rollbackFaultAt: "before-new-rebootstrap",
+  });
+  const previous = Buffer.from(renderControllerPlist({
+    label: deps.label,
+    programArguments: [deps.nodePath, deps.controllerPath, "controller"],
+    stateDir: deps.stateDir,
+  }));
+  await writeFile(deps.controllerPlistPath, previous, { mode: 0o640 });
+  await fsPromises.chmod(deps.controllerPlistPath, 0o640);
+  deps.loaded.add(deps.label);
+
+  await assert.rejects(
+    migrateLegacyWatchdog(deps),
+    (error) => error.code === "MIGRATION_ROLLBACK_FAILED",
+  );
+  const journal = JSON.parse(await readFile(deps.journalPath, "utf8"));
+  assert.equal(journal.newBackup.existed, true);
+  assert.equal(journal.newBackup.bytesBase64, previous.toString("base64"));
+  assert.equal(
+    journal.newBackup.sha256,
+    createHash("sha256").update(previous).digest("hex"),
+  );
+  assert.equal(journal.newBackup.mode, 0o640);
+  assert.equal(journal.newBackup.loaded, true);
 });
 
 test("unit and integration sources never reuse production labels accidentally", async () => {

@@ -1,5 +1,5 @@
 import { execFile as execFileCallback } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import * as nodeFs from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -11,9 +11,25 @@ export const CONTROLLER_LAUNCH_AGENT_LABEL = "com.heige.codex-skin-controller";
 export const LEGACY_WATCHDOG_LABEL = "com.heige.codex-skin-watchdog";
 
 const TEST_LABEL_PREFIX = `${CONTROLLER_LAUNCH_AGENT_LABEL}.test.`;
+const LEGACY_TEST_LABEL_PREFIX = `${LEGACY_WATCHDOG_LABEL}.test.`;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const LABEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const NOT_FOUND_CODES = new Set([3, 113, "3", "113"]);
+const PLIST_BACKUP_MAX_BYTES = 256 * 1024;
+const PRODUCTION_PLATFORM_OVERRIDE_KEYS = [
+  "home",
+  "launchAgentsDir",
+  "stateDir",
+  "stableInstallRoot",
+  "processUid",
+  "fs",
+  "execFile",
+  "readPlist",
+  "faultAt",
+  "rollbackFaultAt",
+  "journalPath",
+  "oldPlistPath",
+];
 
 function xmlEscape(value) {
   return String(value)
@@ -49,6 +65,22 @@ function assertMutationLabel(label, testMode) {
   }
 }
 
+function assertLegacyMutationLabel(label, testMode) {
+  assertLabel(label);
+  if (!testMode) {
+    if (label !== LEGACY_WATCHDOG_LABEL) {
+      throw new Error(`production legacy label must be ${LEGACY_WATCHDOG_LABEL}`);
+    }
+    return;
+  }
+  const suffix = label.startsWith(LEGACY_TEST_LABEL_PREFIX)
+    ? label.slice(LEGACY_TEST_LABEL_PREFIX.length)
+    : "";
+  if (!UUID_PATTERN.test(suffix)) {
+    throw new Error("test mode requires a random UUID legacy label");
+  }
+}
+
 function assertProductionLocations(options) {
   if (options.testMode === true) return;
   const canonicalLaunchAgentsDir = join(options.home, "Library", "LaunchAgents");
@@ -72,6 +104,19 @@ function assertProductionLocations(options) {
   }
 }
 
+function hasOwn(object, key) {
+  return Object.prototype.hasOwnProperty.call(object, key);
+}
+
+function assertProductionPlatformIsNotInjected(input) {
+  if (input.testMode === true) return;
+  if (PRODUCTION_PLATFORM_OVERRIDE_KEYS.some((key) => hasOwn(input, key))) {
+    const error = new Error("production platform context cannot be overridden");
+    error.code = "PRODUCTION_CONTEXT_OVERRIDE";
+    throw error;
+  }
+}
+
 function assertAbsolutePath(path, name) {
   if (typeof path !== "string" || path.includes("\0") || !isAbsolute(path)) {
     throw new TypeError(`${name} must be an absolute path`);
@@ -88,9 +133,7 @@ function isTemporaryPath(path) {
   return roots.some((root) => isWithin(root, path));
 }
 
-function normalizeProgramArguments(options) {
-  const explicit = options.programArguments;
-  const programArguments = explicit ?? [options.nodePath, options.controllerPath, "controller"];
+function validateProgramArguments(programArguments) {
   if (!Array.isArray(programArguments) || programArguments.length === 0) {
     throw new TypeError("programArguments must be a non-empty array");
   }
@@ -103,37 +146,90 @@ function normalizeProgramArguments(options) {
   if (programArguments[1]?.includes(sep)) {
     assertAbsolutePath(programArguments[1], "ProgramArguments[1]");
   }
-  if (!options.testMode) {
-    assertAbsolutePath(options.stableInstallRoot, "stableInstallRoot");
-    const expected = [options.nodePath, options.controllerPath, "controller"];
-    if (
-      programArguments.length !== expected.length ||
-      programArguments.some((value, index) => value !== expected[index]) ||
-      resolve(options.controllerPath) !== resolve(join(options.stableInstallRoot, "src", "cli.mjs"))
-    ) {
+}
+
+async function resolveStableRuntime(options) {
+  if (!options.runtimePathsExplicit) {
+    throw new Error("production registration requires explicit trusted nodePath and controllerPath");
+  }
+  assertAbsolutePath(options.nodePath, "nodePath");
+  assertAbsolutePath(options.controllerPath, "controllerPath");
+  assertAbsolutePath(options.stableInstallRoot, "stableInstallRoot");
+
+  const expectedController = resolve(join(options.stableInstallRoot, "src", "cli.mjs"));
+  if (resolve(options.controllerPath) !== expectedController) {
+    throw new Error("production LaunchAgent must use the stable controller entrypoint");
+  }
+
+  const rootInfo = await options.fs.lstat(options.stableInstallRoot);
+  if (rootInfo.isSymbolicLink() || !rootInfo.isDirectory()) {
+    throw new Error("stable controller entrypoint root must be a real directory");
+  }
+  const realRoot = await options.fs.realpath(options.stableInstallRoot);
+  if (realRoot !== resolve(options.stableInstallRoot)) {
+    throw new Error("stable controller entrypoint root must be canonical");
+  }
+
+  const controllerInfo = await options.fs.lstat(options.controllerPath);
+  if (controllerInfo.isSymbolicLink() || !controllerInfo.isFile()) {
+    throw new Error("stable controller entrypoint must be a regular file");
+  }
+  const realController = await options.fs.realpath(options.controllerPath);
+  if (realController !== join(realRoot, "src", "cli.mjs")) {
+    throw new Error("production LaunchAgent must use the stable controller entrypoint");
+  }
+
+  const realNode = await options.fs.realpath(options.nodePath);
+  const nodeInfo = await options.fs.lstat(realNode);
+  if (!nodeInfo.isFile() || (nodeInfo.mode & 0o111) === 0) {
+    throw new Error("nodePath must resolve to a regular executable");
+  }
+  if (!options.testMode && isTemporaryPath(realNode)) {
+    throw new Error("nodePath must resolve to a stable non-temporary executable");
+  }
+  const { stdout } = await command(options, realNode, ["--version"]);
+  const version = /^v(\d+)\.(\d+)\.(\d+)\s*$/.exec(String(stdout));
+  if (!version || Number(version[1]) < 22) {
+    throw new Error("controller runtime requires Node 22 or newer");
+  }
+  return { nodePath: realNode, controllerPath: realController };
+}
+
+async function resolveProgramArguments(options) {
+  const explicit = options.programArguments;
+  if (explicit !== undefined) {
+    validateProgramArguments(explicit);
+    if (!options.testMode) {
       throw new Error("production LaunchAgent must use the stable controller entrypoint");
     }
+    return [...explicit];
   }
-  return [...programArguments];
+  const runtime = await resolveStableRuntime(options);
+  return [runtime.nodePath, runtime.controllerPath, "controller"];
 }
 
 function normalizedOptions(options = {}) {
-  const home = options.home ?? homedir();
+  assertProductionPlatformIsNotInjected(options);
+  const testMode = options.testMode === true;
+  const home = testMode ? (options.home ?? homedir()) : homedir();
   const label = options.label ?? CONTROLLER_LAUNCH_AGENT_LABEL;
-  const launchAgentsDir = options.launchAgentsDir ?? join(home, "Library", "LaunchAgents");
-  const stateDir = options.stateDir ?? join(
+  assertMutationLabel(label, testMode);
+  const launchAgentsDir = testMode
+    ? (options.launchAgentsDir ?? join(home, "Library", "LaunchAgents"))
+    : join(home, "Library", "LaunchAgents");
+  const stateDir = testMode ? (options.stateDir ?? join(
     home,
     "Library",
     "Application Support",
     "HeiGeCodexSkinStudio",
-  );
-  const stableInstallRoot = options.stableInstallRoot ?? join(
+  )) : join(home, "Library", "Application Support", "HeiGeCodexSkinStudio");
+  const stableInstallRoot = testMode ? (options.stableInstallRoot ?? join(
     home,
     ".codex",
     "heige-codex-skin-studio",
-  );
-  const controllerPath = options.controllerPath ?? join(stableInstallRoot, "src", "cli.mjs");
-  const nodePath = options.nodePath ?? process.execPath;
+  )) : join(home, ".codex", "heige-codex-skin-studio");
+  const controllerPath = options.controllerPath;
+  const nodePath = options.nodePath;
   assertAbsolutePath(home, "home");
   assertAbsolutePath(launchAgentsDir, "launchAgentsDir");
   assertAbsolutePath(stateDir, "stateDir");
@@ -146,10 +242,13 @@ function normalizedOptions(options = {}) {
     stableInstallRoot,
     controllerPath,
     nodePath,
+    testMode,
+    runtimePathsExplicit: hasOwn(options, "nodePath") && hasOwn(options, "controllerPath"),
     plistPath: join(launchAgentsDir, `${label}.plist`),
-    processUid: options.processUid ?? process.getuid?.(),
-    execFile: options.execFile ?? execFileAsync,
-    fs: options.fs ?? nodeFs,
+    processUid: testMode ? (options.processUid ?? process.getuid?.()) : process.getuid?.(),
+    execFile: testMode ? (options.execFile ?? execFileAsync) : execFileAsync,
+    fs: testMode ? (options.fs ?? nodeFs) : nodeFs,
+    readPlist: testMode ? options.readPlist : undefined,
   };
 }
 
@@ -168,11 +267,13 @@ async function command(options, file, args) {
   return options.execFile(file, args);
 }
 
-function isLaunchctlNotFound(error) {
-  return NOT_FOUND_CODES.has(error?.code) ||
-    /could not find service|service.*not found|no such process/i.test(
-      `${error?.message ?? ""}\n${error?.stderr ?? ""}`,
-    );
+function isLaunchctlNotFound(error, options, label) {
+  if (!NOT_FOUND_CODES.has(error?.code)) return false;
+  const expected = `Could not find service "${label}" in domain for user gui: ${options.processUid}`;
+  return `${error?.message ?? ""}\n${error?.stderr ?? ""}`
+    .replaceAll("\r\n", "\n")
+    .split("\n")
+    .some((line) => line.trim() === expected);
 }
 
 async function isLoaded(options, label = options.label) {
@@ -180,7 +281,7 @@ async function isLoaded(options, label = options.label) {
     await command(options, "/bin/launchctl", ["print", launchTarget(options, label)]);
     return true;
   } catch (error) {
-    if (isLaunchctlNotFound(error)) return false;
+    if (isLaunchctlNotFound(error, options, label)) return false;
     throw error;
   }
 }
@@ -253,16 +354,33 @@ async function atomicWrite(fs, path, bytes, mode = 0o600) {
   try {
     handle = await fs.open(temporaryPath, "wx", mode);
     await handle.writeFile(bytes);
+    await handle.chmod(mode);
     await handle.sync();
     await handle.close();
     handle = undefined;
-    await fs.chmod(temporaryPath, mode);
     await fs.rename(temporaryPath, path);
-    await fs.chmod(path, mode);
     await syncDirectory(fs, parent);
   } catch (error) {
     await handle?.close().catch(() => {});
     await fs.rm(temporaryPath, { force: true }).catch(() => {});
+    throw error;
+  }
+}
+
+async function exclusiveWrite(fs, path, bytes, mode = 0o600) {
+  const parent = dirname(path);
+  await ensureDirectory(fs, parent);
+  let handle;
+  try {
+    handle = await fs.open(path, "wx", mode);
+    await handle.writeFile(bytes);
+    await handle.chmod(mode);
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
+    await syncDirectory(fs, parent);
+  } catch (error) {
+    await handle?.close().catch(() => {});
     throw error;
   }
 }
@@ -278,35 +396,128 @@ async function removeAndSync(fs, path) {
   return true;
 }
 
-async function snapshotFile(fs, path, { required = false } = {}) {
-  let info;
+function fileChangedError(path) {
+  const error = new Error(`file changed during validation: ${path}`);
+  error.code = "FILE_CHANGED_DURING_VALIDATION";
+  return error;
+}
+
+function assertSnapshotInfo(path, before, after) {
+  if (
+    before.dev !== after.dev ||
+    before.ino !== after.ino ||
+    before.size !== after.size ||
+    before.mtimeMs !== after.mtimeMs ||
+    before.mode !== after.mode
+  ) {
+    throw fileChangedError(path);
+  }
+}
+
+async function snapshotFile(fs, path, {
+  required = false,
+  maxBytes = PLIST_BACKUP_MAX_BYTES,
+} = {}) {
+  let pathInfo;
   try {
-    info = await fs.lstat(path);
+    pathInfo = await fs.lstat(path);
   } catch (error) {
     if (error.code === "ENOENT" && !required) return null;
     throw error;
   }
-  if (info.isSymbolicLink() || !info.isFile()) {
+  if (pathInfo.isSymbolicLink() || !pathInfo.isFile()) {
     throw new Error(`refusing a non-regular file: ${path}`);
   }
-  if (typeof process.getuid === "function" && info.uid !== process.getuid()) {
+  if (typeof process.getuid === "function" && pathInfo.uid !== process.getuid()) {
     throw new Error(`refusing a file with a different owner: ${path}`);
   }
-  return {
-    bytes: await fs.readFile(path),
-    mode: info.mode & 0o777,
-  };
+  if (pathInfo.size > maxBytes) {
+    const error = new Error(`plist recovery snapshot exceeds ${maxBytes} bytes: ${path}`);
+    error.code = "PLIST_BACKUP_TOO_LARGE";
+    throw error;
+  }
+
+  let handle;
+  try {
+    handle = await fs.open(path, "r");
+    const opened = await handle.stat();
+    assertSnapshotInfo(path, pathInfo, opened);
+    const bytes = await handle.readFile();
+    const completed = await handle.stat();
+    assertSnapshotInfo(path, opened, completed);
+    if (bytes.length !== completed.size || bytes.length > maxBytes) {
+      const error = bytes.length > maxBytes
+        ? Object.assign(
+          new Error(`plist recovery snapshot exceeds ${maxBytes} bytes: ${path}`),
+          { code: "PLIST_BACKUP_TOO_LARGE" },
+        )
+        : fileChangedError(path);
+      throw error;
+    }
+    return {
+      bytes,
+      mode: completed.mode & 0o777,
+      dev: completed.dev,
+      ino: completed.ino,
+      size: completed.size,
+      mtimeMs: completed.mtimeMs,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+    };
+  } finally {
+    await handle?.close();
+  }
 }
 
-async function readPlist(options, path) {
-  if (options.readPlist) return options.readPlist(path);
-  const { stdout } = await command(options, "/usr/bin/plutil", [
-    "-convert",
-    "json",
-    "-o",
-    "-",
-    path,
-  ]);
+async function assertSnapshotCurrent(fs, path, snapshot) {
+  let current;
+  try {
+    current = await snapshotFile(fs, path);
+  } catch (error) {
+    if (error.code === "ENOENT") throw fileChangedError(path);
+    throw error;
+  }
+  if (snapshot === null) {
+    if (current !== null) throw fileChangedError(path);
+    return;
+  }
+  if (
+    current === null ||
+    snapshot.dev !== current.dev ||
+    snapshot.ino !== current.ino ||
+    snapshot.mode !== current.mode ||
+    snapshot.sha256 !== current.sha256
+  ) {
+    throw fileChangedError(path);
+  }
+}
+
+async function readPlistSnapshot(options, path, snapshot) {
+  if (!snapshot) throw new Error(`plist snapshot is required: ${path}`);
+  if (options.readPlist) {
+    return options.readPlist(path, {
+      bytes: Buffer.from(snapshot.bytes),
+      mode: snapshot.mode,
+      sha256: snapshot.sha256,
+    });
+  }
+  const immutablePath = `${path}.validated.${randomUUID()}`;
+  let stdout;
+  try {
+    await exclusiveWrite(options.fs, immutablePath, snapshot.bytes, 0o600);
+    const immutableSnapshot = await snapshotFile(options.fs, immutablePath, { required: true });
+    ({ stdout } = await command(options, "/usr/bin/plutil", [
+      "-convert",
+      "json",
+      "-o",
+      "-",
+      immutablePath,
+    ]));
+    await assertSnapshotCurrent(options.fs, immutablePath, immutableSnapshot);
+  } finally {
+    await removeAndSync(options.fs, immutablePath).catch((error) => {
+      if (error.code !== "ENOENT") throw error;
+    });
+  }
   let value;
   try {
     value = JSON.parse(stdout);
@@ -372,6 +583,37 @@ async function writeJournal(options, journalPath, journal) {
   );
 }
 
+async function createMigrationJournal(options, journalPath, journal) {
+  try {
+    await exclusiveWrite(
+      options.fs,
+      journalPath,
+      `${JSON.stringify(journal, null, 2)}\n`,
+      0o600,
+    );
+  } catch (error) {
+    if (error.code === "EEXIST") {
+      const incomplete = new Error(
+        `unfinished LaunchAgent migration journal already exists: ${journalPath}`,
+      );
+      incomplete.code = "MIGRATION_INCOMPLETE";
+      throw incomplete;
+    }
+    throw error;
+  }
+}
+
+function recoveryBackup(path, snapshot, loaded) {
+  return {
+    path,
+    existed: snapshot !== null,
+    bytesBase64: snapshot ? snapshot.bytes.toString("base64") : null,
+    sha256: snapshot?.sha256 ?? null,
+    mode: snapshot?.mode ?? null,
+    loaded,
+  };
+}
+
 export function renderControllerPlist({
   label = CONTROLLER_LAUNCH_AGENT_LABEL,
   programArguments,
@@ -429,7 +671,10 @@ export async function inspectLaunchAgent(input = {}) {
   assertLabel(options.label);
   launchDomain(options);
   const snapshot = await snapshotFile(options.fs, options.plistPath);
-  const plist = snapshot ? await readPlist(options, options.plistPath) : null;
+  const plist = snapshot
+    ? await readPlistSnapshot(options, options.plistPath, snapshot)
+    : null;
+  await assertSnapshotCurrent(options.fs, options.plistPath, snapshot);
   return {
     label: options.label,
     plistPath: options.plistPath,
@@ -468,7 +713,7 @@ export async function registerControllerAgent(input = {}) {
   assertMutationLabel(options.label, options.testMode === true);
   assertProductionLocations(options);
   launchDomain(options);
-  const programArguments = normalizeProgramArguments(options);
+  const programArguments = await resolveProgramArguments(options);
   await ensurePrivateDirectory(options.fs, options.stateDir);
   await ensureDirectory(options.fs, options.launchAgentsDir);
   await assertCanonicalDirectory(options.fs, options.launchAgentsDir);
@@ -483,7 +728,7 @@ export async function registerControllerAgent(input = {}) {
   if (previous) {
     assertControllerPlistAttribution(
       options,
-      await readPlist(options, options.plistPath),
+      await readPlistSnapshot(options, options.plistPath, previous),
       programArguments,
     );
   }
@@ -493,10 +738,14 @@ export async function registerControllerAgent(input = {}) {
     stateDir: options.stateDir,
   });
   const stagedPath = `${options.plistPath}.staged.${randomUUID()}`;
+  let stagedSnapshot;
 
+  await assertSnapshotCurrent(options.fs, options.plistPath, previous);
   try {
     await atomicWrite(options.fs, stagedPath, plist, 0o600);
+    stagedSnapshot = await snapshotFile(options.fs, stagedPath, { required: true });
     await lintPlist(options, stagedPath);
+    await assertSnapshotCurrent(options.fs, stagedPath, stagedSnapshot);
   } catch (error) {
     await options.fs.rm(stagedPath, { force: true }).catch(() => {});
     throw error;
@@ -504,7 +753,7 @@ export async function registerControllerAgent(input = {}) {
 
   try {
     if (loadedBefore) await bootout(options, options.label);
-    await publishStagedPlist(options, stagedPath, options.plistPath);
+    await publishStagedPlist(options, stagedPath, options.plistPath, stagedSnapshot);
     await bootstrap(options, options.label, options.plistPath);
   } catch (primaryError) {
     const rollbackErrors = [];
@@ -536,18 +785,24 @@ export async function unregisterControllerAgent(input = {}) {
   assertMutationLabel(options.label, options.testMode === true);
   assertProductionLocations(options);
   launchDomain(options);
-  const inspection = await inspectLaunchAgent(options);
-  if (inspection.plistExists && inspection.plistLabel !== options.label) {
-    const error = new Error(`adapter does not own plist ${options.plistPath}`);
-    error.code = "PLIST_ATTRIBUTION_FAILED";
+  const programArguments = await resolveProgramArguments(options);
+  const snapshot = await snapshotFile(options.fs, options.plistPath);
+  const loaded = await isLoaded(options);
+  if (loaded && !snapshot) {
+    const error = new Error("loaded controller has no trusted canonical plist");
+    error.code = "CONTROLLER_PRESTATE_INVALID";
     throw error;
   }
-  if (inspection.loaded) {
+  if (snapshot) {
+    const plist = await readPlistSnapshot(options, options.plistPath, snapshot);
+    assertControllerPlistAttribution(options, plist, programArguments);
+  }
+  await assertSnapshotCurrent(options.fs, options.plistPath, snapshot);
+  if (loaded) {
     await bootout(options, options.label, { knownLoaded: true });
   }
-  const removed = inspection.plistExists
-    ? await removeAndSync(options.fs, options.plistPath)
-    : false;
+  await assertSnapshotCurrent(options.fs, options.plistPath, snapshot);
+  const removed = snapshot ? await removeAndSync(options.fs, options.plistPath) : false;
   return {
     label: options.label,
     plistPath: options.plistPath,
@@ -556,12 +811,12 @@ export async function unregisterControllerAgent(input = {}) {
   };
 }
 
-async function assertCanonicalLegacyPlist(options, oldPlistPath) {
+async function assertCanonicalLegacyPlist(options, oldPlistPath, oldLabel) {
   const canonical = join(
     options.home,
     "Library",
     "LaunchAgents",
-    `${LEGACY_WATCHDOG_LABEL}.plist`,
+    `${oldLabel}.plist`,
   );
   if (resolve(oldPlistPath) !== resolve(canonical)) {
     throw new Error("legacy attribution failed: plist is not at the canonical path");
@@ -572,9 +827,9 @@ async function assertCanonicalLegacyPlist(options, oldPlistPath) {
   }
 }
 
-async function assertLegacyAttribution(options, oldPlistPath, plist) {
+async function assertLegacyAttribution(options, oldPlistPath, plist, oldLabel) {
   if (
-    plist.Label !== LEGACY_WATCHDOG_LABEL ||
+    plist.Label !== oldLabel ||
     plist.RunAtLoad !== true ||
     plist.StartInterval !== 15 ||
     plist.AbandonProcessGroup !== true ||
@@ -588,7 +843,7 @@ async function assertLegacyAttribution(options, oldPlistPath, plist) {
   ) {
     throw new Error("legacy attribution failed: fixed feature tuple mismatch");
   }
-  await assertCanonicalLegacyPlist(options, oldPlistPath);
+  await assertCanonicalLegacyPlist(options, oldPlistPath, oldLabel);
 
   const scriptPath = plist.ProgramArguments[1];
   assertAbsolutePath(scriptPath, "legacy watchdog executable");
@@ -637,9 +892,9 @@ async function advanceMigration(options, journalPath, journal, phase) {
   inject(options, phase);
 }
 
-async function publishStagedPlist(options, stagedPath, targetPath) {
+async function publishStagedPlist(options, stagedPath, targetPath, stagedSnapshot) {
+  await assertSnapshotCurrent(options.fs, stagedPath, stagedSnapshot);
   await options.fs.rename(stagedPath, targetPath);
-  await options.fs.chmod(targetPath, 0o600);
   await syncDirectory(options.fs, dirname(targetPath));
 }
 
@@ -652,6 +907,7 @@ async function rollbackMigration({
   oldPlistPath,
   oldSnapshot,
   oldLoaded,
+  oldLabel,
   newSnapshot,
   newLoadedBefore,
 }) {
@@ -666,8 +922,8 @@ async function rollbackMigration({
 
   await attempt(async () => {
     inject(options, "before-new-bootout", { rollback: true });
-    if (await isLoaded(options, CONTROLLER_LAUNCH_AGENT_LABEL)) {
-      await bootout(options, CONTROLLER_LAUNCH_AGENT_LABEL);
+    if (await isLoaded(options, options.label)) {
+      await bootout(options, options.label);
     }
   });
   await attempt(async () => {
@@ -679,15 +935,15 @@ async function rollbackMigration({
     }
   });
   await attempt(async () => {
-    const currentlyLoaded = await isLoaded(options, CONTROLLER_LAUNCH_AGENT_LABEL);
+    const currentlyLoaded = await isLoaded(options, options.label);
     if (newLoadedBefore && !currentlyLoaded) {
       if (!newSnapshot) throw new Error("loaded controller had no restorable plist snapshot");
       inject(options, "before-new-rebootstrap", { rollback: true });
-      await bootstrap(options, CONTROLLER_LAUNCH_AGENT_LABEL, options.plistPath);
+      await bootstrap(options, options.label, options.plistPath);
     } else if (!newLoadedBefore && currentlyLoaded) {
-      await bootout(options, CONTROLLER_LAUNCH_AGENT_LABEL);
+      await bootout(options, options.label);
     }
-    if ((await isLoaded(options, CONTROLLER_LAUNCH_AGENT_LABEL)) !== newLoadedBefore) {
+    if ((await isLoaded(options, options.label)) !== newLoadedBefore) {
       throw new Error("controller loaded state was not restored");
     }
   });
@@ -696,14 +952,14 @@ async function rollbackMigration({
     await atomicWrite(options.fs, oldPlistPath, oldSnapshot.bytes, oldSnapshot.mode);
   });
   await attempt(async () => {
-    const currentlyLoaded = await isLoaded(options, LEGACY_WATCHDOG_LABEL);
+    const currentlyLoaded = await isLoaded(options, oldLabel);
     if (oldLoaded && !currentlyLoaded) {
       inject(options, "before-old-rebootstrap", { rollback: true });
-      await bootstrap(options, LEGACY_WATCHDOG_LABEL, oldPlistPath);
+      await bootstrap(options, oldLabel, oldPlistPath);
     } else if (!oldLoaded && currentlyLoaded) {
-      await bootout(options, LEGACY_WATCHDOG_LABEL);
+      await bootout(options, oldLabel);
     }
-    if ((await isLoaded(options, LEGACY_WATCHDOG_LABEL)) !== oldLoaded) {
+    if ((await isLoaded(options, oldLabel)) !== oldLoaded) {
       throw new Error("legacy loaded state was not restored");
     }
   });
@@ -739,15 +995,11 @@ async function rollbackMigration({
 }
 
 export async function migrateLegacyWatchdog(input = {}) {
-  const options = normalizedOptions({
-    ...input,
-    label: CONTROLLER_LAUNCH_AGENT_LABEL,
-  });
+  const options = normalizedOptions(input);
   assertMutationLabel(options.label, options.testMode === true);
   assertProductionLocations(options);
-  if ((input.oldLabel ?? LEGACY_WATCHDOG_LABEL) !== LEGACY_WATCHDOG_LABEL) {
-    throw new Error("legacy attribution failed: unexpected old label");
-  }
+  const oldLabel = input.oldLabel ?? LEGACY_WATCHDOG_LABEL;
+  assertLegacyMutationLabel(oldLabel, options.testMode === true);
   launchDomain(options);
   await ensurePrivateDirectory(options.fs, options.stateDir);
   await ensureDirectory(options.fs, options.launchAgentsDir);
@@ -760,58 +1012,70 @@ export async function migrateLegacyWatchdog(input = {}) {
     `${LEGACY_WATCHDOG_LABEL}.plist`,
   );
   const oldSnapshot = await snapshotFile(options.fs, oldPlistPath);
+  const oldLoaded = await isLoaded(options, oldLabel);
   if (!oldSnapshot) {
+    if (oldLoaded) {
+      const error = new Error("loaded legacy watchdog has no canonical plist snapshot");
+      error.code = "LEGACY_PRESTATE_INVALID";
+      throw error;
+    }
     return {
       legacyFound: false,
       legacyRemoved: false,
       controllerRegistered: false,
     };
   }
-  const oldPlist = await readPlist(options, oldPlistPath);
-  await assertLegacyAttribution(options, oldPlistPath, oldPlist);
-  const oldLoaded = await isLoaded(options, LEGACY_WATCHDOG_LABEL);
-  const programArguments = normalizeProgramArguments(options);
+  const oldPlist = await readPlistSnapshot(options, oldPlistPath, oldSnapshot);
+  await assertLegacyAttribution(options, oldPlistPath, oldPlist, oldLabel);
+  const programArguments = await resolveProgramArguments(options);
   const newSnapshot = await snapshotFile(options.fs, options.plistPath);
-  const newLoadedBefore = await isLoaded(options, CONTROLLER_LAUNCH_AGENT_LABEL);
+  const newLoadedBefore = await isLoaded(options, options.label);
   if (newLoadedBefore && !newSnapshot) {
     const error = new Error("loaded controller has no canonical plist snapshot");
     error.code = "CONTROLLER_PRESTATE_INVALID";
     throw error;
   }
   if (newSnapshot) {
-    const newPlist = await readPlist(options, options.plistPath);
+    const newPlist = await readPlistSnapshot(options, options.plistPath, newSnapshot);
     assertControllerPlistAttribution(options, newPlist, programArguments);
   }
+  await assertSnapshotCurrent(options.fs, oldPlistPath, oldSnapshot);
+  await assertSnapshotCurrent(options.fs, options.plistPath, newSnapshot);
   const journalPath = input.journalPath ?? join(options.stateDir, "launch-agent-migration.json");
   const stagedPath = `${options.plistPath}.staged.${randomUUID()}`;
+  let stagedSnapshot;
   const journal = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     operation: "migrate-legacy-watchdog",
     phase: "prepared",
-    oldLabel: LEGACY_WATCHDOG_LABEL,
-    newLabel: CONTROLLER_LAUNCH_AGENT_LABEL,
-    oldLoaded,
-    oldMode: oldSnapshot.mode,
-    newPlistExisted: newSnapshot !== null,
-    newLoaded: newLoadedBefore,
+    createdAt: new Date().toISOString(),
+    oldLabel,
+    newLabel: options.label,
+    oldBackup: recoveryBackup(oldPlistPath, oldSnapshot, oldLoaded),
+    newBackup: recoveryBackup(options.plistPath, newSnapshot, newLoadedBefore),
   };
   const plist = renderControllerPlist({
-    label: CONTROLLER_LAUNCH_AGENT_LABEL,
+    label: options.label,
     programArguments,
     stateDir: options.stateDir,
   });
 
+  await createMigrationJournal(options, journalPath, journal);
   try {
     await advanceMigration(options, journalPath, journal, "after-journal");
     await atomicWrite(options.fs, stagedPath, plist, 0o600);
+    stagedSnapshot = await snapshotFile(options.fs, stagedPath, { required: true });
     await advanceMigration(options, journalPath, journal, "after-new-stage");
+    await assertSnapshotCurrent(options.fs, stagedPath, stagedSnapshot);
     await lintPlist(options, stagedPath);
+    await assertSnapshotCurrent(options.fs, stagedPath, stagedSnapshot);
     await advanceMigration(options, journalPath, journal, "after-new-lint");
+    await assertSnapshotCurrent(options.fs, options.plistPath, newSnapshot);
     if (newLoadedBefore) {
-      await bootout(options, CONTROLLER_LAUNCH_AGENT_LABEL);
+      await bootout(options, options.label);
       await advanceMigration(options, journalPath, journal, "after-existing-new-bootout");
     }
-    await publishStagedPlist(options, stagedPath, options.plistPath);
+    await publishStagedPlist(options, stagedPath, options.plistPath, stagedSnapshot);
     await advanceMigration(options, journalPath, journal, "after-new-publish");
     await command(options, "/bin/launchctl", [
       "bootstrap",
@@ -819,26 +1083,27 @@ export async function migrateLegacyWatchdog(input = {}) {
       options.plistPath,
     ]);
     await advanceMigration(options, journalPath, journal, "after-new-bootstrap");
-    if (!(await isLoaded(options, CONTROLLER_LAUNCH_AGENT_LABEL))) {
+    if (!(await isLoaded(options, options.label))) {
       throw new Error("new controller failed launchctl verification");
     }
     await advanceMigration(options, journalPath, journal, "after-new-verify");
 
+    await assertSnapshotCurrent(options.fs, oldPlistPath, oldSnapshot);
     if (oldLoaded) {
       await command(options, "/bin/launchctl", [
         "bootout",
-        launchTarget(options, LEGACY_WATCHDOG_LABEL),
+        launchTarget(options, oldLabel),
       ]);
     }
     await advanceMigration(options, journalPath, journal, "after-old-bootout");
-    if (await isLoaded(options, LEGACY_WATCHDOG_LABEL)) {
+    if (await isLoaded(options, oldLabel)) {
       throw new Error("legacy watchdog remained loaded after bootout");
     }
     await advanceMigration(options, journalPath, journal, "after-old-verify");
+    await assertSnapshotCurrent(options.fs, oldPlistPath, oldSnapshot);
     await removeAndSync(options.fs, oldPlistPath);
     await advanceMigration(options, journalPath, journal, "after-old-remove");
-    await options.fs.rm(journalPath, { force: true });
-    await syncDirectory(options.fs, dirname(journalPath));
+    await removeAndSync(options.fs, journalPath);
     return {
       legacyFound: true,
       legacyRemoved: true,
@@ -854,6 +1119,7 @@ export async function migrateLegacyWatchdog(input = {}) {
       oldPlistPath,
       oldSnapshot,
       oldLoaded,
+      oldLabel,
       newSnapshot,
       newLoadedBefore,
     });
