@@ -138,7 +138,8 @@ try {
         New-Item -ItemType File -Path $unicodeExe -Force | Out-Null
         $app = Resolve-CodexApp -OverridePath $unicodeExe -Packages @() -ProcessProvider { @() }
         $token = ConvertTo-HeiGeCodexAppIdentityToken -App $app
-        $nodePath = [string](Get-Command node -CommandType Application -ErrorAction Stop).Path
+        $nodeCommand = Get-Command node -CommandType Application -ErrorAction Stop | Select-Object -First 1
+        $nodePath = [string]$nodeCommand.Path
         $runtimeModule = Join-Path $script:RepositoryRoot "src\windows-runtime.mjs"
         $nodeScript = @'
 import { pathToFileURL } from "node:url";
