@@ -745,7 +745,10 @@ export async function enforceLegacyMigrationFence({
   const readState = dependencies.readState ?? readStudioState;
   const readTransition = dependencies.readTransition ?? readTransitionJournal;
   const coordinator = await readCoordinator(journalPath, { lease });
-  if (coordinator === null) return { allowed: true, transactionId: null };
+  if (coordinator === null) {
+    if (authorization !== null) throw migrationFenceError(operation);
+    return { allowed: true, transactionId: null };
+  }
   if (
     coordinator.decision !== "undecided" ||
     coordinator.phase !== "service-prepared" ||

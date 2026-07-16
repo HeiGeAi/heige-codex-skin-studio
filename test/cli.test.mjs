@@ -769,7 +769,7 @@ test("legacy migration fence rejects every unrelated mutation and admits only it
     lastTransitionNonce: null,
     revision: 1,
   };
-  const coordinator = {
+  let coordinator = {
     transactionId: "123e4567-e89b-42d3-a456-426614174000",
     decision: "undecided",
     phase: "service-prepared",
@@ -841,6 +841,21 @@ test("legacy migration fence rejects every unrelated mutation and admits only it
   );
 
   transition = { operation: "foreign-transition" };
+  await assert.rejects(
+    enforceLegacyMigrationFence({
+      ...base,
+      operation: "controller:set-persistence",
+      authorization,
+    }),
+    (error) => error.code === "LEGACY_MIGRATION_IN_PROGRESS",
+  );
+
+  transition = null;
+  coordinator = null;
+  assert.deepEqual(await enforceLegacyMigrationFence({
+    ...base,
+    operation: "controller:start",
+  }), { allowed: true, transactionId: null });
   await assert.rejects(
     enforceLegacyMigrationFence({
       ...base,
