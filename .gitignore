@@ -4,3 +4,5 @@ pet/
 .staging/
 output/*
 !output/heige-codex-skin-studio.skill
+.superpowers/
+reports/
