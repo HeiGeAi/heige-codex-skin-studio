@@ -14,6 +14,8 @@ cp "$SOURCE/spritesheet.webp" "$TARGET/spritesheet.webp"
 if grep -q '^selected-avatar-id = ' "$HOME/.codex/config.toml" && ! grep -q '^selected-avatar-id = "custom:miku-future"$' "$HOME/.codex/config.toml"; then
   cp "$HOME/.codex/config.toml" "$HOME/.codex/config.toml.bak-miku-pet-$(date +%Y%m%d-%H%M%S)"
   sed -i '' 's/^selected-avatar-id = .*/selected-avatar-id = "custom:miku-future"/' "$HOME/.codex/config.toml"
+elif ! grep -q '^selected-avatar-id = "custom:miku-future"$' "$HOME/.codex/config.toml"; then
+  printf '\nselected-avatar-id = "custom:miku-future"\n' >> "$HOME/.codex/config.toml"
 fi
 
 echo "Miku Future 已安装到 $TARGET 并设为当前宠物"
