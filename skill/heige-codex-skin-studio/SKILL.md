@@ -44,7 +44,7 @@ Windows 用户也可双击 `scripts\install.bat`。Windows 入口只转发到包
 - 只有用户打开顶部「皮肤常驻」开关，或明确要求开启常驻时，才运行 `enable-skin.command`。不得用本地启动器代替这个用户决定。
 - 启动器未显式指定主题时，优先恢复上次非原生主题，只有没有历史选择时才使用 `miku-488137`。
 
-macOS 稳定入口是 `scripts/apply.command`、`scripts/enable-skin.command`、`scripts/pause.command`、`scripts/resume.command` 和 `scripts/restore.command`。Windows 对应入口是 `scripts\windows` 下的同名 `.ps1` 或 `.bat`。
+macOS 稳定入口是 `scripts/apply.command`、`scripts/enable-skin.command`、`scripts/pause.command`、`scripts/resume.command` 和 `scripts/restore.command`。Windows 生命周期操作必须使用 `scripts\windows` 下的同名 `.ps1` 或 `.bat`，不得直接运行 Node CLI 代替 Windows Store/MSIX 激活或进程重启。
 
 用户意图必须分开：
 

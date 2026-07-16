@@ -49,3 +49,11 @@ test("public support and security claims stay within verified boundaries", async
   assert.doesNotMatch(docs, /第三方依赖\s*\|\s*0 个/);
   assert.doesNotMatch(docs, /当前只支持 macOS/);
 });
+
+test("public CLI docs keep Windows lifecycle behind the platform wrappers", async () => {
+  const docs = await publicDocs();
+  assert.match(docs, /scripts\/windows\/apply\.ps1/);
+  assert.match(docs, /scripts\/windows\/enable-skin\.bat/);
+  assert.match(docs, /scripts\/windows\/restore\.ps1/);
+  assert.match(docs, /直接.*Node CLI.*安全拒绝|不得直接运行 Node CLI/s);
+});

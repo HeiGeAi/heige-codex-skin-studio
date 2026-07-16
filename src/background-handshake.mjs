@@ -40,6 +40,14 @@ const START_REQUEST_KEYS = Object.freeze([
   "schemaVersion",
   "transitionNonce",
 ]);
+const LEGACY_START_REQUEST_KEYS = Object.freeze([
+  "backgroundIdentity",
+  "createdAt",
+  "platform",
+  "revision",
+  "schemaVersion",
+  "transitionNonce",
+]);
 const OUTER_TRANSACTION_KEYS = Object.freeze(["journalPath", "transactionId"]);
 
 function isRecord(value) {
@@ -149,6 +157,40 @@ function validateStartRequest(value, stateRoot) {
     platform: value.platform,
     backgroundIdentity,
     outerTransaction,
+    createdAt: value.createdAt,
+  });
+}
+
+function validateLegacyStartRequest(value) {
+  if (!exactKeys(value, LEGACY_START_REQUEST_KEYS)) {
+    throw new Error("legacy background start request schema has unknown or missing fields");
+  }
+  if (value.schemaVersion !== 1) {
+    throw new Error("legacy background start request schemaVersion is unsupported");
+  }
+  if (!Number.isSafeInteger(value.revision) || value.revision < 0) {
+    throw new Error("legacy background start request revision is invalid");
+  }
+  if (typeof value.transitionNonce !== "string" || !NONCE.test(value.transitionNonce)) {
+    throw new Error("legacy background start request nonce is invalid");
+  }
+  if (!PLATFORMS.has(value.platform)) {
+    throw new Error("legacy background start request platform is invalid");
+  }
+  const backgroundIdentity = boundedText(
+    value.backgroundIdentity,
+    "legacy start request background identity",
+    256,
+  );
+  if (typeof value.createdAt !== "string" || !Number.isFinite(Date.parse(value.createdAt))) {
+    throw new Error("legacy background start request createdAt is invalid");
+  }
+  return Object.freeze({
+    schemaVersion: 1,
+    revision: value.revision,
+    transitionNonce: value.transitionNonce,
+    platform: value.platform,
+    backgroundIdentity,
     createdAt: value.createdAt,
   });
 }
@@ -496,15 +538,100 @@ export async function removeBackgroundHandshake({ stateRoot } = {}) {
   return true;
 }
 
-export async function removeBackgroundStartRequest({ stateRoot } = {}) {
-  const existing = await readBackgroundStartRequest({ stateRoot });
-  if (existing === null) return false;
+function validateStartRequestCleanupCandidate(value, stateRoot) {
+  if (value?.schemaVersion === 1) {
+    return Object.freeze({ legacy: true, request: validateLegacyStartRequest(value) });
+  }
+  return Object.freeze({
+    legacy: false,
+    request: validateStartRequest(value, stateRoot),
+  });
+}
+
+async function removeStartRequestForCleanup({ stateRoot } = {}, {
+  legacyOnly,
+  nonce,
+}) {
+  stateRoot = validateStateRoot(stateRoot);
   const path = backgroundStartRequestPath(stateRoot);
-  const before = await lstat(path);
+  const inspected = await readPrivateDocument({
+    stateRoot,
+    path,
+    validate: (value) => validateStartRequestCleanupCandidate(value, stateRoot),
+    description: "background start request cleanup candidate",
+  });
+  if (inspected === null || (legacyOnly && inspected.legacy !== true)) return false;
+
+  let before;
+  try {
+    before = await lstat(path);
+  } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
   requirePrivateFile(before);
-  await unlink(path);
+  const claimedPath = join(
+    stateRoot,
+    `.${BACKGROUND_START_REQUEST_FILE}.${nonce()}.${legacyOnly ? "legacy-cleanup" : "cleanup"}`,
+  );
+  try {
+    await rename(path, claimedPath);
+  } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
   await syncDirectory(stateRoot);
-  return true;
+
+  let removed = false;
+  try {
+    const claimed = await lstat(claimedPath);
+    requirePrivateFile(claimed);
+    if (!sameFile(before, claimed)) {
+      throw new Error("background start request changed before cleanup claim");
+    }
+    const claimedCandidate = await readPrivateDocument({
+      stateRoot,
+      path: claimedPath,
+      validate: (value) => validateStartRequestCleanupCandidate(value, stateRoot),
+      description: "background start request cleanup claim",
+    });
+    if (
+      claimedCandidate.legacy !== inspected.legacy ||
+      JSON.stringify(claimedCandidate.request) !== JSON.stringify(inspected.request)
+    ) {
+      throw new Error("background start request changed after cleanup inspection");
+    }
+    await unlink(claimedPath);
+    removed = true;
+    await syncDirectory(stateRoot);
+    return true;
+  } catch (error) {
+    if (!removed) {
+      try {
+        await link(claimedPath, path);
+        await unlink(claimedPath);
+        await syncDirectory(stateRoot);
+      } catch (restoreError) {
+        throw new AggregateError(
+          [error, restoreError],
+          "background start request cleanup failed and its claim could not be restored",
+        );
+      }
+    }
+    throw error;
+  }
+}
+
+export async function removeBackgroundStartRequest(input = {}, {
+  nonce = randomUUID,
+} = {}) {
+  return removeStartRequestForCleanup(input, { legacyOnly: false, nonce });
+}
+
+export async function removeLegacyBackgroundStartRequest(input = {}, {
+  nonce = randomUUID,
+} = {}) {
+  return removeStartRequestForCleanup(input, { legacyOnly: true, nonce });
 }
 
 function validateExpected(expected) {

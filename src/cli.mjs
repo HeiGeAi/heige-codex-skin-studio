@@ -13,6 +13,7 @@ import {
   publishBackgroundStartRequest,
   removeBackgroundHandshake,
   removeBackgroundStartRequest,
+  removeLegacyBackgroundStartRequest,
   waitForBackgroundHandshake,
 } from "./background-handshake.mjs";
 import {
@@ -1109,6 +1110,7 @@ export async function productionController({
     prepareBackgroundHandshake: async ({ revision, transitionNonce }) => {
       readiness.discard();
       await removeBackgroundHandshake({ stateRoot: paths.stateRoot });
+      await removeLegacyBackgroundStartRequest({ stateRoot: paths.stateRoot });
       const request = await publishBackgroundStartRequest({
         stateRoot: paths.stateRoot,
         revision,
@@ -1370,7 +1372,35 @@ async function productionRegisterEphemeral({ deps, paths, port, preflight, theme
   return { mode: "active" };
 }
 
-async function productionRestartDetached({ paths, preflight, launchMode, port, afterLaunch = null }) {
+function windowsLifecycleWrapperRequired(command) {
+  const wrapper = command === "enable-after-restart" ? "enable-skin" : command;
+  const error = new Error(
+    `Windows 上 ${wrapper} 需要启动或重启 Codex 时，必须使用 ` +
+    `scripts/windows/${wrapper}.ps1 或 scripts/windows/${wrapper}.bat；` +
+    "直接运行 Node CLI 不会调用 macOS 生命周期助手",
+  );
+  error.code = "WINDOWS_LIFECYCLE_WRAPPER_REQUIRED";
+  return error;
+}
+
+function assertDirectLifecycleRestartSupported(platform, command) {
+  if (platform === "win32") throw windowsLifecycleWrapperRequired(command);
+}
+
+async function productionRestartDetached({
+  paths,
+  preflight,
+  launchMode,
+  port,
+  afterLaunch = null,
+  platform = process.platform,
+}) {
+  if (platform === "win32") {
+    const command = launchMode === "native"
+      ? "restore"
+      : (afterLaunch?.command ?? "apply");
+    throw windowsLifecycleWrapperRequired(command);
+  }
   const actionPath = join(paths.stateRoot, `lifecycle-${randomUUID()}.json`);
   await writeLifecycleActionFile(actionPath, {
     process: preflight.process,
@@ -1928,6 +1958,7 @@ function defaults(overrides, {
     bundledThemesRoot,
     userThemesRoot: paths.userThemesRoot,
     paths,
+    platform,
     roots,
     home: process.env.HOME,
     nodeVersion: process.versions.node,
@@ -1975,7 +2006,7 @@ function defaults(overrides, {
       paths: merged.paths,
     })));
   merged.restartDetached = overrides.restartDetached ?? ((input) =>
-    productionRestartDetached({ ...input, paths: merged.paths }));
+    productionRestartDetached({ ...input, paths: merged.paths, platform }));
   merged.offlineDisablePersistence = overrides.offlineDisablePersistence ?? ((input) =>
     productionOfflineDisable({
       ...input,
@@ -2018,6 +2049,7 @@ async function applySelectedTheme({ deps, roots, command, port, preferStored, th
   });
   const before = await deps.readState();
   if (restartRequired) {
+    assertDirectLifecycleRestartSupported(deps.platform, command);
     const queued = await deps.restartDetached({
       launchMode: "cdp",
       port,
@@ -2095,6 +2127,13 @@ export async function runCli(argv, overrides = {}) {
   });
   if (command === "help") {
     return {
+      platform: deps.platform,
+      lifecycleContract: deps.platform === "win32"
+        ? "Windows 生命周期请使用 scripts/windows/apply.ps1 或 scripts/windows/apply.bat、" +
+          "scripts/windows/enable-skin.ps1 或 scripts/windows/enable-skin.bat、" +
+          "scripts/windows/pause.ps1、scripts/windows/resume.ps1，以及 " +
+          "scripts/windows/restore.ps1 或 scripts/windows/restore.bat"
+        : "macOS 生命周期请优先使用 scripts 下对应的 .command 稳定入口",
       commands: [
         "list",
         "create --image PATH --name NAME",
@@ -2180,6 +2219,7 @@ export async function runCli(argv, overrides = {}) {
       };
     const { preflight, restartRequired } = preflightResult;
     if (restartRequired) {
+      assertDirectLifecycleRestartSupported(deps.platform, command);
       const queued = await deps.restartDetached({
         launchMode: "cdp",
         port,
@@ -2235,6 +2275,7 @@ export async function runCli(argv, overrides = {}) {
         persistenceEnabled: false,
       };
     }
+    assertDirectLifecycleRestartSupported(deps.platform, command);
     const controller = await lifecycleController(deps, { port, preflight });
     const result = await withStoppedController(controller, () => controller.restore());
     await deps.restartDetached({ launchMode: "native", port, preflight });

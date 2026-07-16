@@ -8,6 +8,7 @@
 - 常驻开关采用方案 1：关闭后本次继续使用；下次启动恢复原生界面。
 - 本地「HeiGe 皮肤启动器」只恢复当前会话的最近皮肤，不会自动打开常驻；下次启动是否继续使用，仍由用户通过顶部开关或明确的 `enable-skin` 操作决定。
 - `apply`、`enable-skin`、`pause`、`resume`、`restore` 与只读 `status`、`doctor` 语义分离。
+- Windows 生命周期操作使用 `scripts/windows` 下对应的 `.ps1` 或 `.bat`；直接 Node CLI 不负责 Windows Store/MSIX 激活或进程重启。
 - macOS 有自动化与日期化真机证据；Windows 有 Windows PowerShell 5.1、PowerShell 7、32 位解析和隔离任务自动化，Microsoft Store/MSIX 真机待验证。
 - 使用系统 Node 时要求 Node.js 22 或更新版本。生产安装不含 npm 运行时依赖；开发依赖仅用于测试与确定性打包。
 - CDP 即使绑定 `127.0.0.1` 仍无认证，本机同权限进程属于威胁边界。未来 Codex Desktop 变化仍可能要求兼容适配。

@@ -357,6 +357,15 @@ test("Node 22 is accepted for runtime commands", async () => {
   assert.equal((await runCli(["list"], fx.deps))[0].id, "miku-488137");
 });
 
+test("Windows CLI help directs lifecycle work to PowerShell or batch wrappers", async () => {
+  const fx = lifecycleDeps({ platform: "win32" });
+  const help = await runCli(["help"], fx.deps);
+  assert.equal(help.platform, "win32");
+  assert.match(help.lifecycleContract, /scripts\/windows\/apply\.ps1/);
+  assert.match(help.lifecycleContract, /scripts\/windows\/enable-skin\.bat/);
+  assert.match(help.lifecycleContract, /scripts\/windows\/restore\.ps1/);
+});
+
 test("apply validates everything and registers only an ephemeral current-session controller", async () => {
   const fx = lifecycleDeps();
   const result = await runCli(["apply", "--theme", "miku-488137"], fx.deps);
@@ -1296,6 +1305,79 @@ test("enable-skin starts a fully closed Codex and completes enable only after la
   });
   assert.equal(fx.calls.detached[0].preflight.process, null);
   assert.equal(fx.calls.detached[0].afterLaunch.command, "enable-after-restart");
+});
+
+test("Windows direct lifecycle never queues the macOS helper and points restart work to wrappers", async (t) => {
+  const nativePreflight = async (input) => {
+    if (input.requirePort) {
+      const error = new Error("当前 Codex 尚未启用 CDP");
+      error.code = "CDP_NOT_OWNED";
+      throw error;
+    }
+    return {
+      appPath: "C:\\Program Files\\WindowsApps\\OpenAI.Codex.exe",
+      nodePath: "C:\\Program Files\\nodejs\\node.exe",
+      process: {
+        pid: 4242,
+        executablePath: "C:\\Program Files\\WindowsApps\\OpenAI.Codex.exe",
+        startedAt: "2026-07-17T03:00:00.0000000Z",
+      },
+    };
+  };
+
+  for (const command of ["apply", "enable-skin"]) {
+    await t.test(`${command} native fallback`, async () => {
+      const fx = lifecycleDeps({
+        platform: "win32",
+        preflightLifecycle: nativePreflight,
+      });
+      await assert.rejects(
+        runCli([command], fx.deps),
+        (error) => error.code === "WINDOWS_LIFECYCLE_WRAPPER_REQUIRED" &&
+          error.message.includes(`scripts/windows/${command}.ps1`) &&
+          error.message.includes(`scripts/windows/${command}.bat`),
+      );
+      assert.deepEqual(fx.calls.detached, []);
+      assert.deepEqual(fx.calls.controller, []);
+      assert.deepEqual(fx.calls.registerEphemeral, []);
+    });
+  }
+
+  await t.test("restore from an active CDP session", async () => {
+    const fx = lifecycleDeps({ platform: "win32" });
+    await assert.rejects(
+      runCli(["restore"], fx.deps),
+      (error) => error.code === "WINDOWS_LIFECYCLE_WRAPPER_REQUIRED" &&
+        error.message.includes("scripts/windows/restore.ps1") &&
+        error.message.includes("scripts/windows/restore.bat"),
+    );
+    assert.deepEqual(fx.calls.detached, []);
+    assert.deepEqual(fx.calls.createController, []);
+    assert.deepEqual(fx.calls.controller, []);
+  });
+
+  await t.test("offline native restore remains restart-free", async () => {
+    const fx = lifecycleDeps({
+      initialState: {
+        schemaVersion: 2,
+        persistenceEnabled: true,
+        selectedThemeId: "miku-488137",
+        lastNonNativeThemeId: "miku-488137",
+        controlToken: Buffer.alloc(32, 7).toString("base64url"),
+        lastTransitionNonce: null,
+        revision: 5,
+      },
+      platform: "win32",
+      preflightLifecycle: nativePreflight,
+    });
+    assert.deepEqual(await runCli(["restore"], fx.deps), {
+      mode: "native",
+      persistenceEnabled: false,
+    });
+    assert.deepEqual(fx.calls.offlineDisable, [{ port: 9341 }]);
+    assert.deepEqual(fx.calls.detached, []);
+    assert.deepEqual(fx.calls.createController, []);
+  });
 });
 
 test("set-persistence false uses the offline path when Codex is native without CDP", async () => {

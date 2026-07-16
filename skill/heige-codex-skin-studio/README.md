@@ -16,6 +16,8 @@
 
 `apply` 只改变当前会话，不改变常驻选择。启用与完整恢复可能让 Codex 正常重启，执行前要先告知用户。`status` 严格只读，不应启动、退出、重启或注入 Codex。
 
+Windows 的生命周期操作必须从 `scripts\windows` 下对应的 `.ps1` 或 `.bat` 进入。不要直接运行 Node CLI 代替 Windows Store/MSIX 激活或重启流程；如果直接调用遇到需要启动或重启，CLI 会安全拒绝并提示正确入口。
+
 Skill 保留 10 个内置预设，默认是 `miku-488137`。顶部菜单可上传、覆盖或删除一个快速自定义图片；需要正式主题时使用 `create`，再把返回的 `id` 传给 macOS 或 Windows 的 `apply` 入口。`pause` 暂停当前会话，`resume` 只恢复同一进程，`restore` 关闭常驻并还原。仅当用户明确要求 `Miku Future` 时才调用统一 `install-pet` 入口。
 
 ## Windows 证据边界

@@ -24,6 +24,8 @@ import {
   readBackgroundStartRequest,
   readBackgroundHandshake,
   removeBackgroundHandshake,
+  removeBackgroundStartRequest,
+  removeLegacyBackgroundStartRequest,
   waitForBackgroundHandshake,
 } from "../src/background-handshake.mjs";
 
@@ -120,6 +122,69 @@ test("install start request preserves one exact outer transaction through claim"
     clock: () => NOW.getTime(),
   });
   assert.deepEqual(claimed.outerTransaction, outerTransaction);
+});
+
+test("canonical v1 start requests are cleanup-only before a v2 republish", async () => {
+  const legacyDocument = {
+    schemaVersion: 1,
+    revision: 6,
+    transitionNonce: "controller-transition-7",
+    platform: "darwin",
+    backgroundIdentity: "com.heige.codex-skin-controller",
+    createdAt: NOW.toISOString(),
+  };
+
+  const cleanupRoot = await privateRoot("heige-v1-cleanup-");
+  const cleanupPath = backgroundStartRequestPath(cleanupRoot);
+  await writeFile(cleanupPath, `${JSON.stringify(legacyDocument)}\n`, { mode: 0o600 });
+  await assert.rejects(
+    readBackgroundStartRequest({ stateRoot: cleanupRoot }),
+    /schema|unsupported/i,
+  );
+  assert.equal(await removeLegacyBackgroundStartRequest({ stateRoot: cleanupRoot }), true);
+  assert.equal(await readBackgroundStartRequest({ stateRoot: cleanupRoot }), null);
+  const republished = await publishBackgroundStartRequest({
+    stateRoot: cleanupRoot,
+    ...startRequest(),
+  }, { now: () => NOW });
+  assert.equal(republished.schemaVersion, 2);
+  assert.equal(await removeLegacyBackgroundStartRequest({ stateRoot: cleanupRoot }), false);
+  assert.deepEqual(await readBackgroundStartRequest({ stateRoot: cleanupRoot }), republished);
+  assert.equal(await removeBackgroundStartRequest({ stateRoot: cleanupRoot }), true);
+  assert.equal(await readBackgroundStartRequest({ stateRoot: cleanupRoot }), null);
+
+  const claimRoot = await privateRoot("heige-v1-claim-");
+  await writeFile(
+    backgroundStartRequestPath(claimRoot),
+    `${JSON.stringify(legacyDocument)}\n`,
+    { mode: 0o600 },
+  );
+  await assert.rejects(claimBackgroundStartRequest({
+    stateRoot: claimRoot,
+    platform: "darwin",
+    backgroundIdentity: "com.heige.codex-skin-controller",
+    clock: () => NOW.getTime(),
+  }), /schema|unsupported/i);
+  assert.equal(await readBackgroundStartRequest({ stateRoot: claimRoot }), null);
+
+  const unregisterRoot = await privateRoot("heige-v1-unregister-");
+  await writeFile(
+    backgroundStartRequestPath(unregisterRoot),
+    `${JSON.stringify(legacyDocument)}\n`,
+    { mode: 0o600 },
+  );
+  assert.equal(await removeBackgroundStartRequest({ stateRoot: unregisterRoot }), true);
+  assert.equal(await readBackgroundStartRequest({ stateRoot: unregisterRoot }), null);
+
+  const malformedRoot = await privateRoot("heige-v1-malformed-");
+  const malformedPath = backgroundStartRequestPath(malformedRoot);
+  const malformedBytes = `${JSON.stringify({ ...legacyDocument, unexpected: true })}\n`;
+  await writeFile(malformedPath, malformedBytes, { mode: 0o600 });
+  await assert.rejects(
+    removeLegacyBackgroundStartRequest({ stateRoot: malformedRoot }),
+    /unknown|schema/i,
+  );
+  assert.equal(await readFile(malformedPath, "utf8"), malformedBytes);
 });
 
 test("background start request is atomically single-consumer and cannot replay", async () => {
