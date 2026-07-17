@@ -19,6 +19,7 @@ import { applyPort, parseArgs as parseCreateArgs } from "../skill/codex-skin-stu
 import { buildPlist, buildTaskXml, createControlServer, parseArgs as parsePersistArgs } from "../skill/codex-skin-studio/scripts/persist.mjs";
 import { createPet, defaultPetsDir, DEFAULT_PET_CONTRACT, installPet, petStatus, validateContract, validatePetDirectory } from "../skill/codex-skin-studio/scripts/pet.mjs";
 import { buildMacOpenSettingsScript, buildWindowsOpenSettingsScript, OPEN_ACCOUNT_MENU_EXPRESSION, OPEN_PETS_PANEL_EXPRESSION, OPEN_SETTINGS_EXPRESSION, PET_UI_STATE_EXPRESSION, petSelectionStateExpression, REFRESH_PETS_EXPRESSION, selectPetExpression } from "../skill/codex-skin-studio/scripts/pet-desktop.mjs";
+import { parseArgs as parseVerifyPetContractArgs, verifyPetContract } from "../skill/codex-skin-studio/scripts/verify-pet-contract.mjs";
 import { parseArgs as parseVerifyPetArgs, verifyPetDesktop } from "../skill/codex-skin-studio/scripts/verify-pet-desktop.mjs";
 import { createPairBundle, switchPairBundle, validatePairBundle } from "../skill/codex-skin-studio/scripts/paired.mjs";
 
@@ -1401,6 +1402,22 @@ test("Windows Pet evidence command requires native selection and loaded asset", 
   await assert.rejects(verifyPetDesktop({ petId: "paired-demo", port: 9341 }, async () => ({ selection: "refresh-required", assetLoaded: false })), /did not confirm native Pet selection/);
 });
 
+test("verifies the official hatch-pet contract independently of native UI selection", async () => {
+  await withTempDir("codex-pet-contract-", async (root) => {
+    const source = join(root, "codex-pet-contract.md");
+    const markdown = `# Codex V2 Pet Contract\n\n- Version: \`spriteVersionNumber: 2\`.\n- Dimensions: \`1536x2288\`.\n- Grid: 8 columns x 11 rows.\n- Cell: \`192x208\`.\n- Background: transparent.\n- Rows \`0-8\`: standard animation states.\n- Rows \`9-10\`: 16 clockwise look directions.\n- \`000\` means up / 12 o'clock, not neutral/front.\n- The 8x9 \`1536x1872\` atlas is an intermediate assembly artifact only.\n- Directions: 000, 022.5, 045, 067.5, 090, 112.5, 135, 157.5, 180, 202.5, 225, 247.5, 270, 292.5, 315, 337.5.`;
+    await writeFile(source, markdown);
+    const contract = join(root, "contract.json");
+    await writeFile(contract, JSON.stringify(observedPetContract));
+    assert.deepEqual(parseVerifyPetContractArgs(["--source", source, "--contract", contract, "--platform", "win32", "--json"]), { source, contract, platform: "win32" });
+    const result = await verifyPetContract({ source, contract, platform: "win32" });
+    assert.equal(result.status, "verified");
+    assert.equal(result.platform, "win32");
+    assert.equal(result.evidence.dimensions, "128x176");
+    assert.equal(result.evidence.lookDirections, 16);
+  });
+});
+
 test("paired switch records a native Pet selection postcondition", async () => {
   await withTempDir("codex-paired-switch-", async (root) => {
     const frames = await makePetFrames(root);
@@ -1444,7 +1461,7 @@ test("paired switch preserves an explicit manual-refresh fallback when native UI
 });
 
 test("distribution files are English ASCII text and SKILL has valid frontmatter", async () => {
-  const textExpected = ["SKILL.md", "agents/openai.yaml", "examples/cyberpunk/prompt.md", "examples/cyberpunk/theme.json", "examples/pets/mascot/pet.json", "examples/slayers-xellos-night/theme.json", "scripts/apply.mjs", "scripts/create-paired.mjs", "scripts/create-pet.mjs", "scripts/create-theme.mjs", "scripts/install-pet.mjs", "scripts/paired-status.mjs", "scripts/paired.mjs", "scripts/pet-desktop.mjs", "scripts/pet.mjs", "scripts/persist.mjs", "scripts/switch-paired.mjs", "scripts/validate-pet.mjs", "scripts/verify-pet-desktop.mjs", "scripts/windows/apply.ps1", "templates/pet-contract.json", "templates/pet.json", "templates/theme.json"].sort((a, b) => a.localeCompare(b));
+  const textExpected = ["SKILL.md", "agents/openai.yaml", "examples/cyberpunk/prompt.md", "examples/cyberpunk/theme.json", "examples/pets/mascot/pet.json", "examples/slayers-xellos-night/theme.json", "scripts/apply.mjs", "scripts/create-paired.mjs", "scripts/create-pet.mjs", "scripts/create-theme.mjs", "scripts/install-pet.mjs", "scripts/paired-status.mjs", "scripts/paired.mjs", "scripts/pet-desktop.mjs", "scripts/pet.mjs", "scripts/persist.mjs", "scripts/switch-paired.mjs", "scripts/validate-pet.mjs", "scripts/verify-pet-contract.mjs", "scripts/verify-pet-desktop.mjs", "scripts/windows/apply.ps1", "templates/pet-contract.json", "templates/pet.json", "templates/theme.json"].sort((a, b) => a.localeCompare(b));
   const binaryExpected = ["examples/pets/mascot/spritesheet.webp", "examples/slayers-xellos-night/hero.webp"];
   assert.deepEqual((await listFiles(skillRoot)).map((value) => value.replaceAll("\\", "/")), [...textExpected, ...binaryExpected].sort((a, b) => a.localeCompare(b)));
   const skill = await readFile(join(skillRoot, "SKILL.md"), "utf8");
@@ -1521,6 +1538,7 @@ test("package script creates exactly the new Skill folder contents", async () =>
     "codex-skin-studio/scripts/windows/apply.ps1",
     "codex-skin-studio/scripts/switch-paired.mjs",
     "codex-skin-studio/scripts/validate-pet.mjs",
+    "codex-skin-studio/scripts/verify-pet-contract.mjs",
     "codex-skin-studio/scripts/verify-pet-desktop.mjs",
     "codex-skin-studio/templates/",
     "codex-skin-studio/templates/pet-contract.json",

@@ -686,7 +686,7 @@ Codex 原生 Image Generation
 - Pet 图集生成、chroma-key 去背景、RGBA WebP 输出、Codex V2 `1536 × 2288` / 8 × 11 / `spriteVersionNumber: 2` 校验、未使用单元格透明校验、manifest 校验、原子安装和本地状态查询已经实现；
 - 配套主题 + Pet Bundle 创建、配套切换和合并状态查询已经实现；
 - 英文 `SKILL.md` 已加入 Pet 和配套 Bundle 编排规则；
-- 自动化回归测试为 `87/87`，Windows 路径、PowerShell 设置入口和安装契约测试为 `3/3`；Windows 另提供 `verify-pet-desktop.mjs` 证据命令，要求真实 selected-row 和 loaded-sprite postcondition；
+- 自动化回归测试为 `88/88`，Windows 路径、PowerShell 设置入口和安装契约测试为 `3/3`；Windows workflow 另会从官方安装包读取 `hatch-pet/references/codex-pet-contract.md`，通过 `verify-pet-contract.mjs` 独立确认 v2 格式，再由 `verify-pet-desktop.mjs` 要求真实 selected-row 和 loaded-sprite postcondition；
 - 当前模板 contract 已更新为随 ChatGPT Desktop 提供的 Codex V2 observed contract；`--allow-provisional` 仅保留给未来契约变更的开发测试；
 - 本机 ChatGPT Desktop `26.715.21316` 已发现官方 `hatch-pet` 资源契约；已通过当前 Renderer 的可见 Settings > Pets 控件真实完成 Refresh、匹配 Pet 选择、selected-row postcondition 和 embedded custom WebP sprite loaded postcondition，适配器版本为 `chatgpt-desktop-pets-settings-v1`；实测 `/pet` 返回 “isn’t a recognized command here”，因此不作为当前版本唤醒路径，Windows 仍缺少本机手工验证。
 

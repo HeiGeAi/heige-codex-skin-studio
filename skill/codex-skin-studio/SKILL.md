@@ -303,6 +303,22 @@ Never infer an animation row mapping from a community example. If the observed
 contract changes, stop with `PET_CONTRACT_MISMATCH` and update the versioned
 contract before generating or installing a Pet.
 
+Validate the official bundled contract independently of native Pet UI selection
+when a ChatGPT Desktop installation is available:
+
+```bash
+node "$SKILL_ROOT/scripts/verify-pet-contract.mjs" \
+  --source "/absolute/path/to/hatch-pet/references/codex-pet-contract.md" \
+  --contract "$SKILL_ROOT/templates/pet-contract.json" \
+  --platform win32 \
+  --json
+```
+
+This verifies the installed package's v2 dimensions, grid, cell size, row
+semantics, look directions, transparency requirement, and 8x9 intermediate
+boundary. It does not claim that a user is signed in or that the Pet is
+selected in the visible application UI.
+
 ### Pet input and assembly
 
 Create a frame manifest with one list of frames per observed row. Standard rows

@@ -455,6 +455,11 @@ node "$env:USERPROFILE\.codex\skills\codex-skin-studio\scripts\verify-pet-deskto
   --pet-id mascot --port 9341 --json
 ```
 
+The official Windows package contract can be checked separately from UI
+selection with `scripts/verify-pet-contract.mjs`; the E2E workflow locates the
+bundled `hatch-pet/references/codex-pet-contract.md` and records that evidence
+before attempting native Pet selection.
+
 The theme distribution is intentionally zero-dependency and English ASCII-only. The optional Pet atlas tools require `sharp`, using ChatGPT Desktop's bundled Node runtime when available. Theme names and user-facing responses may use any language.
 
 ## Security Boundary

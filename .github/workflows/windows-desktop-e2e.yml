@@ -20,6 +20,16 @@ jobs:
           powershell -NoProfile -ExecutionPolicy Bypass -File `
             'skill\codex-skin-studio\scripts\windows\apply.ps1' `
             -ThemeDir 'skill\codex-skin-studio\examples\slayers-xellos-night' -Force
+      - name: Verify the official Windows hatch-pet contract
+        shell: pwsh
+        run: |
+          $package = Get-AppxPackage -Name OpenAI.Codex -ErrorAction Stop
+          $source = Get-ChildItem -LiteralPath $package.InstallLocation -Filter 'codex-pet-contract.md' -File -Recurse -ErrorAction Stop | Select-Object -First 1
+          if (-not $source) { throw "The installed ChatGPT Desktop package does not contain codex-pet-contract.md" }
+          node skill\codex-skin-studio\scripts\verify-pet-contract.mjs `
+            --source $source.FullName `
+            --contract skill\codex-skin-studio\templates\pet-contract.json `
+            --platform win32 --json
       - name: Install the example Pet
         shell: pwsh
         run: |

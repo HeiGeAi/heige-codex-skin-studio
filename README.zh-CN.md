@@ -400,6 +400,11 @@ node "$env:USERPROFILE\.codex\skills\codex-skin-studio\scripts\verify-pet-deskto
   --pet-id mascot --port 9341 --json
 ```
 
+官方 Windows 安装包的 Pet 契约可以独立于 UI 选择进行校验：使用
+`scripts/verify-pet-contract.mjs` 读取安装包内的
+`hatch-pet/references/codex-pet-contract.md`。E2E workflow 会先记录这份契约
+证据，再尝试原生 Pet 选择。
+
 主题换肤分发路径保持零依赖和英文 ASCII-only；可选 Pet 图集工具需要 `sharp`，优先使用 ChatGPT Desktop 随附的 Node 运行时。主题名称和用户回复可以使用任意语言。
 
 ## 安全边界
