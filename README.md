@@ -297,7 +297,7 @@ For the Chinese guide, see [README.zh-CN.md](README.zh-CN.md).
 
 For project contact and community information, scan the QR code:
 
-![Contact QR code](codex-skin-skill-qrcode.jpg)
+<img src="codex-skin-skill-qrcode.jpg" alt="Contact QR code" width="188">
 
 - Discord: [Join the community server](https://discord.gg/bjeNUUCXq)
 - X / Twitter: [@dennis_huangbei](https://x.com/dennis_huangbei)
