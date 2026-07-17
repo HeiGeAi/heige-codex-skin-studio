@@ -1078,6 +1078,15 @@ export async function productionController({
     if (candidates.length !== 1) throw new Error("Codex 进程身份不唯一");
     return publicProcess(candidates[0]);
   };
+  // 用户正常启动的 Codex 不带任何 CDP 端口，这正是常驻要接管的那一个。
+  const probeNative = async () => {
+    const app = await resolveCodexApp({ platform });
+    const candidates = (await listCodexProcesses({ app }))
+      .filter((entry) => entry.cdpPort === null);
+    if (candidates.length === 0) return null;
+    if (candidates.length !== 1) throw new Error("Codex 原生进程身份不唯一");
+    return publicProcess(candidates[0]);
+  };
   if (preflight?.process !== undefined && preflight.process !== null) {
     const current = await probe();
     if (!sameProcessIdentity(current, preflight.process)) {
@@ -1112,6 +1121,27 @@ export async function productionController({
       requestContext: context,
     }, action),
     probeCurrentProcess: probe,
+    // Windows 的重启必须走 scripts/windows 包装器，这条直连生命周期路径只在 macOS 成立。
+    ...(platform === "darwin"
+      ? {
+        probeNativeProcess: probeNative,
+        restartIntoCdp: async ({ process: nativeProcess }) => {
+          const app = await resolveCodexApp({ platform });
+          // 不带 afterLaunch：本控制器就在运行，Codex 一带着 CDP 回来它自己会注入。
+          return productionRestartDetached({
+            paths,
+            preflight: {
+              appPath: app.appPath,
+              nodePath: process.execPath,
+              process: nativeProcess,
+            },
+            launchMode: "cdp",
+            port,
+            platform,
+          });
+        },
+      }
+      : {}),
     validatePortOwner: async (candidate) => {
       const current = await probe();
       if (!sameProcessIdentity(current, candidate)) return false;

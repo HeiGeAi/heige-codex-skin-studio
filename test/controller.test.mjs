@@ -87,6 +87,9 @@ function fixture(overrides = {}) {
   let processIdentity = Object.hasOwn(overrides, "process")
     ? clone(overrides.process)
     : clone(CURRENT_PROCESS);
+  let nativeProcessIdentity = Object.hasOwn(overrides, "nativeProcess")
+    ? clone(overrides.nativeProcess)
+    : null;
   let serverClosed = false;
   let backgroundRegistered = overrides.backgroundRegistered ?? state.persistenceEnabled;
   let backgroundIdentityVerified = false;
@@ -113,6 +116,8 @@ function fixture(overrides = {}) {
     prepareHandshake: [],
     logs: [],
     backgroundSequence: [],
+    probeNative: [],
+    restart: [],
   };
   let nonceIndex = 0;
   let journalWriteCount = 0;
@@ -189,6 +194,24 @@ function fixture(overrides = {}) {
       return { state: clone(state), session: clone(session), recovered: true };
     },
     probeCurrentProcess: async () => clone(processIdentity),
+    ...(Object.hasOwn(overrides, "nativeProcess")
+      ? {
+        probeNativeProcess: async () => {
+          calls.probeNative.push(true);
+          if (overrides.probeNativeFailure) throw new Error("native probe failed");
+          return clone(nativeProcessIdentity);
+        },
+      }
+      : {}),
+    ...(overrides.omitRestartIntoCdp === true
+      ? {}
+      : {
+        restartIntoCdp: async (input) => {
+          calls.restart.push(clone(input));
+          if (overrides.restartFailure) throw new Error("relaunch failed");
+          return { queued: true };
+        },
+      }),
     validatePortOwner: async (candidate) => {
       if (overrides.wrongPortOwner) return false;
       return candidate !== null;
@@ -303,6 +326,7 @@ function fixture(overrides = {}) {
     get transition() { return clone(transition); },
     get backgroundRegistered() { return backgroundRegistered; },
     setProcess(value) { processIdentity = clone(value); },
+    setNativeProcess(value) { nativeProcessIdentity = clone(value); },
     setHealth(value) { health = value; },
   };
 }
@@ -1509,4 +1533,191 @@ test("stop is idempotent and closes the control endpoint exactly once", async ()
   assert.deepEqual(await controller.stop(), { stopped: true });
   assert.deepEqual(await controller.stop(), { stopped: true });
   assert.equal(fx.calls.close, 1);
+});
+
+// ---- 常驻承诺：原生启动的 Codex 必须被后台控制器拉回皮肤模式 ----
+
+const NATIVE_PROCESS = {
+  pid: 4242,
+  executablePath: "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
+  startedAt: "Fri Jul 17 17:00:00 2026",
+};
+
+test("background controller relaunches a natively started Codex into CDP while persistence is on", async () => {
+  const fx = fixture({
+    backgroundProcess: true,
+    state: { persistenceEnabled: true, revision: 3, selectedThemeId: DEFAULT_THEME_ID },
+    session: nativeSession(),
+    process: null,
+    nativeProcess: NATIVE_PROCESS,
+  });
+  const result = await createSkinController(fx.deps).start();
+
+  assert.deepEqual(result, {
+    action: "relaunch",
+    mode: "native",
+    persistenceEnabled: true,
+    revision: 3,
+  });
+  assert.equal(fx.calls.restart.length, 1);
+  assert.deepEqual(fx.calls.restart[0], {
+    process: NATIVE_PROCESS,
+    themeId: DEFAULT_THEME_ID,
+  });
+  assert.equal(fx.calls.inject.length, 0);
+  assert.equal(fx.calls.unregister.length, 0);
+});
+
+test("controller relaunches one exact native process at most once", async () => {
+  const fx = fixture({
+    backgroundProcess: true,
+    state: { persistenceEnabled: true, revision: 3 },
+    session: nativeSession(),
+    process: null,
+    nativeProcess: NATIVE_PROCESS,
+  });
+  const controller = createSkinController(fx.deps);
+  assert.equal((await controller.start()).action, "relaunch");
+  assert.equal((await controller.tick()).action, "wait-for-app");
+  assert.equal((await controller.tick()).action, "wait-for-app");
+  assert.equal(fx.calls.restart.length, 1);
+});
+
+test("controller relaunches again once a different native process appears", async () => {
+  const fx = fixture({
+    backgroundProcess: true,
+    state: { persistenceEnabled: true, revision: 3 },
+    session: nativeSession(),
+    process: null,
+    nativeProcess: NATIVE_PROCESS,
+  });
+  const controller = createSkinController(fx.deps);
+  assert.equal((await controller.start()).action, "relaunch");
+  assert.equal((await controller.tick()).action, "wait-for-app");
+  fx.setNativeProcess({ ...NATIVE_PROCESS, pid: 4343, startedAt: "Fri Jul 17 17:05:00 2026" });
+  assert.equal((await controller.tick()).action, "relaunch");
+  assert.equal(fx.calls.restart.length, 2);
+  assert.equal(fx.calls.restart[1].process.pid, 4343);
+});
+
+test("controller never relaunches while persistence is off", async () => {
+  const fx = fixture({
+    backgroundProcess: true,
+    state: { persistenceEnabled: false, revision: 3 },
+    session: nativeSession(),
+    process: null,
+    nativeProcess: NATIVE_PROCESS,
+    backgroundRegistered: true,
+  });
+  assert.equal((await createSkinController(fx.deps).start()).action, "unregister");
+  assert.equal(fx.calls.restart.length, 0);
+});
+
+test("controller waits without relaunching when no Codex process exists at all", async () => {
+  const fx = fixture({
+    backgroundProcess: true,
+    state: { persistenceEnabled: true, revision: 3 },
+    session: nativeSession(),
+    process: null,
+    nativeProcess: null,
+  });
+  assert.equal((await createSkinController(fx.deps).start()).action, "wait-for-app");
+  assert.equal(fx.calls.restart.length, 0);
+});
+
+test("ephemeral controller never relaunches Codex", async () => {
+  const fx = fixture({
+    backgroundProcess: false,
+    state: { persistenceEnabled: true, revision: 3 },
+    session: nativeSession(),
+    process: null,
+    nativeProcess: NATIVE_PROCESS,
+  });
+  assert.equal((await createSkinController(fx.deps).start()).action, "wait-for-app");
+  assert.equal(fx.calls.restart.length, 0);
+  assert.equal(fx.calls.probeNative.length, 0);
+});
+
+test("controller keeps waiting and stays quiet when the relaunch dependency is absent", async () => {
+  const fx = fixture({
+    backgroundProcess: true,
+    state: { persistenceEnabled: true, revision: 3 },
+    session: nativeSession(),
+    process: null,
+    nativeProcess: NATIVE_PROCESS,
+    omitRestartIntoCdp: true,
+  });
+  assert.equal((await createSkinController(fx.deps).start()).action, "wait-for-app");
+  assert.equal(fx.calls.restart.length, 0);
+});
+
+test("a failing relaunch degrades to waiting instead of erroring or looping", async () => {
+  const fx = fixture({
+    backgroundProcess: true,
+    state: { persistenceEnabled: true, revision: 3 },
+    session: nativeSession(),
+    process: null,
+    nativeProcess: NATIVE_PROCESS,
+    restartFailure: true,
+  });
+  const controller = createSkinController(fx.deps);
+  assert.equal((await controller.start()).action, "wait-for-app");
+  assert.equal((await controller.tick()).action, "wait-for-app");
+  assert.equal(fx.calls.restart.length, 1);
+  assert.ok(fx.calls.logs.some((entry) => entry.event === "relaunch_failed"));
+});
+
+test("a failing native probe degrades to waiting instead of erroring", async () => {
+  const fx = fixture({
+    backgroundProcess: true,
+    state: { persistenceEnabled: true, revision: 3 },
+    session: nativeSession(),
+    process: null,
+    nativeProcess: NATIVE_PROCESS,
+    probeNativeFailure: true,
+  });
+  assert.equal((await createSkinController(fx.deps).start()).action, "wait-for-app");
+  assert.equal(fx.calls.restart.length, 0);
+});
+
+test("repeated relaunches that never restore CDP stop after the failure budget", async () => {
+  const fx = fixture({
+    backgroundProcess: true,
+    state: { persistenceEnabled: true, revision: 3 },
+    session: nativeSession(),
+    process: null,
+    nativeProcess: NATIVE_PROCESS,
+  });
+  const controller = createSkinController(fx.deps);
+  // 每次重启后 Codex 都换了身份却依旧没有 CDP：单靠身份去重会无限重启。
+  assert.equal((await controller.start()).action, "relaunch");
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    fx.setNativeProcess({ ...NATIVE_PROCESS, pid: 5000 + attempt, startedAt: `Fri Jul 17 18:0${attempt}:00 2026` });
+    await controller.tick();
+  }
+  assert.equal(fx.calls.restart.length, 3);
+  assert.equal((await controller.tick()).action, "wait-for-app");
+});
+
+test("a relaunch that restores CDP refills the budget for the next native start", async () => {
+  const fx = fixture({
+    backgroundProcess: true,
+    state: { persistenceEnabled: true, revision: 3 },
+    session: nativeSession(),
+    process: null,
+    nativeProcess: NATIVE_PROCESS,
+  });
+  const controller = createSkinController(fx.deps);
+  assert.equal((await controller.start()).action, "relaunch");
+
+  // 重启生效：Codex 带着 CDP 回来，控制器完成注入。
+  fx.setProcess(REPLACEMENT_PROCESS);
+  fx.setNativeProcess(null);
+  assert.equal((await controller.tick()).action, "inject");
+
+  // 用户随后又正常重启了一次 Codex，必须照样被接管。
+  fx.setProcess(null);
+  fx.setNativeProcess({ ...NATIVE_PROCESS, pid: 6161, startedAt: "Fri Jul 17 19:00:00 2026" });
+  assert.equal((await controller.tick()).action, "relaunch");
+  assert.equal(fx.calls.restart.length, 2);
 });

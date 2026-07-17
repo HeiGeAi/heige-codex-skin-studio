@@ -20,11 +20,13 @@ const RENDERER_GENERATION = /^[a-f0-9]{32}$/;
 const MENU_REQUEST_ID = /^[a-f0-9]{32}$/;
 const THEME_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const LOCAL_CUSTOM_THEME_ID = "custom-upload";
+const MAX_RELAUNCH_ATTEMPTS = 3;
 const ACTIONS = new Set([
   "idle",
   "inject",
   "repair",
   "wait-for-app",
+  "relaunch",
   "unregister",
   "paused",
   "handoff",
@@ -280,6 +282,12 @@ function normalizedDependencies(input) {
     clearJournal: requireFunction(clearJournal, "clearJournal"),
     recoverTransition: requireFunction(recoverTransition, "recoverTransition"),
     probeCurrentProcess: requireFunction(input.probeCurrentProcess, "probeCurrentProcess"),
+    probeNativeProcess: input.probeNativeProcess === undefined
+      ? null
+      : requireFunction(input.probeNativeProcess, "probeNativeProcess"),
+    restartIntoCdp: input.restartIntoCdp === undefined
+      ? null
+      : requireFunction(input.restartIntoCdp, "restartIntoCdp"),
     validatePortOwner: requireFunction(input.validatePortOwner, "validatePortOwner"),
     inspectSkin: input.inspectSkin,
     validateThemeSelection: input.validateThemeSelection === undefined
@@ -534,6 +542,41 @@ export function createSkinController(input) {
   let handoffRequested = false;
 
   const probeProcess = async () => normalizeProcessProbe(await deps.probeCurrentProcess());
+
+  // 常驻承诺：用户正常启动的 Codex 不带 CDP，只有后台服务能把它拉回皮肤模式。
+  // 三重刹车，因为重启后的 Codex 若仍无 CDP 会变成另一个原生进程，单靠身份去重挡不住循环：
+  //   1. 同一进程身份只尝试一次；
+  //   2. 连续失败用尽预算后彻底停手，等待人工介入；
+  //   3. 任何一次重启把 CDP 拉起来，预算即清零，用户后续重启照常被接管。
+  let relaunchAttempt = null;
+  let relaunchFailures = 0;
+  const clearRelaunchBudget = () => {
+    relaunchAttempt = null;
+    relaunchFailures = 0;
+  };
+  const relaunchNativeCodex = async (state) => {
+    if (!deps.backgroundProcess) return false;
+    if (deps.probeNativeProcess === null || deps.restartIntoCdp === null) return false;
+    if (relaunchFailures >= MAX_RELAUNCH_ATTEMPTS) return false;
+    let native;
+    try {
+      native = normalizeProcessProbe(await deps.probeNativeProcess());
+    } catch (error) {
+      await safeLog(deps.logger, "warn", "native_probe_failed", error);
+      return false;
+    }
+    if (native === null) return false;
+    if (relaunchAttempt !== null && sameProcessIdentity(relaunchAttempt, native)) return false;
+    relaunchAttempt = native;
+    relaunchFailures += 1;
+    try {
+      await deps.restartIntoCdp({ process: native, themeId: state.selectedThemeId });
+      return true;
+    } catch (error) {
+      await safeLog(deps.logger, "error", "relaunch_failed", error);
+      return false;
+    }
+  };
 
   const assertPortOwner = async (processIdentity) => {
     if (processIdentity === null || await deps.validatePortOwner(processIdentity) !== true) {
@@ -811,10 +854,12 @@ export function createSkinController(input) {
         session = nativeSession();
         await deps.writeSession(session, lease);
       }
+      if (await relaunchNativeCodex(state)) return result("relaunch", "native", state);
       return result("wait-for-app", "native", state);
     }
 
     await assertPortOwner(processIdentity);
+    clearRelaunchBudget();
     let { control, started: serverStarted } = await ensureServer(state);
     const sameSessionProcess = isRecord(session) &&
       sameProcessIdentity(session.process, processIdentity);
