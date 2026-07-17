@@ -283,3 +283,6 @@ English guide: [README.md](README.md)
 项目联系方式和交流信息请扫描二维码：
 
 ![联系方式二维码](codex-skin-skill-qrcode.jpg)
+
+- Discord：[加入社区服务器](https://discord.gg/bjeNUUCXq)
+- X / Twitter：[@dennis_huangbei](https://x.com/dennis_huangbei)
