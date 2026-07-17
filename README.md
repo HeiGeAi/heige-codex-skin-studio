@@ -1,144 +1,267 @@
-# HeiGe Codex Skin Studio | Codex 换肤工作室
+# ChatGPT Desktop Skin Studio
 
-<div align="center">
+AI-orchestrated skins for ChatGPT Desktop on macOS.
 
-**给 Codex Desktop 一键换肤：一张图片就是一个主题，右上角菜单即时切换。**
+This repository contains the `codex-skin-studio` Codex Skill and its zero-dependency Node.js runtime. The Skill turns a generated or user-provided image into a complete ChatGPT Desktop theme, validates the local assets, applies the theme through loopback CDP, and can keep the selected theme alive across app and computer restarts through a macOS LaunchAgent.
 
-*Reskin the Codex Desktop app on macOS: one image becomes a theme, switch instantly from an in-app menu.*
+The current application is ChatGPT Desktop. Its technical bundle identifier is `com.openai.codex`.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-![Platform](https://img.shields.io/badge/platform-macOS-black)
-![Codex Desktop](https://img.shields.io/badge/Codex-Desktop-10a37f)
+## Highlights
 
-[中文](#这是什么) · [English](#english)
+- Text-to-skin orchestration through Codex native image generation.
+- Image-to-skin workflows for direct backgrounds, subject preservation, style references, and multi-image composition.
+- Five-zone visual contract for safe ChatGPT Desktop composition.
+- One-shot theme creation with `hero`, `theme.json`, optional logo, optional portrait card, and optional brand copy.
+- Scoped CSS injection that replaces only the top workspace label and preserves project session controls and account controls.
+- Local-only CDP communication on `127.0.0.1`.
+- Optional macOS LaunchAgent persistence for login, app launch, and renderer reload recovery.
+- No `app.asar` modification, code-signature changes, database, website, remote service, or arbitrary theme CSS.
+- English-only Skill distribution files; the Skill can respond to users in their language.
 
-</div>
+## Architecture
 
-![真机截图：Miku 主题 + 右上角一键切换菜单](docs/images/miku-switcher-live.jpg)
-
-*真机截图：Miku 488137 高精度主题（品牌 Logo + 肖像背景 + 拍立得挂件），右上角 🎨 菜单一键切换全部主题和自定义上传。*
-
-## 这是什么
-
-一个效率优先的 macOS Codex Desktop 换肤工具。它通过本机回环 CDP 把主题实时注入 Codex 界面，不修改 `app.asar`，不破坏应用签名，也不需要为每次 Codex 更新重新适配。
-
-- **一键切换**：应用皮肤后 Codex 右上角出现 🎨 菜单，所有已装主题和原生界面即点即换，零等待。
-- **自定义上传**：菜单里选「＋ 自定义图片」直接上传本地图片，自动按图片风格取色（主色、辅色、面板底色、文字色），即点即换，重启后重新 apply 仍会保留；行尾 × 一键删除。
-- **一张图片就是一个主题**：任意 PNG、JPG、JPEG、WebP 直接生成皮肤（配色 + 背景底图）。
-- **9 个内置预设**：高精度定制的 `Miku 488137`，加上原神、鸣潮、火影忍者、恋与深空各两款轻量主题。
-- **AI 生成主题**：把 Skill 交给 Codex，让它先用生图能力产出主图，再自动做成皮肤，无需额外 API Key。
-- **可选桌宠**：独立的 `Miku Future` 动画桌面宠物，不覆盖 Codex 内置宠物。
-- **随时还原**：暂停皮肤或切回原生界面，官方安装包始终原封不动。
-
-![真机截图：原神星夜主题](docs/images/genshin-night-live.jpg)
-
-*真机截图：原神 · 星夜 轻量主题（无文字干净底图 + 自动配色）。*
-
-## 最快使用
-
-需要 macOS 和已安装的 Codex Desktop。下载本仓库后：
-
-```bash
-open "<仓库路径>/scripts/install.command"
+```text
+User request or reference image
+            |
+            v
+Codex Vision + native image_gen
+            |
+            v
+Final hero + colors + optional assets
+            |
+            v
+create-theme.mjs
+            |
+            v
+validate -> persist -> apply.mjs -> loopback CDP
+                                      |
+                                      v
+                              ChatGPT Desktop
+                                      ^
+                                      |
+                         optional macOS LaunchAgent
 ```
 
-安装脚本会把工具放到 `~/.codex/heige-codex-skin-studio`，并默认应用 Miku 预设。应用皮肤时 Codex 会被正常退出并以本机调试模式重新打开，当前任务请先保存。
+The Skill is the agent layer. `create-theme.mjs` creates a complete local theme directory. `apply.mjs` discovers the signed ChatGPT Desktop app, selects the main renderer, injects one verified style element, persists the theme, and reports a truthful status. `persist.mjs` runs the long-lived recovery worker when persistence is enabled.
 
-之后的日常切换都在 Codex 右上角 🎨 菜单里完成。想用自己的图片做皮肤：
+## Repository Layout
 
-```bash
-open "$HOME/.codex/heige-codex-skin-studio/scripts/customize.command"
+```text
+skill/codex-skin-studio/
+├── SKILL.md
+├── agents/openai.yaml
+├── scripts/
+│   ├── apply.mjs
+│   ├── create-theme.mjs
+│   └── persist.mjs
+├── templates/theme.json
+└── examples/cyberpunk/
+
+themes/
+└── slayers-xellos-night/
+
+output/
+└── codex-skin-studio.skill
 ```
 
-暂停皮肤、回到原生外观：
+## Install The Skill
+
+Build the distributable Skill package:
 
 ```bash
-open "$HOME/.codex/heige-codex-skin-studio/scripts/pause.command"
+npm run package:codex-skin-studio
 ```
 
-注意：Codex 手动重启后注入会消失（CDP 方案的天性），重跑一次 `apply.command` 即可回来。
+The output is `output/codex-skin-studio.skill`. Install that package through the Codex Skill installer, or install the source directory for local development:
 
-## 交给 Codex 使用
+```bash
+mkdir -p "$HOME/.codex/skills"
+rsync -a --delete skill/codex-skin-studio/ "$HOME/.codex/skills/codex-skin-studio/"
+```
 
-把 `output/heige-codex-skin-studio.skill` 交给 Codex，可以直接说：
+Skill installation copies files only. It does not start a background process. Persistence starts automatically during the first explicit apply flow, after a theme has been selected.
 
-> 用这张图片给 Codex 做一个皮肤并应用。
+## User Workflows
 
-或者：
+### Text-to-skin
 
-> 先生成一张蓝紫色赛博城市主图，再把它做成 Codex 皮肤。
+Example request:
 
-Skill 会优先调用 Codex 当前可用的图片生成能力产出主图，然后调用本地确定性工具创建并应用主题。
+```text
+Create and apply a dark cyberpunk ChatGPT Desktop skin with neon cyan accents.
+```
 
-## 极简主题格式
+The Skill writes a visual brief, calls native image generation, inspects the result, derives colors, creates the theme directory, applies it, and verifies `active` status.
+
+### Subject-preserving image-to-skin
+
+Example request:
+
+```text
+Use the attached character as the subject. Create and apply a Japanese anime ChatGPT Desktop skin. Preserve the face, silhouette, clothing, staff, colors, and proportions. Rebuild the scene around it.
+```
+
+The source image is inspected with Vision first. The subject is assigned an explicit role and remains separate from the style and layout constraints.
+
+### Style-reference skin
+
+Example request:
+
+```text
+Use this image only as a style reference. Create a new ChatGPT Desktop skin with the same palette, lighting, rendering density, and mood, but do not copy its subject or composition.
+```
+
+### Direct background
+
+Example request:
+
+```text
+Use this local image directly as the ChatGPT Desktop background and apply it.
+```
+
+The Skill checks aspect ratio, safe zones, contrast, text, and watermarks before applying it.
+
+## Five-Zone Visual Contract
+
+Every generated hero is a background for the live ChatGPT Desktop workbench, not a screenshot or poster.
+
+1. **Left: brand and navigation safe zone.** Reserve quiet space for a logo or styled brand label and the live navigation. No face, important object, high-contrast highlight, or dense detail belongs here.
+2. **Center: immersive scene and gradient safety.** Keep the scene visible while leaving room for the runtime gradient behind conversations.
+3. **Right: subject and information-card space.** Place the preserved person or product in the right third with breathing room for optional brand information.
+4. **Bottom: input workbench safe zone.** Keep roughly the lower 20 percent calm and low contrast for the composer and approval controls.
+5. **Lower right: optional portrait card.** Treat it as secondary decoration. It must not cover the subject, composer, or primary information.
+
+The hero must not contain fake menus, buttons, chat bubbles, code, text, watermarks, or a baked-in ChatGPT interface.
+
+## One-Shot Theme Creation And Apply
+
+After the final hero has been generated and inspected, the Skill can create and apply a theme in one command:
+
+```bash
+node "$HOME/.codex/skills/codex-skin-studio/scripts/create-theme.mjs" \
+  --id "slayers-xellos-night" \
+  --name "Slayers Xellos Night" \
+  --out "/absolute/path/to/themes/slayers-xellos-night" \
+  --hero "/absolute/path/to/final-hero.webp" \
+  --accent "#D76CFF" \
+  --secondary "#806CFF" \
+  --surface "#090D2A" \
+  --text "#FFFFFF" \
+  --brand "SLAYERS // XELLOS" \
+  --replace \
+  --apply
+```
+
+The command creates the files in a temporary directory, validates them, atomically replaces the output directory, persists the theme, and applies it when a renderer is available. `--replace` never deletes the old theme until the new one passes validation.
+
+When a user explicitly asks to apply a theme, the Skill also checks the persistence worker. If it is disabled, the Skill enables it before reporting completion:
+
+```bash
+node "$HOME/.codex/skills/codex-skin-studio/scripts/persist.mjs" status --json
+node "$HOME/.codex/skills/codex-skin-studio/scripts/persist.mjs" install --json
+```
+
+The final result must be `applied` or a later `apply.mjs status` result of `active`. `scheduled`, `pending`, and `enabled` are not proof that the skin is currently visible.
+
+## Theme Format
+
+The runtime core is a local hero image and `theme.json`:
 
 ```json
 {
   "schemaVersion": 1,
-  "id": "my-skin",
-  "name": "My Skin",
+  "id": "slayers-xellos-night",
+  "name": "Slayers Xellos Night",
   "hero": "hero.webp",
+  "logo": "logo.png",
+  "polaroid": "polaroid.png",
+  "copy": {
+    "brand": "SLAYERS // XELLOS",
+    "headline": "The Black Cloak of Xellos",
+    "tagline": "Arcane ruins. Violet stars. Quiet mischief."
+  },
   "colors": {
-    "accent": "#24C9D7",
-    "secondary": "#EF8FD3",
-    "surface": "#F7FBFF",
-    "text": "#17344F"
+    "accent": "#D76CFF",
+    "secondary": "#806CFF",
+    "surface": "#090D2A",
+    "text": "#FFFFFF"
   }
 }
 ```
 
-只有 `schemaVersion`、`id`、`name` 和 `hero` 必填。图片必须位于主题目录内，颜色和文案都可省略。
+Only `schemaVersion`, `id`, `name`, `hero`, and the four colors are required by the current Skill workflow. `logo` replaces the top workspace label with an authorized local asset. Without a logo, `copy.brand` replaces the live label with scoped styled text. `headline` and `tagline` are optional and create a right-side information card only when explicitly requested. `polaroid` is a non-interactive lower-right asset.
 
-## 主题概念图库
+Current runtime media support is PNG, JPEG, and WebP. GIF and video backgrounds are not enabled in this MVP; they require additional animation and media-lifecycle validation.
 
-这些 4K 概念图展示「一张图就是一个皮肤方向」的设计效果，内置的 8 款轻量预设使用同场景的无文字干净壁纸版本。
+## Persistence
 
-| 原神 | 原神 |
-| --- | --- |
-| ![原神 Codex UI 概念一](assets/previews/genshin-impact-codex-ui-1.webp) | ![原神 Codex UI 概念二](assets/previews/genshin-impact-codex-ui-2.webp) |
-
-| 鸣潮 | 鸣潮 |
-| --- | --- |
-| ![鸣潮 Codex UI 概念一](assets/previews/wuthering-waves-codex-ui-1.webp) | ![鸣潮 Codex UI 概念二](assets/previews/wuthering-waves-codex-ui-2.webp) |
-
-| 火影忍者 | 火影忍者 |
-| --- | --- |
-| ![火影忍者 Codex UI 概念一](assets/previews/naruto-codex-ui-1.webp) | ![火影忍者 Codex UI 概念二](assets/previews/naruto-codex-ui-2.webp) |
-
-| 恋与深空 | 恋与深空 |
-| --- | --- |
-| ![恋与深空 Codex UI 概念一](assets/previews/love-and-deepspace-codex-ui-1.webp) | ![恋与深空 Codex UI 概念二](assets/previews/love-and-deepspace-codex-ui-2.webp) |
-
-## 命令行
+CDP CSS lives in renderer memory and normally disappears after a full app restart. The optional LaunchAgent solves this without modifying the application package:
 
 ```bash
-node src/cli.mjs list
-node src/cli.mjs create --image "/absolute/path/hero.webp" --name "My Skin"
-node src/cli.mjs apply --theme my-skin-id
-node src/cli.mjs status
-node src/cli.mjs pause
-node src/cli.mjs doctor
+node "$HOME/.codex/skills/codex-skin-studio/scripts/persist.mjs" install --json
+node "$HOME/.codex/skills/codex-skin-studio/scripts/persist.mjs" status --json
+node "$HOME/.codex/skills/codex-skin-studio/scripts/persist.mjs" uninstall --json
 ```
 
-## 设计边界
+The worker is a separate Node.js process managed by macOS `launchd`. It uses loopback CDP, watches for the selected renderer, and reapplies the persisted theme after login, app launch, or renderer reload. It does not generate images or modify `app.asar`.
 
-这是一个轻量工具。皮肤跟随当前 renderer 存活，Codex 完整重载界面后重新运行一次 `apply.command` 即可。当前版本只保证 macOS，CDP 只绑定本机回环地址 `127.0.0.1`。
+Do not use ChatGPT Scheduled Tasks for local skin persistence. They do not provide a reliable local process or app lifecycle hook.
 
-本仓库前身是走 ASAR 修改路线的 codex-miku-theme，旧实现保存在历史提交中（tag `v5-asar-legacy`），已由当前 CDP 注入方案取代。
+## Inspect And Restore
 
-## 开发
+```bash
+node "$HOME/.codex/skills/codex-skin-studio/scripts/apply.mjs" doctor --json
+node "$HOME/.codex/skills/codex-skin-studio/scripts/apply.mjs" status --json
+node "$HOME/.codex/skills/codex-skin-studio/scripts/apply.mjs" restore --json
+node "$HOME/.codex/skills/codex-skin-studio/scripts/apply.mjs" restore --restart-normal --json
+```
+
+`restore` removes the injected style but keeps theme files. `restore --restart-normal` also restarts ChatGPT Desktop without the debugging argument.
+
+## Troubleshooting
+
+### The skin disappears after restart
+
+Check the worker:
+
+```bash
+node "$HOME/.codex/skills/codex-skin-studio/scripts/persist.mjs" status --json
+```
+
+The expected result is `status: "enabled"` and `running: true`. If it is disabled, run `install` and then reapply the selected theme.
+
+### Application returns `scheduled`
+
+ChatGPT Desktop did not expose a renderer yet. Wait briefly and run `apply.mjs status --json`. Report success only after `active`.
+
+### Image generation fails
+
+The Skill uses Codex native image generation. If the current provider does not expose image generation, provide a final local PNG, JPEG, or WebP background. The runtime does not silently switch to an external image API.
+
+### The wrong UI element changes
+
+This is a regression. The brand selector must be scoped to the top navigation mode button. Project session buttons and the account footer must remain native. Run the repository test suite before changing selectors.
+
+## Development
 
 ```bash
 npm test
-npm run doctor
+npm run test:codex-skin-studio
+npm run package:codex-skin-studio
 ```
 
-## English
+The Skill distribution is intentionally zero-dependency and English ASCII-only. Theme names and user-facing responses may use any language.
 
-**HeiGe Codex Skin Studio** reskins the Codex Desktop app on macOS through loopback-only CDP injection. It never touches `app.asar` or the code signature. Any single image becomes a theme (palette + backdrop); after applying once, a 🎨 menu in the top-right corner of Codex switches between every installed theme and the native look instantly. Nine presets ship built in: the fully customized `Miku 488137` showcase plus eight lightweight game-inspired themes. Hand the bundled `.skill` to Codex and it can even generate theme artwork with its own image tools, then install the result deterministically.
+## Security Boundary
 
-Quick start: run `scripts/install.command`, then switch themes from the in-app menu. Pause anytime with `scripts/pause.command`; a normal Codex restart always returns to stock.
+- CDP is restricted to `127.0.0.1`.
+- Theme assets must be local files inside the theme directory.
+- Manifest fields are validated; themes cannot provide arbitrary CSS or JavaScript.
+- The application bundle and code signature are never modified.
+- Persistence is user-level and removable with `persist.mjs uninstall`.
 
-## 许可证与素材
+## License
 
-代码使用 [MIT License](LICENSE)。预览与预设中的角色、名称和视觉素材权利属于各自权利人（初音未来、原神、鸣潮、火影忍者、恋与深空等），仅用于主题概念展示，不由本项目的软件许可证授权，详见 [NOTICE.md](NOTICE.md)。
+The project code is released under the [MIT License](LICENSE). Character names, logos, and third-party visual assets remain subject to their respective rights; see [NOTICE.md](NOTICE.md).
+
+For the Chinese guide, see [README.zh-CN.md](README.zh-CN.md).

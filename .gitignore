@@ -4,3 +4,4 @@ pet/
 .staging/
 output/*
 !output/heige-codex-skin-studio.skill
+!output/codex-skin-studio.skill

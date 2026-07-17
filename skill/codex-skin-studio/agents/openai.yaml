@@ -1,0 +1,3 @@
+display_name: "Codex Skin Studio"
+short_description: "Design and manage ChatGPT Desktop skins on macOS"
+default_prompt: "Use $codex-skin-studio to create a complete one-shot ChatGPT Desktop skin with left brand-navigation, center gradient safety, right subject and information-card space, bottom composer safety, and optional lower-right portrait space. Validate the local files and, when requested, enable the local LaunchAgent persistence worker on first apply, create and apply the skin, then confirm active status. When image generation or editing is needed, invoke $imagegen first and use its native image_gen tool."

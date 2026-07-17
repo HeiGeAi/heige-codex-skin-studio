@@ -8,6 +8,8 @@
   },
   "scripts": {
     "test": "node --test",
+    "test:codex-skin-studio": "node --test test/codex-skin-studio-mvp.test.mjs",
+    "package:codex-skin-studio": "scripts/package-codex-skin-studio.command",
     "doctor": "node src/cli.mjs doctor",
     "status": "node src/cli.mjs status",
     "list": "node src/cli.mjs list",

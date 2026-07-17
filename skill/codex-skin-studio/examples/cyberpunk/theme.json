@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "cyberpunk-night",
+  "name": "Cyberpunk Night",
+  "hero": "hero.png",
+  "colors": {
+    "accent": "#25D9FF",
+    "secondary": "#FF5CC8",
+    "surface": "#10151F",
+    "text": "#FFFFFF"
+  }
+}
