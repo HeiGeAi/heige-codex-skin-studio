@@ -45,7 +45,7 @@ function commandFailure(error, fallback = "PET_NATIVE_UI_UNAVAILABLE") {
 
 export const PET_UI_STATE_EXPRESSION = `(() => ({
   settingsSlugs: [...document.querySelectorAll('[data-settings-panel-slug]')].map((node) => node.getAttribute('data-settings-panel-slug')).filter(Boolean),
-  settings: Boolean(document.querySelector('[data-settings-panel-slug]')),
+  settings: Boolean(document.querySelector('[data-settings-panel-slug], [data-testid*="settings-panel"], [role="dialog"]') || [...document.querySelectorAll('h1,h2,h3,[role="heading"]')].some((node) => /^(settings|preferences|appearance|pets?)$/i.test((node.textContent || '').replace(/\\s+/g, ' ').trim()))),
   petsPanel: Boolean(document.querySelector('[data-settings-panel-slug="pets"][aria-current="page"]') || [...document.querySelectorAll('h1,h2,h3,[role="heading"],button,[role="button"]')].some((node) => /refresh\\s+(custom\\s+)?pets?|custom\\s+pets?/i.test((node.getAttribute('aria-label') || '') + ' ' + (node.textContent || '')))),
   customPetIds: [...document.querySelectorAll('[data-avatar-id^="custom:"],[data-pet-id]')].map((node) => node.getAttribute('data-avatar-id')?.startsWith('custom:') ? node.getAttribute('data-avatar-id').slice(7) : node.getAttribute('data-pet-id')?.replace(/^custom:/, '')).filter(Boolean),
   main: (() => { const probe = ${MAIN_TARGET_PROBE}; return Boolean(probe.main && probe.root); })()
