@@ -123,6 +123,9 @@ export function validateThemeManifest(input) {
     hero: normalizeHero(input.hero),
     logo: input.logo === undefined || input.logo === null ? null : normalizeAssetPath(input.logo, "logo"),
     polaroid: input.polaroid === undefined || input.polaroid === null ? null : normalizeAssetPath(input.polaroid, "polaroid"),
+    cardArtwork: input.cardArtwork === undefined || input.cardArtwork === null
+      ? null
+      : normalizeAssetPath(input.cardArtwork, "cardArtwork"),
     colors: normalizeColors(input.colors),
     copy: normalizeCopy(input.copy),
   };
@@ -183,8 +186,17 @@ export async function loadTheme(themeDir) {
   const hero = await resolveAsset(root, realRoot, manifest.hero, "hero");
   const logo = manifest.logo ? await resolveAsset(root, realRoot, manifest.logo, "logo") : null;
   const polaroid = manifest.polaroid ? await resolveAsset(root, realRoot, manifest.polaroid, "polaroid") : null;
+  const cardArtwork = manifest.cardArtwork
+    ? await resolveAsset(root, realRoot, manifest.cardArtwork, "cardArtwork")
+    : null;
   const resourceBytes = sumWithinLimit(
-    [manifestBytes.byteLength, hero.bytes, logo?.bytes ?? 0, polaroid?.bytes ?? 0],
+    [
+      manifestBytes.byteLength,
+      hero.bytes,
+      logo?.bytes ?? 0,
+      polaroid?.bytes ?? 0,
+      cardArtwork?.bytes ?? 0,
+    ],
     RESOURCE_LIMITS.themeBytes,
     "theme",
   );
@@ -194,17 +206,20 @@ export async function loadTheme(themeDir) {
     heroPath: hero.path,
     logoPath: logo?.path ?? null,
     polaroidPath: polaroid?.path ?? null,
+    cardArtworkPath: cardArtwork?.path ?? null,
     manifestBytes: manifestBytes.byteLength,
     resourceBytes,
     assetMetadata: {
       hero: hero.metadata,
       logo: logo?.metadata ?? null,
       polaroid: polaroid?.metadata ?? null,
+      cardArtwork: cardArtwork?.metadata ?? null,
     },
     assetBuffers: {
       hero: hero.buffer,
       logo: logo?.buffer ?? null,
       polaroid: polaroid?.buffer ?? null,
+      cardArtwork: cardArtwork?.buffer ?? null,
     },
     root,
   };

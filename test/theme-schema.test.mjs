@@ -51,6 +51,7 @@ test("normalizes the minimal theme and supplies color defaults", () => {
     hero: "hero.png",
     logo: null,
     polaroid: null,
+    cardArtwork: null,
     colors: {
       accent: "#4BC2E0",
       secondary: "#AD7ED5",
@@ -167,6 +168,72 @@ test("loads one existing non-empty hero", async () => {
   );
 });
 
+test("loads optional signature-card artwork inside the theme budget", async () => {
+  await withTheme({
+    ...minimalManifest,
+    cardArtwork: "card.png",
+  }, async (root) => {
+    const hero = png(1600, 900);
+    const cardArtwork = png(480, 600);
+    await writeFile(join(root, "hero.png"), hero);
+    await writeFile(join(root, "card.png"), cardArtwork);
+
+    const theme = await loadTheme(root);
+
+    assert.equal(theme.manifest.cardArtwork, "card.png");
+    assert.equal(theme.cardArtworkPath, join(root, "card.png"));
+    assert.deepEqual(theme.assetMetadata.cardArtwork, {
+      mime: "image/png",
+      width: 480,
+      height: 600,
+    });
+    assert.deepEqual(theme.assetBuffers.cardArtwork, cardArtwork);
+  });
+});
+
+test("rejects unsafe or unsupported signature-card artwork paths", () => {
+  for (const cardArtwork of ["/tmp/card.png", "../card.png", "art/../../card.png"]) {
+    assert.throws(
+      () => validateThemeManifest({ ...minimalManifest, cardArtwork }),
+      /relative path inside the theme directory/,
+    );
+  }
+  assert.throws(
+    () => validateThemeManifest({ ...minimalManifest, cardArtwork: "card.gif" }),
+    /PNG, JPEG, or WebP/,
+  );
+});
+
+test("rejects invalid signature-card artwork files", async () => {
+  await withTheme({
+    ...minimalManifest,
+    cardArtwork: "card.png",
+  }, async (root) => {
+    await writeFile(join(root, "hero.png"), png(1600, 900));
+    await writeFile(join(root, "card.png"), png(8193, 100));
+    await assert.rejects(loadTheme(root), /宽度|width/i);
+    await writeFile(join(root, "card.png"), "");
+    await assert.rejects(loadTheme(root), /cardArtwork.*non-empty|cardArtwork不能为空|图片/i);
+  });
+});
+
+test("rejects signature-card artwork reached through a symlink outside the theme", async () => {
+  const outside = await mkdtemp(join(tmpdir(), "outside-card-artwork-"));
+  try {
+    await writeFile(join(outside, "card.png"), png(480, 600));
+    await withTheme(
+      { ...minimalManifest, cardArtwork: "images/card.png" },
+      async (root) => {
+        await writeFile(join(root, "hero.png"), png(1600, 900));
+        await symlink(outside, join(root, "images"));
+        await assert.rejects(loadTheme(root), /escapes the theme directory/);
+      },
+    );
+  } finally {
+    await rm(outside, { force: true, recursive: true });
+  }
+});
+
 test("enforces manifest bytes and nesting before resolving assets", async () => {
   const root = await mkdtemp(join(tmpdir(), "heige-theme-budget-"));
   try {
@@ -198,9 +265,10 @@ test("rejects MIME mismatch, image bombs, and aggregate theme bytes", async () =
     ...minimalManifest,
     logo: "logo.png",
     polaroid: "polaroid.png",
+    cardArtwork: "card.png",
   }, async (root) => {
-    for (const file of ["hero.png", "logo.png", "polaroid.png"]) {
-      await writeFile(join(root, file), png(100, 100, 6 * 1024 * 1024));
+    for (const file of ["hero.png", "logo.png", "polaroid.png", "card.png"]) {
+      await writeFile(join(root, file), png(100, 100, 5 * 1024 * 1024));
     }
     await assert.rejects(loadTheme(root), /theme.*16777216|16 MiB/i);
   });
