@@ -666,8 +666,46 @@ try {
                 -WorkingDirectory (Split-Path $script:ApplyBat -Parent) `
                 -Description $script:ShortcutDescription
         } catch {
-            $hresult = "0x{0:X8}" -f $_.Exception.HResult
-            throw "WScript shortcut creation failed：$($_.Exception.Message)；HRESULT=$hresult`n$($_.InvocationInfo.PositionMessage)`n$($_.ScriptStackTrace)"
+            $creationError = $_
+            $hresult = "0x{0:X8}" -f $creationError.Exception.HResult
+            $matrixRoot = Join-Path $env:RUNNER_TEMP ("heige-wsh-matrix-" + [guid]::NewGuid().ToString("N"))
+            $matrixResults = @()
+            try {
+                $unicodeRoot = Join-Path $matrixRoot "目标目录"
+                New-Item -ItemType Directory -Path $unicodeRoot -Force | Out-Null
+                $asciiEmpty = Join-Path $matrixRoot "ascii-empty.bat"
+                $asciiContent = Join-Path $matrixRoot "ascii-content.bat"
+                $unicodeEmpty = Join-Path $unicodeRoot "empty.bat"
+                $unicodeContent = Join-Path $unicodeRoot "content.bat"
+                New-Item -ItemType File -Path $asciiEmpty, $unicodeEmpty -Force | Out-Null
+                [System.IO.File]::WriteAllText($asciiContent, "@echo off`r`nexit /b 0`r`n")
+                [System.IO.File]::WriteAllText($unicodeContent, "@echo off`r`nexit /b 0`r`n")
+                $cases = [ordered]@{
+                    CmdExe = (Join-Path $env:SystemRoot "System32\cmd.exe")
+                    AsciiEmpty = $asciiEmpty
+                    AsciiContent = $asciiContent
+                    UnicodeEmpty = $unicodeEmpty
+                    UnicodeContent = $unicodeContent
+                }
+                foreach ($case in $cases.GetEnumerator()) {
+                    try {
+                        $matrixShell = New-Object -ComObject WScript.Shell
+                        $matrixShortcut = $matrixShell.CreateShortcut(
+                            (Join-Path $matrixRoot ($case.Key + ".lnk"))
+                        )
+                        $matrixShortcut.TargetPath = [string]$case.Value
+                        $matrixResults += "$($case.Key)=PASS"
+                    } catch {
+                        $caseHresult = "0x{0:X8}" -f $_.Exception.HResult
+                        $matrixResults += "$($case.Key)=FAIL:$caseHresult"
+                    }
+                }
+            } catch {
+                $matrixResults += "MatrixSetup=FAIL:$($_.Exception.GetType().FullName):$($_.Exception.Message)"
+            } finally {
+                Remove-Item -LiteralPath $matrixRoot -Recurse -Force -ErrorAction SilentlyContinue
+            }
+            throw "WScript shortcut creation failed：$($creationError.Exception.Message)；HRESULT=$hresult；matrix=$($matrixResults -join ',')`n$($creationError.InvocationInfo.PositionMessage)`n$($creationError.ScriptStackTrace)"
         }
         try {
             $observed = Read-DefaultHeiGeShortcut -Path $shortcutPath
