@@ -388,8 +388,13 @@ process.stdout.write(JSON.stringify(app));
 
     Test-Case "State directory grants access only to the current user" {
         $acl = New-HeiGePrivateDirectoryAcl -UserSid "S-1-5-21-1000"
+        $accessSids = @($acl.GetAccessRules(
+            $true,
+            $false,
+            [System.Security.Principal.SecurityIdentifier]
+        ) | ForEach-Object { $_.IdentityReference.Value })
         Assert-True $acl.AreAccessRulesProtected
-        Assert-Equal @("S-1-5-21-1000") @($acl.Access.IdentityReference.Value)
+        Assert-Equal @("S-1-5-21-1000") $accessSids
     }
 
     Test-Case "Private state directory applies the protected ACL" {
