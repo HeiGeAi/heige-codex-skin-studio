@@ -69,14 +69,16 @@ test("every tracked visual asset has exactly one provenance row", async () => {
   });
 });
 
-test("public Release fails closed while packaged visual rights are unresolved", async () => {
-  await assert.rejects(
-    execFileAsync(process.execPath, ["scripts/check-asset-provenance.mjs", "--release"], {
+test("public Release accepts the project owner's explicit distribution decision", async () => {
+  const { stdout } = await execFileAsync(
+    process.execPath,
+    ["scripts/check-asset-provenance.mjs", "--release"],
+    {
       cwd: root,
       encoding: "utf8",
-    }),
-    /公开 Release 已阻断|public release.*blocked/i,
+    },
   );
+  assert.match(stdout, /public release provenance accepted: 36 visual assets/i);
 });
 
 test("notice does not pretend a disclaimer grants redistribution rights", async () => {

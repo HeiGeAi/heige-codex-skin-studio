@@ -48,7 +48,7 @@ test("uses the approved package identity without ASAR runtime modules", async ()
   const packageJson = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
 
   assert.equal(packageJson.name, "heige-codex-skin-studio");
-  assert.equal(packageJson.version, "5.0.0");
+  assert.equal(packageJson.version, "5.1.0");
   assert.equal(packageJson.type, "module");
   assert.equal(existsSync(join(root, "src/asar.mjs")), false);
   assert.equal(existsSync(join(root, "src/theme-patch.mjs")), false);

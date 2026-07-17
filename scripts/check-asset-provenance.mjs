@@ -9,7 +9,10 @@ const execFileAsync = promisify(execFile);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const documentPath = resolve(root, "ASSET_PROVENANCE.md");
 const visualPath = /^(?:assets|themes|custom-pet|docs\/images)\/.*\.(?:png|jpe?g|webp)$/i;
-const APPROVED_RELEASE_STATUS = "已验证可公开再分发";
+const APPROVED_RELEASE_STATUSES = new Set([
+  "已验证可公开再分发",
+  "项目所有者确认公开发布",
+]);
 
 if (process.argv.length !== 3 || !new Set(["--check", "--release"]).has(process.argv[2])) {
   console.error("usage: node scripts/check-asset-provenance.mjs --check|--release");
@@ -46,15 +49,15 @@ if (process.argv.length !== 3 || !new Set(["--check", "--release"]).has(process.
   }
   if (releaseMode) {
     const blocked = rows
-      .filter(({ fields }) => fields[3] !== APPROVED_RELEASE_STATUS)
+      .filter(({ fields }) => !APPROVED_RELEASE_STATUSES.has(fields[3]))
       .map(({ path }) => path);
     if (blocked.length !== 0) {
       throw new Error(
-        `公开 Release 已阻断：${blocked.length} 个素材未标记为「${APPROVED_RELEASE_STATUS}」\n` +
+        `公开 Release 已阻断：${blocked.length} 个素材没有验证许可或项目所有者发布确认\n` +
         blocked.join("\n"),
       );
     }
-    console.log(`public release provenance verified: ${tracked.length} visual assets`);
+    console.log(`public release provenance accepted: ${tracked.length} visual assets`);
   } else {
     console.log(`asset provenance inventory verified: ${tracked.length} tracked visual assets`);
   }
