@@ -46,24 +46,34 @@ function commandFailure(error, fallback = "PET_NATIVE_UI_UNAVAILABLE") {
 export const PET_UI_STATE_EXPRESSION = `(() => ({
   settingsSlugs: [...document.querySelectorAll('[data-settings-panel-slug]')].map((node) => node.getAttribute('data-settings-panel-slug')).filter(Boolean),
   settings: Boolean(document.querySelector('[data-settings-panel-slug]')),
-  petsPanel: Boolean(document.querySelector('[data-settings-panel-slug="pets"][aria-current="page"]') || [...document.querySelectorAll('button,[role="button"]')].some((node) => /refresh\\s+(custom\\s+)?pets?|custom\\s+pets?/i.test((node.getAttribute('aria-label') || '') + ' ' + (node.textContent || '')))),
-  customPetIds: [...document.querySelectorAll('[data-avatar-id^="custom:"]')].map((node) => node.getAttribute('data-avatar-id').slice(7)),
+  petsPanel: Boolean(document.querySelector('[data-settings-panel-slug="pets"][aria-current="page"]') || [...document.querySelectorAll('h1,h2,h3,[role="heading"],button,[role="button"]')].some((node) => /refresh\\s+(custom\\s+)?pets?|custom\\s+pets?/i.test((node.getAttribute('aria-label') || '') + ' ' + (node.textContent || '')))),
+  customPetIds: [...document.querySelectorAll('[data-avatar-id^="custom:"],[data-pet-id]')].map((node) => node.getAttribute('data-avatar-id')?.startsWith('custom:') ? node.getAttribute('data-avatar-id').slice(7) : node.getAttribute('data-pet-id')?.replace(/^custom:/, '')).filter(Boolean),
   main: (() => { const probe = ${MAIN_TARGET_PROBE}; return Boolean(probe.main && probe.root); })()
 }))()`;
 
 export const OPEN_PETS_PANEL_EXPRESSION = `(() => {
-  const button = document.querySelector('[data-settings-panel-slug="pets"], [data-settings-panel-slug="appearance"]');
+  const visible = (node) => { const rect = node.getBoundingClientRect(); return rect.width > 0 && rect.height > 0; };
+  const button = [...document.querySelectorAll('[data-settings-panel-slug],button,[role="button"],a')].filter(visible).find((candidate) => {
+    const slug = (candidate.getAttribute('data-settings-panel-slug') || '').toLowerCase();
+    const value = ((candidate.getAttribute('aria-label') || '') + ' ' + (candidate.getAttribute('title') || '') + ' ' + (candidate.textContent || '')).replace(/\\s+/g, ' ').trim().toLowerCase();
+    const href = (candidate.getAttribute('href') || '').toLowerCase();
+    return slug === 'pets' || slug === 'appearance' || /^(pets?|appearance)$/.test(value) || /(^|\\s)(pets?|appearance)(\\s|$)/.test(value) || /\\/(pets?|appearance)(?:[/?#]|$)/.test(href);
+  });
   if (!button) return { ok: false, reason: "pets-settings-button-not-found" };
   button.click();
   return { ok: true };
 })()`;
 
 export const OPEN_SETTINGS_EXPRESSION = `(() => {
-  const button = [...document.querySelectorAll('button,[role="button"],a')].find((candidate) => {
+  const visible = (node) => { const rect = node.getBoundingClientRect(); return rect.width > 0 && rect.height > 0; };
+  const candidates = [...document.querySelectorAll('button,[role="button"],a,[data-testid]')].filter(visible);
+  const button = candidates.find((candidate) => {
     const value = ((candidate.getAttribute('aria-label') || '') + ' ' + (candidate.getAttribute('title') || '') + ' ' + (candidate.textContent || '')).replace(/\\s+/g, ' ').trim().toLowerCase();
-    return /^(settings|preferences|\\u504f\\u597d\\u8bbe\\u7f6e|\\u8bbe\\u7f6e)$/.test(value) || /(^|\\s)(settings|preferences)(\\s|$)/.test(value);
+    const testId = (candidate.getAttribute('data-testid') || '').toLowerCase();
+    const href = (candidate.getAttribute('href') || '').toLowerCase();
+    return /^(settings|preferences|\\u504f\\u597d\\u8bbe\\u7f6e|\\u8bbe\\u7f6e)$/.test(value) || /(^|\\s)(settings|preferences)(\\s|$)/.test(value) || /settings|preferences/.test(testId) || /\\/(settings|preferences)(?:[/?#]|$)/.test(href);
   });
-  if (!button) return { ok: false, reason: "settings-control-not-found" };
+  if (!button) return { ok: false, reason: "settings-control-not-found", candidates: candidates.slice(0, 40).map((candidate) => ({ tag: candidate.tagName.toLowerCase(), label: ((candidate.getAttribute('aria-label') || '') + ' ' + (candidate.getAttribute('title') || '') + ' ' + (candidate.textContent || '')).replace(/\\s+/g, ' ').trim().slice(0, 120), testId: candidate.getAttribute('data-testid'), href: candidate.getAttribute('href') })) };
   button.click();
   return { ok: true };
 })()`;
@@ -81,37 +91,41 @@ export const REFRESH_PETS_EXPRESSION = `(() => {
 
 export function selectPetExpression(petId) {
   assertPetId(petId);
-  const selector = `[data-avatar-id="custom:${petId}"]`;
+  const selector = `[data-avatar-id="custom:${petId}"], [data-pet-id="${petId}"], [data-pet-id="custom:${petId}"]`;
   return `(() => {
     const avatar = document.querySelector(${JSON.stringify(selector)});
     if (!avatar) return { ok: false, reason: "pet-not-found" };
-    let row = avatar.closest('[role="listitem"], .flex.items-center.justify-between');
+    let row = avatar.closest('[role="listitem"], [data-pet-row], [data-testid*="pet-row"], .flex.items-center.justify-between');
     if (!row) row = avatar.parentElement?.parentElement?.parentElement || null;
     if (!row) return { ok: false, reason: "pet-row-not-found" };
-    const labels = ${json([...SELECT_LABELS])};
+    const labels = ${json([...SELECT_LABELS, "choose", "use", "apply"])};
     const selected = ${json([...SELECTED_LABELS])};
     const button = [...row.querySelectorAll('button')].find((candidate) => labels.includes((candidate.textContent || '').replace(/\\s+/g, ' ').trim().toLowerCase()));
     if (button) button.click();
+    else if (typeof avatar.click === 'function') avatar.click();
     const rowText = (row.textContent || '').replace(/\\s+/g, ' ').trim().toLowerCase();
-    return { ok: true, clicked: Boolean(button), selected: selected.some((label) => rowText.includes(label)), rowText };
+    return { ok: true, clicked: Boolean(button) || typeof avatar.click === 'function', selected: selected.some((label) => rowText.includes(label)), rowText };
   })()`;
 }
 
 export function petSelectionStateExpression(petId) {
   assertPetId(petId);
-  const selector = `[data-avatar-id="custom:${petId}"]`;
+  const selector = `[data-avatar-id="custom:${petId}"], [data-pet-id="${petId}"], [data-pet-id="custom:${petId}"]`;
   return `(() => {
     const avatar = document.querySelector(${JSON.stringify(selector)});
-    const row = avatar?.closest('[role="listitem"], .flex.items-center.justify-between') || null;
-    const preview = avatar?.querySelector('[data-testid="codex-avatar"]') || null;
+    const row = avatar?.closest('[role="listitem"], [data-pet-row], [data-testid*="pet-row"], .flex.items-center.justify-between') || null;
+    const preview = avatar?.querySelector('[data-testid="codex-avatar"], img, [style*="background-image"]') || avatar;
     const selected = ${json([...SELECTED_LABELS])};
     const rowText = (row?.textContent || '').replace(/\\s+/g, ' ').trim().toLowerCase();
     const backgroundImage = preview ? getComputedStyle(preview).backgroundImage : '';
+    const image = preview?.tagName === 'IMG' ? preview : preview?.querySelector?.('img');
+    const imageLoaded = Boolean(image?.complete && image.naturalWidth > 0);
+    const source = image?.currentSrc || image?.src || '';
     return {
       exists: Boolean(avatar),
       selected: selected.some((label) => rowText.includes(label)),
-      assetLoaded: Boolean(backgroundImage && backgroundImage !== 'none'),
-      assetSource: backgroundImage.startsWith('url("data:') || backgroundImage.startsWith('url(data:') ? 'embedded' : backgroundImage ? 'other' : 'none',
+      assetLoaded: Boolean((backgroundImage && backgroundImage !== 'none') || imageLoaded),
+      assetSource: backgroundImage.startsWith('url("data:') || backgroundImage.startsWith('url(data:') || source.startsWith('data:') ? 'embedded' : (backgroundImage || source) ? 'other' : 'none',
       rowText,
     };
   })()`;
@@ -188,7 +202,7 @@ async function waitForState(port, predicate, options = {}) {
 async function openSettingsThroughVisibleControl(port) {
   const target = await currentTarget(port);
   const opened = await evaluateTarget(target, OPEN_SETTINGS_EXPRESSION);
-  if (!opened?.ok) throw petError("PET_NATIVE_UI_UNAVAILABLE", opened?.reason || "could not open ChatGPT Desktop Settings through visible UI");
+  if (!opened?.ok) throw petError("PET_NATIVE_UI_UNAVAILABLE", opened?.reason || "could not open ChatGPT Desktop Settings through visible UI", { candidates: opened?.candidates || [] });
   return opened;
 }
 

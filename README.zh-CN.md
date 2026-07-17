@@ -385,8 +385,18 @@ npm run package:codex-skin-studio
 ```
 
 仓库还提供手动触发的 Windows Desktop E2E workflow：安装官方 Microsoft
-Store 版本、启动 loopback CDP、安装示例 Pet，并通过可见的 Settings > Pets
-执行 Refresh 和选择：[Windows Desktop E2E workflow](.github/workflows/windows-desktop-e2e.yml)。
+Store 版本、启动 loopback CDP、安装示例 Pet，并尝试通过可见的 Settings >
+Pets 执行 Refresh 和选择：[Windows Desktop E2E workflow](.github/workflows/windows-desktop-e2e.yml)。
+当前 Windows Renderer 的主题注入已经验证；原生 Pet 选择需要已登录且能显示
+Settings 的交互式 Desktop，会在干净 Runner 中保留明确失败，不会把本地文件安装
+误报为已选择 Pet。
+
+在已登录的 Windows 机器上，可使用以下命令收集原生选择验收证据：
+
+```powershell
+node "$env:USERPROFILE\.codex\skills\codex-skin-studio\scripts\verify-pet-desktop.mjs" `
+  --pet-id mascot --port 9341 --json
+```
 
 主题换肤分发路径保持零依赖和英文 ASCII-only；可选 Pet 图集工具需要 `sharp`，优先使用 ChatGPT Desktop 随附的 Node 运行时。主题名称和用户回复可以使用任意语言。
 

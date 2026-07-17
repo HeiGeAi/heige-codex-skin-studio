@@ -403,7 +403,13 @@ button labels only; it does not use private React state, private storage, or
 arbitrary screen coordinates. On macOS it opens Settings through AppleScript.
 On Windows it uses the standard ChatGPT Settings shortcut through PowerShell;
 accessibility or keyboard automation failures fall back without undoing the
-theme application.
+theme application. The adapter also recognizes visible settings links and
+semantic controls through `aria-label`, `title`, `data-testid`, and settings
+URLs, then recognizes visible Pets/Appearance panels and custom Pet cards. It
+never reads private app state. If the current Windows session is unauthenticated
+or does not expose a visible Settings control, return the adapter error and keep
+the result at `theme-applied-pet-refresh-required`; do not report native Pet
+selection from local installation alone.
 
 When native selection is unavailable, the command reports
 `theme-applied-pet-refresh-required` or
@@ -416,6 +422,20 @@ Inspect the combined state with:
 ```bash
 node "$SKILL_ROOT/scripts/paired-status.mjs" --json
 ```
+
+For an authenticated Windows Desktop acceptance run, use the evidence command
+after the Pet has been installed locally:
+
+```bash
+node "$SKILL_ROOT/scripts/verify-pet-desktop.mjs" \
+  --pet-id "pet-id" \
+  --port 9341 \
+  --json
+```
+
+It exits non-zero unless the visible selected row and loaded sprite asset are
+both confirmed, and prints a stable JSON error for manual triage. Use
+`--no-restore` only when the Settings view should remain open for inspection.
 
 Use `--manual-pet` to skip native Pet selection and deliberately require the
 manual Refresh flow. The adapter is best-effort and versioned because ChatGPT

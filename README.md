@@ -439,8 +439,19 @@ npm run package:codex-skin-studio
 
 The repository also includes a manual-dispatch Windows Desktop E2E workflow.
 It installs the official Microsoft Store package, starts ChatGPT Desktop with
-loopback CDP, installs the example Pet, and exercises visible Settings > Pets
+loopback CDP, installs the example Pet, and attempts visible Settings > Pets
 Refresh and selection: [Windows Desktop E2E workflow](.github/workflows/windows-desktop-e2e.yml).
+Theme injection is verified on the current Windows renderer. Native Pet
+selection requires an authenticated interactive Desktop session with visible
+Settings; a clean runner must preserve an explicit failure instead of claiming
+that local installation selected the Pet.
+
+On an authenticated Windows machine, collect the acceptance result with:
+
+```powershell
+node "$env:USERPROFILE\.codex\skills\codex-skin-studio\scripts\verify-pet-desktop.mjs" `
+  --pet-id mascot --port 9341 --json
+```
 
 The theme distribution is intentionally zero-dependency and English ASCII-only. The optional Pet atlas tools require `sharp`, using ChatGPT Desktop's bundled Node runtime when available. Theme names and user-facing responses may use any language.
 

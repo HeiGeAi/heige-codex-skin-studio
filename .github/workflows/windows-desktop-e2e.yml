@@ -30,10 +30,4 @@ jobs:
       - name: Refresh and select the custom Pet through visible UI
         shell: pwsh
         run: |
-          $script = @'
-          import { selectPetInChatGptDesktop } from './skill/codex-skin-studio/scripts/pet-desktop.mjs';
-          const result = await selectPetInChatGptDesktop({ petId: 'mascot', port: 9341 });
-          console.log(JSON.stringify(result, null, 2));
-          if (result.selection !== 'native-ui-confirmed' || result.assetLoaded !== true) process.exitCode = 1;
-          '@
-          node --input-type=module -e $script
+          node skill\codex-skin-studio\scripts\verify-pet-desktop.mjs --pet-id mascot --port 9341 --json

@@ -19,6 +19,7 @@ import { applyPort, parseArgs as parseCreateArgs } from "../skill/codex-skin-stu
 import { buildPlist, buildTaskXml, createControlServer, parseArgs as parsePersistArgs } from "../skill/codex-skin-studio/scripts/persist.mjs";
 import { createPet, defaultPetsDir, DEFAULT_PET_CONTRACT, installPet, petStatus, validateContract, validatePetDirectory } from "../skill/codex-skin-studio/scripts/pet.mjs";
 import { buildMacOpenSettingsScript, buildWindowsOpenSettingsScript, OPEN_PETS_PANEL_EXPRESSION, OPEN_SETTINGS_EXPRESSION, petSelectionStateExpression, REFRESH_PETS_EXPRESSION, selectPetExpression } from "../skill/codex-skin-studio/scripts/pet-desktop.mjs";
+import { parseArgs as parseVerifyPetArgs, verifyPetDesktop } from "../skill/codex-skin-studio/scripts/verify-pet-desktop.mjs";
 import { createPairBundle, switchPairBundle, validatePairBundle } from "../skill/codex-skin-studio/scripts/paired.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -1371,14 +1372,28 @@ test("uses visible ChatGPT Desktop Pets controls instead of private app state", 
   assert.match(buildMacOpenSettingsScript(), /Settings/);
   assert.match(buildWindowsOpenSettingsScript(), /SendKeys\('\^,'\)/);
   assert.match(buildWindowsOpenSettingsScript(), /AppActivate\('Codex'\)/);
-  assert.match(OPEN_PETS_PANEL_EXPRESSION, /data-settings-panel-slug=\\?\"pets/);
-  assert.match(OPEN_PETS_PANEL_EXPRESSION, /data-settings-panel-slug=\\?\"appearance/);
+  assert.match(OPEN_PETS_PANEL_EXPRESSION, /data-settings-panel-slug/);
+  assert.match(OPEN_PETS_PANEL_EXPRESSION, /slug === 'pets'/);
+  assert.match(OPEN_PETS_PANEL_EXPRESSION, /slug === 'appearance'/);
+  assert.match(OPEN_PETS_PANEL_EXPRESSION, /getBoundingClientRect/);
   assert.match(OPEN_SETTINGS_EXPRESSION, /settings|preferences/);
+  assert.match(OPEN_SETTINGS_EXPRESSION, /data-testid/);
+  assert.match(OPEN_SETTINGS_EXPRESSION, /candidates/);
   assert.match(REFRESH_PETS_EXPRESSION, /button,\[role=\\?\"button/);
   assert.match(REFRESH_PETS_EXPRESSION, /custom\\s/);
   assert.match(selectPetExpression("paired-demo"), /custom:paired-demo/);
+  assert.match(selectPetExpression("paired-demo"), /data-pet-id/);
   assert.match(petSelectionStateExpression("paired-demo"), /已选/);
   assert.match(petSelectionStateExpression("paired-demo"), /assetLoaded/);
+  assert.match(petSelectionStateExpression("paired-demo"), /naturalWidth/);
+});
+
+test("Windows Pet evidence command requires native selection and loaded asset", async () => {
+  assert.deepEqual(parseVerifyPetArgs(["--pet-id", "paired-demo", "--port", "9341", "--json"]), { petId: "paired-demo", port: 9341, restoreApp: true });
+  assert.deepEqual(parseVerifyPetArgs(["--pet-id", "paired-demo", "--no-restore"]), { petId: "paired-demo", port: 9341, restoreApp: false });
+  const verified = await verifyPetDesktop({ petId: "paired-demo", port: 9341, restoreApp: true }, async () => ({ selection: "native-ui-confirmed", assetLoaded: true }));
+  assert.equal(verified.status, "verified");
+  await assert.rejects(verifyPetDesktop({ petId: "paired-demo", port: 9341 }, async () => ({ selection: "refresh-required", assetLoaded: false })), /did not confirm native Pet selection/);
 });
 
 test("paired switch records a native Pet selection postcondition", async () => {
@@ -1424,7 +1439,7 @@ test("paired switch preserves an explicit manual-refresh fallback when native UI
 });
 
 test("distribution files are English ASCII text and SKILL has valid frontmatter", async () => {
-  const textExpected = ["SKILL.md", "agents/openai.yaml", "examples/cyberpunk/prompt.md", "examples/cyberpunk/theme.json", "examples/pets/mascot/pet.json", "examples/slayers-xellos-night/theme.json", "scripts/apply.mjs", "scripts/create-paired.mjs", "scripts/create-pet.mjs", "scripts/create-theme.mjs", "scripts/install-pet.mjs", "scripts/paired-status.mjs", "scripts/paired.mjs", "scripts/pet-desktop.mjs", "scripts/pet.mjs", "scripts/persist.mjs", "scripts/switch-paired.mjs", "scripts/validate-pet.mjs", "scripts/windows/apply.ps1", "templates/pet-contract.json", "templates/pet.json", "templates/theme.json"].sort((a, b) => a.localeCompare(b));
+  const textExpected = ["SKILL.md", "agents/openai.yaml", "examples/cyberpunk/prompt.md", "examples/cyberpunk/theme.json", "examples/pets/mascot/pet.json", "examples/slayers-xellos-night/theme.json", "scripts/apply.mjs", "scripts/create-paired.mjs", "scripts/create-pet.mjs", "scripts/create-theme.mjs", "scripts/install-pet.mjs", "scripts/paired-status.mjs", "scripts/paired.mjs", "scripts/pet-desktop.mjs", "scripts/pet.mjs", "scripts/persist.mjs", "scripts/switch-paired.mjs", "scripts/validate-pet.mjs", "scripts/verify-pet-desktop.mjs", "scripts/windows/apply.ps1", "templates/pet-contract.json", "templates/pet.json", "templates/theme.json"].sort((a, b) => a.localeCompare(b));
   const binaryExpected = ["examples/pets/mascot/spritesheet.webp", "examples/slayers-xellos-night/hero.webp"];
   assert.deepEqual((await listFiles(skillRoot)).map((value) => value.replaceAll("\\", "/")), [...textExpected, ...binaryExpected].sort((a, b) => a.localeCompare(b)));
   const skill = await readFile(join(skillRoot, "SKILL.md"), "utf8");
@@ -1501,6 +1516,7 @@ test("package script creates exactly the new Skill folder contents", async () =>
     "codex-skin-studio/scripts/windows/apply.ps1",
     "codex-skin-studio/scripts/switch-paired.mjs",
     "codex-skin-studio/scripts/validate-pet.mjs",
+    "codex-skin-studio/scripts/verify-pet-desktop.mjs",
     "codex-skin-studio/templates/",
     "codex-skin-studio/templates/pet-contract.json",
     "codex-skin-studio/templates/pet.json",

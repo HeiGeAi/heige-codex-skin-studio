@@ -29,6 +29,7 @@ const EXPECTED = [
   "scripts/persist.mjs",
   "scripts/switch-paired.mjs",
   "scripts/validate-pet.mjs",
+  "scripts/verify-pet-desktop.mjs",
   "scripts/windows/apply.ps1",
   "templates/pet-contract.json",
   "templates/pet.json",
