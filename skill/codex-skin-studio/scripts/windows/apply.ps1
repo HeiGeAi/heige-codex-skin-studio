@@ -16,11 +16,41 @@ $node = $nodeCommand.Source
 
 function Invoke-Node {
     param([string[]]$Arguments)
-    $output = (& $node @Arguments 2>&1 | Out-String)
-    if ($LASTEXITCODE -ne 0) {
-        throw "Node command failed with exit code $LASTEXITCODE`n$output"
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $node
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    if ($startInfo.ArgumentList) {
+        foreach ($argument in $Arguments) {
+            $null = $startInfo.ArgumentList.Add($argument)
+        }
+    } else {
+        $quotedArguments = foreach ($argument in $Arguments) {
+            if ($argument -notmatch '[\s"]') {
+                $argument
+                continue
+            }
+            '"' + (($argument -replace '(\\*)"', '$1$1\"') -replace '(\\+)$', '$1$1') + '"'
+        }
+        $startInfo.Arguments = $quotedArguments -join ' '
     }
-    return $output.Trim()
+
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    if (-not $process.Start()) {
+        throw "Node process could not be started"
+    }
+    $stdout = $process.StandardOutput.ReadToEnd()
+    $stderr = $process.StandardError.ReadToEnd()
+    $process.WaitForExit()
+    if ($process.ExitCode -ne 0) {
+        $diagnostics = @($stdout.Trim(), $stderr.Trim()) | Where-Object { $_ }
+        $diagnostics = $diagnostics -join "`n"
+        throw "Node command failed with exit code $($process.ExitCode)`n$diagnostics"
+    }
+    return $stdout.Trim()
 }
 
 function Test-Cdp {
