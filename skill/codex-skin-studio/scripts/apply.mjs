@@ -315,7 +315,7 @@ function discover(platformName = platform()) {
   return appPath(platformName);
 }
 
-async function targets(port, timeoutMs = 2000) {
+async function targets(port, timeoutMs = 10000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {

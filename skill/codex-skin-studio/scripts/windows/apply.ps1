@@ -231,6 +231,7 @@ try {
         if ($persistStatus.status -eq "disabled") { $null = Invoke-Node @($persistScript, "install", "--json") }
     }
 
+    Write-Output ("CDP targets before apply: " + (Get-CdpTargetSummary))
     $result = Invoke-Node @($applyScript, "apply", $ThemeDir, "--port", "$Port", "--json")
     Write-Output $result
 } catch {
