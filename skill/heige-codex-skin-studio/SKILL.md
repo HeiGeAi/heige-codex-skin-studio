@@ -58,7 +58,7 @@ macOS 稳定入口是 `scripts/apply.command`、`scripts/enable-skin.command`、
 
 默认回退主题是 `miku-488137`。另有 `genshin-dawn`、`genshin-night`、`wuthering-tide`、`wuthering-echo`、`naruto-hokage`、`naruto-sasuke`、`deepspace-dawn`、`deepspace-star` 和 `dalao-dianyan`，合计 10 个内置预设。
 
-顶部菜单的「＋ 自定义图片」可选择本地图片、自动压缩取色并立即应用。「自定义图片」只是单个本地快捷槽，再次上传会覆盖，行尾 × 可删除；它不是可分发的正式主题，也不改写最近正式主题。renderer 本地存储可在自动补针或常驻启动时继续显示它，清除本地数据后会丢失。快速试用优先用这个入口；需要分发或长期管理时，用 `create` 生成正式主题。
+内置预设会同步 Codex 深浅外观。顶部菜单的「＋ 自定义图片」可选择本地图片、自动压缩取色、判断画面亮度并同步 Codex 外观。「自定义图片」只是单个本地快捷槽，再次上传会覆盖，行尾 × 可删除；它不是可分发的正式主题，也不改写最近正式主题。renderer 本地存储可在自动补针或常驻启动时继续显示它，清除本地数据后会丢失。快速试用优先用这个入口；需要分发或长期管理时，用 `create` 生成正式主题。
 
 ## 状态与诊断
 
@@ -100,9 +100,9 @@ Windows PowerShell 运行：
 
 用户只给创意描述时，先用当前可用的 `imagegen` 生成横向 UI 主图。为左侧导航和底部输入区留出可读空间，不要把按钮、菜单文字或聊天内容烘焙到图片中。
 
-## 可选 Miku Future 宠物
+## 安装包自带的可选 Miku Future Pet
 
-仅当用户明确要求安装 `Miku Future` 时才执行。macOS 优先使用统一 wrapper：
+发布包内自带 `Miku Future` 动画 Pet，但皮肤安装不会自动启用。仅当用户明确要求安装时才执行。macOS 优先使用统一 wrapper：
 
 ```bash
 "$ROOT/scripts/install-pet.command"

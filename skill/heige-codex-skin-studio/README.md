@@ -18,7 +18,7 @@
 
 Windows 的生命周期操作必须从 `scripts\windows` 下对应的 `.ps1` 或 `.bat` 进入。不要直接运行 Node CLI 代替 Windows Store/MSIX 激活或重启流程；如果直接调用遇到需要启动或重启，CLI 会安全拒绝并提示正确入口。
 
-Skill 保留 10 个内置预设，默认是 `miku-488137`。顶部「自定义图片」只是一个本地快捷槽，可上传、覆盖或删除；它不是可分发的正式主题，也不改写启动器记录的最近正式主题。renderer 本地存储可在自动补针或常驻启动时继续显示它，清除本地数据后会丢失。需要正式主题时使用 `create`，再把返回的 `id` 传给 macOS 或 Windows 的 `apply` 入口。`pause` 暂停当前会话，`resume` 只恢复同一进程，`restore` 关闭常驻并还原。仅当用户明确要求 `Miku Future` 时才调用统一 `install-pet` 入口。
+Skill 保留 10 个内置预设，默认是 `miku-488137`。切换预设会同步 Codex 深浅外观，顶部「自定义图片」也会按画面亮度自动判断外观。自定义图片只是一个本地快捷槽，可上传、覆盖或删除；它不是可分发的正式主题，也不改写启动器记录的最近正式主题。renderer 本地存储可在自动补针或常驻启动时继续显示它，清除本地数据后会丢失。需要正式主题时使用 `create`，再把返回的 `id` 传给 macOS 或 Windows 的 `apply` 入口。`pause` 暂停当前会话，`resume` 只恢复同一进程，`restore` 关闭常驻并还原。发布包内自带可选的 `Miku Future` 动画 Pet，仅当用户明确要求时才调用统一 `install-pet` 入口。
 
 ## Windows 证据边界
 
