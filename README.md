@@ -1,5 +1,7 @@
 # ChatGPT Desktop Skin Studio
 
+[中文 README](README.zh-CN.md)
+
 AI-orchestrated skins for ChatGPT Desktop on macOS.
 
 This repository contains the `codex-skin-studio` Codex Skill and its zero-dependency Node.js runtime. The Skill turns a generated or user-provided image into a complete ChatGPT Desktop theme, validates the local assets, applies the theme through loopback CDP, and can keep the selected theme alive across app and computer restarts through a macOS LaunchAgent.

@@ -1,5 +1,7 @@
 # ChatGPT Desktop Skin Studio
 
+[English README](README.md)
+
 面向 macOS ChatGPT Desktop 的 AI 换肤 Skill 与轻量运行时。
 
 本仓库包含 `codex-skin-studio` Codex Skill 以及零依赖 Node.js 工具链。Skill 可以把生图结果或用户提供的图片制作成完整主题，校验本地资源，通过本机回环 CDP 应用到 ChatGPT Desktop，并通过 macOS LaunchAgent 在电脑登录、应用启动和 Renderer 重载后自动恢复。
