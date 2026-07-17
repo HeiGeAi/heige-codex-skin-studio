@@ -101,19 +101,51 @@ function Resolve-CodexLaunchTarget {
 "@
 }
 
+function Get-CodexStoreLaunchTarget {
+    Write-Host "[Codex] Get-CodexApp：检查商店版包"
+    $package = Get-CodexStorePackage
+    if (-not $package) {
+        Write-Host "[Codex] Get-CodexApp：未找到商店版包"
+        return $null
+    }
+
+    Write-Host "[Codex] Get-CodexApp：找到商店版包：$($package.Name)"
+    $aumid = "aumid:$(Get-CodexAumid -Package $package)"
+    Write-Host "[Codex] Get-CodexApp：使用商店版 AUMID：$aumid"
+    return $aumid
+}
+
 function Get-CodexApp {
     # 用户显式指定的路径优先，装在非默认位置时用这个兜底。
     # 也要过 Resolve：商店版用户按报错填了 WindowsApps 包内路径时，翻译成别名/aumid，否则直启必被拒
+    Write-Host "[Codex] Get-CodexApp：开始查找 Codex 启动目标"
+    Write-Host "[Codex] Get-CodexApp：HEIGE_CODEX_APP=$($env:HEIGE_CODEX_APP)"
     if ($env:HEIGE_CODEX_APP) {
-        if (Test-Path $env:HEIGE_CODEX_APP) { return Resolve-CodexLaunchTarget -AppPath $env:HEIGE_CODEX_APP }
+        if (Test-Path $env:HEIGE_CODEX_APP) {
+            Write-Host "[Codex] Get-CodexApp：使用环境变量指定路径：$($env:HEIGE_CODEX_APP)"
+            $resolved = Resolve-CodexLaunchTarget -AppPath $env:HEIGE_CODEX_APP
+            Write-Host "[Codex] Get-CodexApp：解析后的启动目标：$resolved"
+            return $resolved
+        }
+        Write-Host "[Codex] Get-CodexApp：环境变量路径不存在：$($env:HEIGE_CODEX_APP)"
         throw "环境变量 HEIGE_CODEX_APP 指向的文件不存在：$($env:HEIGE_CODEX_APP)"
     }
 
     $exeNames = @("ChatGPT.exe", "Codex.exe")
 
+    # 商店版没有常规安装目录，优先通过包身份启动，避免误选管理器。
+    $storeTarget = Get-CodexStoreLaunchTarget
+    if ($storeTarget) { return $storeTarget }
+
     # 正在运行的客户端进程路径最可信；商店版进程路径在 WindowsApps 下，须翻译成可启动的别名
+    Write-Host "[Codex] Get-CodexApp：检查正在运行的 ChatGPT/Codex 进程"
     foreach ($proc in (Get-Process -Name "ChatGPT", "Codex" -ErrorAction SilentlyContinue)) {
-        if ($proc.Path -and (Test-Path $proc.Path)) { return Resolve-CodexLaunchTarget -AppPath $proc.Path }
+        Write-Host "[Codex] Get-CodexApp：发现进程 $($proc.ProcessName) [$($proc.Id)]，路径：$($proc.Path)"
+        if ($proc.Path -and (Test-Path $proc.Path)) {
+            $resolved = Resolve-CodexLaunchTarget -AppPath $proc.Path
+            Write-Host "[Codex] Get-CodexApp：使用运行中进程路径：$resolved"
+            return $resolved
+        }
     }
 
     # 常见安装根目录，含 Squirrel 风格的 app-x.y.z 子目录
@@ -130,9 +162,13 @@ function Get-CodexApp {
         $roots += (Join-Path ${env:ProgramFiles(x86)} "Codex")
     }
     foreach ($root in $roots) {
+        Write-Host "[Codex] Get-CodexApp：检查安装目录：$root"
         foreach ($name in $exeNames) {
             $direct = Join-Path $root $name
-            if (Test-Path $direct) { return $direct }
+            if (Test-Path $direct) {
+                Write-Host "[Codex] Get-CodexApp：找到启动文件：$direct"
+                return $direct
+            }
         }
         if (Test-Path $root) {
             # 按版本号排序，不能用字符串序（否则 app-1.9.0 会排在 app-1.10.0 前面选到旧版）
@@ -144,7 +180,10 @@ function Get-CodexApp {
             foreach ($dir in $appDirs) {
                 foreach ($name in $exeNames) {
                     $nested = Join-Path $dir.FullName $name
-                    if (Test-Path $nested) { return $nested }
+                    if (Test-Path $nested) {
+                        Write-Host "[Codex] Get-CodexApp：找到版本目录中的启动文件：$nested"
+                        return $nested
+                    }
                 }
             }
         }
@@ -158,13 +197,22 @@ function Get-CodexApp {
     )
     foreach ($entry in (Get-ItemProperty $uninstallKeys -ErrorAction SilentlyContinue)) {
         if ($entry.DisplayName -notmatch "ChatGPT|Codex") { continue }
+        Write-Host "[Codex] Get-CodexApp：检查卸载注册表项：$($entry.DisplayName)"
         $found = @()
         if ($entry.DisplayIcon) { $found += ($entry.DisplayIcon -split ",")[0].Trim('"') }
         if ($entry.InstallLocation) {
             foreach ($name in $exeNames) { $found += (Join-Path $entry.InstallLocation $name) }
         }
         foreach ($path in $found) {
-            if ($path -and $path -like "*.exe" -and $path -notmatch "unins|setup|update" -and (Test-Path $path)) {
+            # DisplayIcon 可能指向 Codex++ 管理器，而不是实际的 Codex 客户端。
+            # 管理器不会转发 Chromium 的 remote-debugging 参数，不能作为注入目标。
+            $fileName = if ($path) { [System.IO.Path]::GetFileName($path) } else { "" }
+            if ($fileName -notin @("ChatGPT.exe", "Codex.exe")) {
+                if ($path) { Write-Host "[Codex] Get-CodexApp：跳过非客户端程序：$path" }
+                continue
+            }
+            if ($path -and (Test-Path $path)) {
+                Write-Host "[Codex] Get-CodexApp：从注册表找到启动文件：$path"
                 return $path
             }
         }
@@ -178,25 +226,34 @@ function Get-CodexApp {
     )
     foreach ($menu in $menus) {
         if (-not (Test-Path $menu)) { continue }
+        Write-Host "[Codex] Get-CodexApp：检查开始菜单：$menu"
         $links = Get-ChildItem $menu -Recurse -Filter "*.lnk" -ErrorAction SilentlyContinue |
             Where-Object { $_.BaseName -match "ChatGPT|Codex" }
         foreach ($lnk in $links) {
             $target = $shell.CreateShortcut($lnk.FullName).TargetPath
-            if ($target -and $target -like "*.exe" -and $target -notmatch "unins|setup|update" -and (Test-Path $target)) {
+            $fileName = if ($target) { [System.IO.Path]::GetFileName($target) } else { "" }
+            if ($fileName -notin @("ChatGPT.exe", "Codex.exe")) {
+                if ($target) { Write-Host "[Codex] Get-CodexApp：跳过非客户端快捷方式目标：$target" }
+                continue
+            }
+            if ($target -and (Test-Path $target)) {
+                Write-Host "[Codex] Get-CodexApp：从快捷方式找到启动文件：$target"
                 return Resolve-CodexLaunchTarget -AppPath $target
             }
         }
     }
 
-    # 微软商店（MSIX）安装没有常规安装目录，也不写卸载注册表项：
-    # 先认应用执行别名，包没声明别名就返回 aumid: 标记走系统激活接口
+    # 微软商店（MSIX）安装的应用执行别名兜底。
     $aliasDir = Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps"
     foreach ($name in $exeNames) {
         $alias = Join-Path $aliasDir $name
-        if (Test-Path $alias) { return $alias }
+        Write-Host "[Codex] Get-CodexApp：检查应用执行别名：$alias"
+        if (Test-Path $alias) {
+            Write-Host "[Codex] Get-CodexApp：找到应用执行别名：$alias"
+            return $alias
+        }
     }
-    $package = Get-CodexStorePackage
-    if ($package) { return "aumid:$(Get-CodexAumid -Package $package)" }
+    Write-Host "[Codex] Get-CodexApp：所有候选位置均未找到 Codex"
 
     throw @"
 未找到 Codex Desktop。分两种情况处理：
