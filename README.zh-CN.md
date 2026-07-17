@@ -4,6 +4,8 @@
 
 本仓库包含 `codex-skin-studio` Codex Skill 以及零依赖 Node.js 工具链。Skill 可以把生图结果或用户提供的图片制作成完整主题，校验本地资源，通过本机回环 CDP 应用到 ChatGPT Desktop，并通过 macOS LaunchAgent 在电脑登录、应用启动和 Renderer 重载后自动恢复。
 
+本项目是受 [HeiGeAi/heige-codex-skin-studio](https://github.com/HeiGeAi/heige-codex-skin-studio) 的研究和产品方向启发的独立轻量实现，不是其镜像，也不宣称功能完全一致。当前范围是 Codex Skill 加本地零依赖运行时，后续计划独立扩展皮肤网站能力。
+
 当前应用名称是 ChatGPT Desktop，技术 Bundle ID 为 `com.openai.codex`。
 
 ## 核心能力
