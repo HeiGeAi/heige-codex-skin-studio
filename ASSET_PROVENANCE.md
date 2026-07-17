@@ -23,9 +23,12 @@
 | `assets/previews/wuthering-waves-codex-ui-1.webp` | Wuthering Waves 预设预览 | 来源证据缺失，授权未验证 | 未知 | 公开再分发风险未解决 | 取得授权后保留，否则删除预览 |
 | `assets/previews/wuthering-waves-codex-ui-2.webp` | Wuthering Waves 预设预览 | 来源证据缺失，授权未验证 | 未知 | 公开再分发风险未解决 | 取得授权后保留，否则删除预览 |
 | `custom-pet/miku-future/spritesheet.webp` | Miku 宠物精灵图 | 来源证据缺失，授权未验证 | 未知 | 公开再分发风险未解决 | 发布前换成自制或取得明确授权的精灵图 |
+| `docs/images/dalao-live.jpg` | 大佬点烟主题运行截图 | 仓库标注为运行截图，但原始采集与画面权利记录缺失，授权未验证 | 未知 | 文档再分发风险未解决 | 补充自有截图记录并替换其中未授权素材 |
+| `docs/images/genshin-dawn-live.jpg` | Genshin Dawn 运行截图 | 仓库标注为运行截图，但原始采集与画面权利记录缺失，授权未验证 | 未知 | 文档再分发风险未解决 | 补充自有截图记录并替换其中未授权素材 |
 | `docs/images/genshin-night-live.jpg` | Genshin Night 运行截图 | 仓库标注为运行截图，但原始采集与画面权利记录缺失，授权未验证 | 未知 | 文档再分发风险未解决 | 补充自有截图记录并替换其中未授权素材 |
 | `docs/images/miku-switcher-live.jpg` | Miku 菜单运行截图 | 仓库标注为运行截图，但原始采集与画面权利记录缺失，授权未验证 | 未知 | 文档再分发风险未解决 | 补充自有截图记录并替换其中未授权素材 |
 | `docs/images/wechat-group-qr.png` | 微信交流群二维码 | 来源证据缺失，授权未验证 | 未知 | 公开再分发与长期有效性未确认 | 由群管理员提供可核验原件与发布许可 |
+| `docs/images/wuthering-live.jpg` | Wuthering Waves 主题运行截图 | 仓库标注为运行截图，但原始采集与画面权利记录缺失，授权未验证 | 未知 | 文档再分发风险未解决 | 补充自有截图记录并替换其中未授权素材 |
 | `themes/dalao-dianyan/hero.webp` | Dalao Dianyan 主题主视觉 | 来源证据缺失，授权未验证 | 未知 | 人物肖像与再分发风险未解决 | 发布前删除或取得人物及图像授权 |
 | `themes/deepspace-dawn/hero.webp` | Deepspace Dawn 主题主视觉 | 来源证据缺失，授权未验证 | 未知 | 公开再分发风险未解决 | 发布前换成自制或取得明确授权的素材 |
 | `themes/deepspace-star/hero.webp` | Deepspace Star 主题主视觉 | 来源证据缺失，授权未验证 | 未知 | 公开再分发风险未解决 | 发布前换成自制或取得明确授权的素材 |
