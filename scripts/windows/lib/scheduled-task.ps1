@@ -38,6 +38,30 @@ function Get-HeiGeCurrentUserId {
     return [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 }
 
+function Resolve-HeiGeWindowsIdentitySid {
+    param([Parameter(Mandatory = $true)][string]$UserId)
+    try {
+        if ($UserId -match '^S-\d(?:-\d+)+$') {
+            return ([System.Security.Principal.SecurityIdentifier]::new($UserId)).Value
+        }
+        $account = [System.Security.Principal.NTAccount]::new($UserId)
+        return ($account.Translate([System.Security.Principal.SecurityIdentifier])).Value
+    } catch {
+        return $null
+    }
+}
+
+function Test-HeiGeSameWindowsIdentity {
+    param(
+        [Parameter(Mandatory = $true)][string]$Expected,
+        [Parameter(Mandatory = $true)][string]$Stored
+    )
+    if ($Expected -ieq $Stored) { return $true }
+    $expectedSid = Resolve-HeiGeWindowsIdentitySid -UserId $Expected
+    $storedSid = Resolve-HeiGeWindowsIdentitySid -UserId $Stored
+    return $expectedSid -and $storedSid -and $expectedSid -eq $storedSid
+}
+
 function Get-HeiGeDefaultStateDirectory {
     if ($env:APPDATA) { return (Join-Path $env:APPDATA "HeiGeCodexSkinStudio") }
     if ($env:USERPROFILE) { return (Join-Path $env:USERPROFILE "AppData\Roaming\HeiGeCodexSkinStudio") }
@@ -311,11 +335,17 @@ function Assert-HeiGeStoredTaskDefinition {
         @("Settings.ExecutionTimeLimit", [string]$Expected.Settings.ExecutionTimeLimit, [string]$Stored.Settings.ExecutionTimeLimit)
     )
     foreach ($check in $checks) {
-        $caseSensitive = [string]$check[0] -eq "Action.Arguments" -or
-            [string]$check[0] -eq "TaskName"
+        $fieldName = [string]$check[0]
+        if ($fieldName -eq "Principal.UserId" -or $fieldName -eq "Trigger.UserId") {
+            if (-not (Test-HeiGeSameWindowsIdentity -Expected $check[1] -Stored $check[2])) {
+                throw "stored task definition mismatch: $fieldName"
+            }
+            continue
+        }
+        $caseSensitive = $fieldName -eq "Action.Arguments" -or $fieldName -eq "TaskName"
         $different = if ($caseSensitive) { $check[1] -cne $check[2] } else { $check[1] -ne $check[2] }
         if ($different) {
-            throw "stored task definition mismatch: $($check[0])"
+            throw "stored task definition mismatch: $fieldName"
         }
     }
     if ($Stored.PSObject.Properties.Name -contains "ActionCount" -and [int]$Stored.ActionCount -ne 1) {

@@ -123,6 +123,11 @@ try {
         } "Principal.LogonType"
     }
 
+    Test-Case "Stored task identity comparison preserves strict fallback behavior" {
+        Assert-True (Test-HeiGeSameWindowsIdentity -Expected "TESTDOMAIN\HeiGe User" -Stored "testdomain\heige user")
+        Assert-False (Test-HeiGeSameWindowsIdentity -Expected "TESTDOMAIN\HeiGe User" -Stored "FOREIGN\HeiGe User")
+    }
+
     Test-Case "Stored action arguments reject case-only drift" {
         $expected = New-TestDefinition
         $stored = New-TestDefinition
