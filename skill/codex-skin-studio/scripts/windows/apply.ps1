@@ -161,6 +161,6 @@ try {
     $result = Invoke-Node @($applyScript, "apply", $ThemeDir, "--port", "$Port", "--json")
     Write-Output $result
 } catch {
-    Write-Error $_.Exception.Message
+    Write-Error ($_.Exception.ToString())
     exit 1
 }
