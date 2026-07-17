@@ -65,6 +65,9 @@ Source: https://learn.chatgpt.com/docs/pets?surface=app
 The Windows workflow uses the current Microsoft Store Codex product and a
 direct packaged executable launch with loopback CDP flags. The run verified:
 
+- the installed `OpenAI.Codex` package contains the official `hatch-pet`
+  contract, and `verify-pet-contract.mjs` confirmed the v2 dimensions, grid,
+  row semantics, and look directions (workflow run `29590065014`);
 - the current renderer target was discovered;
 - the theme was applied successfully;
 - the Pet atlas was installed locally;

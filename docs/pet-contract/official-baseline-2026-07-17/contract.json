@@ -26,6 +26,7 @@
   "desktopRefreshE2E": "macos-refresh-selection-overlay-verified",
   "customSpriteE2E": "macos-refresh-selection-embedded-sprite-loaded-verified",
   "windowsThemeApplyE2E": "current-codex-renderer-theme-injection-verified-on-windows-runner",
+  "windowsContractE2E": "msix-bundled-hatch-pet-contract-verified-run-29590065014",
   "windowsPetSelectionE2E": "blocked-clean-runner-no-visible-settings-control",
   "windowsManualE2E": "pending-authenticated-desktop-verification",
   "windowsLastObservedError": "PET_NATIVE_UI_UNAVAILABLE: settings-control-not-found",
