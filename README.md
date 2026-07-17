@@ -22,6 +22,7 @@ The current application is ChatGPT Desktop. macOS identifies it with bundle iden
 - Upper-right `Skins` switcher for selecting any valid locally generated theme without leaving the conversation.
 - The `Skins` menu refreshes valid local themes on open and in the background, so newly created themes appear without restarting ChatGPT Desktop.
 - Oversized raster Heroes are decoded and compressed to a smaller WebP data URL before CSS injection, avoiding stylesheet limits that can silently drop the background rule.
+- Theme creation also converts the final Hero, logo, and portrait assets to `.webp` on disk and updates `theme.json` automatically.
 - No `app.asar` modification, code-signature changes, database, website, remote service, or arbitrary theme CSS.
 - English-only Skill distribution files; the Skill can respond to users in their language.
 

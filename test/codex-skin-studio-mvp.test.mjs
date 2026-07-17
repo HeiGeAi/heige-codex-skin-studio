@@ -274,8 +274,9 @@ test("creates a complete theme directory in one deterministic command", async ()
     const hero = join(root, "source.webp");
     const logo = join(root, "source-logo.png");
     const themeDir = join(root, "theme");
-    await writeFile(hero, Buffer.alloc(12, 1));
-    await writeFile(logo, Buffer.alloc(12, 2));
+    const validImage = await readFile(join(skillRoot, "examples/slayers-xellos-night/hero.webp"));
+    await writeFile(hero, validImage);
+    await writeFile(logo, validImage);
     const { stdout } = await execFileAsync(process.execPath, [createThemeScript,
       "--id", "one-shot-skin", "--name", "One Shot Skin", "--out", themeDir,
       "--hero", hero, "--logo", logo,
@@ -284,7 +285,9 @@ test("creates a complete theme directory in one deterministic command", async ()
     ]);
     const result = JSON.parse(stdout);
     assert.equal(result.status, "created");
-    assert.deepEqual((await readdir(themeDir)).sort(), ["hero.webp", "logo.png", "theme.json"]);
+    assert.deepEqual((await readdir(themeDir)).sort(), ["hero.webp", "logo.webp", "theme.json"]);
+    assert.equal(JSON.parse(await readFile(join(themeDir, "theme.json"), "utf8")).hero, "hero.webp");
+    assert.equal(JSON.parse(await readFile(join(themeDir, "theme.json"), "utf8")).logo, "logo.webp");
     assert.deepEqual(JSON.parse(await readFile(join(themeDir, "theme.json"), "utf8")).copy, { brand: "One Shot", headline: "A complete theme", tagline: "Ready to apply" });
   });
 });

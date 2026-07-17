@@ -189,7 +189,7 @@ node "$SKILL_ROOT/scripts/create-theme.mjs" \
 ```
 
 6. Add `--logo` and/or `--polaroid` only when the user explicitly requests those assets and provides or authorizes the source files. The manifest accepts optional `copy.brand`, `copy.headline`, and `copy.tagline` strings.
-7. Keep every final asset as a non-empty local PNG, JPEG, or WebP file inside the theme directory. Do not add CSS, JavaScript, remote URLs, source copies, transparent intermediates, or reference images.
+7. Keep every final asset as a non-empty local WebP file inside the theme directory. `create-theme.mjs` automatically converts the final Hero, logo, and portrait assets to WebP and updates the manifest; do not manually copy large PNG/JPEG files into the output. Do not add CSS, JavaScript, remote URLs, source copies, transparent intermediates, or reference images.
 8. Immediately run `validate` against the directory. Treat the returned JSON as the creation result and report the exact theme directory and files.
 9. If application was explicitly requested, use the same creator with `--apply` (and `--port` only when needed), or run `apply.mjs apply` immediately after creation. Poll `apply.mjs status` after a `scheduled` result until it is `active`, with a bounded wait. Never call a `scheduled` or `pending` result active.
 

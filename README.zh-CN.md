@@ -22,6 +22,7 @@
 - 对话区域右上角提供 `Skins` 按钮，可以直接切换本地已生成的有效主题。
 - `Skins` 菜单打开时和运行期间会自动刷新本地主题，新创建的主题无需重启 ChatGPT Desktop 即可出现。
 - 过大的 PNG/JPG 主背景会先在 Renderer 中解码并压缩为较小的 WebP Data URL，避免 CSS 过大导致背景规则被静默丢弃。
+- 主题生成阶段也会自动把 Hero、Logo、肖像卡转换为 `.webp` 并同步更新 `theme.json`。
 - 不修改 `app.asar`，不修改应用签名，不需要网站、数据库、远程服务或任意主题 CSS。
 - Skill 分发文件全部使用英文 ASCII；Skill 可以用中文或其他语言回复用户。
 

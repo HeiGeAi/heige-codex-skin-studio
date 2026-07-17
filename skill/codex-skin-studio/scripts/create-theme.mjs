@@ -1,14 +1,25 @@
 #!/usr/bin/env node
 
-import { copyFile, mkdir, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 import { commandApply, loadTheme, validateManifest } from "./apply.mjs";
 
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
 const REQUIRED_COLORS = ["accent", "secondary", "surface", "text"];
 const DEFAULT_PORT = 9341;
+const execFileAsync = promisify(execFile);
+const require = createRequire(import.meta.url);
+let sharp = null;
+try {
+  sharp = require("sharp");
+} catch {
+  sharp = null;
+}
 
 function parseArgs(argv) {
   const values = new Map();
@@ -88,8 +99,25 @@ function applyPort(values) {
   return port;
 }
 
+async function compressToWebp(source, destination) {
+  if (sharp) {
+    await sharp(source).webp({ quality: 84, alphaQuality: 100 }).toFile(destination);
+    return basename(destination);
+  }
+  try {
+    await execFileAsync("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-i", source, "-frames:v", "1", "-c:v", "libwebp", "-quality", "84", destination]);
+    return basename(destination);
+  } catch {
+    throw new Error("automatic WebP compression requires the optional sharp package or ffmpeg in PATH");
+  }
+}
+
+function assetName(key) {
+  return `${key}.webp`;
+}
+
 async function copyAsset(source, destination) {
-  await copyFile(source, destination);
+  await compressToWebp(source, destination);
   return basename(destination);
 }
 
@@ -108,9 +136,9 @@ async function createTheme(values) {
     schemaVersion: 1,
     id,
     name,
-    hero: `hero${extname(hero).toLowerCase()}`,
-    ...(assets.logo ? { logo: `logo${extname(assets.logo).toLowerCase()}` } : {}),
-    ...(assets.polaroid ? { polaroid: `polaroid${extname(assets.polaroid).toLowerCase()}` } : {}),
+    hero: assetName("hero"),
+    ...(assets.logo ? { logo: assetName("logo") } : {}),
+    ...(assets.polaroid ? { polaroid: assetName("polaroid") } : {}),
     ...(optionalCopy(values) ? { copy: optionalCopy(values) } : {}),
     colors,
   });
@@ -152,6 +180,6 @@ async function main() {
   }
 }
 
-export { applyPort, createTheme, parseArgs };
+export { applyPort, compressToWebp, createTheme, parseArgs };
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();
