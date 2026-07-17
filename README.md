@@ -49,6 +49,8 @@ The Skill is the agent layer. `create-theme.mjs` creates a complete local theme 
 
 When persistence is enabled, the worker also exposes a loopback-only control endpoint on `127.0.0.1:9342`. The injected upper-right `Skins` button uses it to list valid local themes and request a switch by theme id. It reuses the normal validation and CDP application path; it does not accept arbitrary filesystem paths or commands.
 
+The switcher observes native ChatGPT Desktop menu and popover state. It temporarily hides and disables its own hit area while a native menu such as a file open-method menu is expanded, then restores itself when the native menu closes.
+
 ## Repository Layout
 
 ```text

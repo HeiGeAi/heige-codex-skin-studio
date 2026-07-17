@@ -122,12 +122,16 @@ test("emits the local skin switcher button and control routes", () => {
   const expression = styleExpression(validManifest, "data:image/png;base64,AA", null, null, [{ id: "miku", name: "Miku" }]);
   assert.match(value, /#codex-skin-studio-switcher/);
   assert.match(value, /right: clamp\(96px, 11vw, 148px\)/);
+  assert.match(value, /data-native-overlay="true"/);
+  assert.match(value, /pointer-events: none/);
   assert.match(expression, /codex-skin-studio-switcher/);
   assert.match(expression, /127\.0\.0\.1:9342\/apply/);
   assert.match(expression, /Miku/);
   assert.match(expression, /window\.open/);
   assert.match(expression, /Switch ChatGPT Desktop skin/);
   assert.match(expression, /shell\?\.remove\(\);\s+shell = null/);
+  assert.match(expression, /MutationObserver/);
+  assert.match(expression, /aria-haspopup="menu"\]\[aria-expanded="true"/);
 });
 
 test("parses the local switcher control port and exposes a loopback control server", async (t) => {

@@ -727,6 +727,11 @@ mark,
   font: 600 12px/1.2 ui-rounded, system-ui, sans-serif;
 }
 
+#${SWITCHER_ID}[data-native-overlay="true"] {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 #${SWITCHER_ID} > button {
   display: inline-flex;
   min-height: 30px;
@@ -904,6 +909,7 @@ function switcherExpression(themes = []) {
       const body = document.body;
       if (!body) return;
       let shell = document.getElementById(${switcherId});
+      shell?.__codexSkinNativeOverlayObserver?.disconnect();
       shell?.remove();
       shell = null;
       if (!shell) {
@@ -919,6 +925,15 @@ function switcherExpression(themes = []) {
       const status = shell.querySelector("#${SWITCHER_ID}-status");
       const styleNode = () => document.getElementById(${styleId});
       const localThemes = ${localThemes};
+      const nativeOverlayOpen = () => [...document.querySelectorAll('[aria-haspopup="menu"][aria-expanded="true"], [aria-haspopup="listbox"][aria-expanded="true"], [data-state="open"][aria-haspopup="menu"], [role="menu"], [role="listbox"], [data-radix-menu-content], [data-radix-popper-content-wrapper], [role="dialog"]')].some((node) => {
+        if (shell.contains(node) || node === shell) return false;
+        const rect = node.getBoundingClientRect();
+        const computed = getComputedStyle(node);
+        return rect.width > 0 && rect.height > 0 && computed.visibility !== "hidden" && computed.display !== "none";
+      });
+      const syncNativeOverlay = () => {
+        shell.dataset.nativeOverlay = nativeOverlayOpen() ? "true" : "false";
+      };
       const renderThemes = () => {
         if (!list || !status) return;
         list.replaceChildren();
@@ -968,6 +983,10 @@ function switcherExpression(themes = []) {
         });
         shell.dataset.bound = "true";
       }
+      const observer = new MutationObserver(syncNativeOverlay);
+      observer.observe(body, { subtree: true, attributes: true, attributeFilter: ["aria-expanded", "data-state", "hidden", "style", "class"] });
+      shell.__codexSkinNativeOverlayObserver = observer;
+      syncNativeOverlay();
       renderThemes();
     } catch {
       // The visual skin must still apply when the optional local switcher is unavailable.

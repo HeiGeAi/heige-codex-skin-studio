@@ -45,7 +45,7 @@ validate -> persist -> apply.mjs -> 本机回环 CDP
                          可选 macOS LaunchAgent
 ```
 
-Skill 负责 Agent 编排；`create-theme.mjs` 负责一次性生成完整主题目录；`apply.mjs` 负责发现经过签名校验的 ChatGPT Desktop、选择主 Renderer、注入并验证样式；`persist.mjs` 负责长期运行的自动恢复 worker。启用持久化后，worker 还会在 `127.0.0.1:9342` 提供仅本机访问的主题控制接口，右上角 `Skins` 按钮通过主题 ID 切换有效本地主题，不接受任意文件路径或命令。
+Skill 负责 Agent 编排；`create-theme.mjs` 负责一次性生成完整主题目录；`apply.mjs` 负责发现经过签名校验的 ChatGPT Desktop、选择主 Renderer、注入并验证样式；`persist.mjs` 负责长期运行的自动恢复 worker。启用持久化后，worker 还会在 `127.0.0.1:9342` 提供仅本机访问的主题控制接口，右上角 `Skins` 按钮通过主题 ID 切换有效本地主题，不接受任意文件路径或命令。原生菜单（包括文件“打开方式”菜单）展开时，按钮会临时隐藏并释放点击区域，菜单关闭后自动恢复。
 
 ## 目录结构
 

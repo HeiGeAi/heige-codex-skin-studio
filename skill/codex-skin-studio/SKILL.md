@@ -268,6 +268,9 @@ on `127.0.0.1:9342`, accepts a theme id rather than a filesystem path, and does
 not expose arbitrary command execution. If the worker is unavailable, the
 button remains non-destructive and reports that local skin switching is
 temporarily unavailable.
+When a native ChatGPT Desktop menu or popover opens, the switcher temporarily
+hides itself and releases pointer events so file open-method menus and other
+native controls always receive the interaction.
 
 ## Inspect or restore
 
