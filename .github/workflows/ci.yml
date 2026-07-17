@@ -129,6 +129,10 @@ jobs:
           $env:LOCALAPPDATA = Join-Path $profileRoot "AppData\Local"
           $env:APPDATA = Join-Path $profileRoot "AppData\Roaming"
           New-Item -ItemType Directory -Path $env:LOCALAPPDATA, $env:APPDATA -Force | Out-Null
+          $fakeApp = Join-Path $sandbox "fake-app\ChatGPT.exe"
+          New-Item -ItemType Directory -Path (Split-Path $fakeApp -Parent) -Force | Out-Null
+          [System.IO.File]::WriteAllBytes($fakeApp, [byte[]]@())
+          $env:HEIGE_CODEX_APP = $fakeApp
           & (Join-Path $candidateRoot "scripts\install.ps1") `
             -InstallRoot $installRoot -StartMenuRoot $startMenuRoot -SkipApply
           if ($LASTEXITCODE -ne 0) { throw "Packaged Windows install failed." }
@@ -146,10 +150,6 @@ jobs:
           & node (Join-Path $installRoot "src\cli.mjs") list | Out-Null
           if ($LASTEXITCODE -ne 0) { throw "Installed Windows CLI smoke test failed." }
 
-          $fakeApp = Join-Path $sandbox "fake-app\ChatGPT.exe"
-          New-Item -ItemType Directory -Path (Split-Path $fakeApp -Parent) -Force | Out-Null
-          [System.IO.File]::WriteAllBytes($fakeApp, [byte[]]@())
-          $env:HEIGE_CODEX_APP = $fakeApp
           & (Join-Path $installRoot "scripts\windows\restore.ps1")
           $statePath = Join-Path $env:APPDATA "HeiGeCodexSkinStudio\state.json"
           $state = Get-Content -LiteralPath $statePath -Raw -Encoding UTF8 | ConvertFrom-Json

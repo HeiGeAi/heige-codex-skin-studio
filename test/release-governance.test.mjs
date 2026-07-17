@@ -161,6 +161,12 @@ test("CI has independent Node macOS Windows and package gates", async () => {
     /windows:\s[\s\S]*?output\\heige-codex-skin-studio\.skill[\s\S]*?package-skill\.mjs[\s\S]*?scripts\\install\.ps1[\s\S]*?-SkipApply[\s\S]*?scripts\\windows\\restore\.ps1/,
     "Windows must rebuild, install, and offline-restore the exact tracked candidate",
   );
+  const fakeAppBinding = workflow.indexOf("$env:HEIGE_CODEX_APP = $fakeApp");
+  const packagedInstall = workflow.indexOf('& (Join-Path $candidateRoot "scripts\\install.ps1")');
+  assert.ok(
+    fakeAppBinding >= 0 && fakeAppBinding < packagedInstall,
+    "the package smoke test must bind its isolated fake app before invoking the installer",
+  );
   assert.match(
     workflow,
     /Unregister-ScheduledTask[\s\S]*?Get-ScheduledTask[\s\S]*?cleanup failed/,
