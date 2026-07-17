@@ -18,7 +18,7 @@ import { appCandidates, appInfoSync, commandApply, commandErrorCode, commandRest
 import { applyPort, parseArgs as parseCreateArgs } from "../skill/codex-skin-studio/scripts/create-theme.mjs";
 import { buildPlist, buildTaskXml, createControlServer, parseArgs as parsePersistArgs } from "../skill/codex-skin-studio/scripts/persist.mjs";
 import { createPet, defaultPetsDir, DEFAULT_PET_CONTRACT, installPet, petStatus, validateContract, validatePetDirectory } from "../skill/codex-skin-studio/scripts/pet.mjs";
-import { buildMacOpenSettingsScript, buildWindowsOpenSettingsScript, OPEN_PETS_PANEL_EXPRESSION, petSelectionStateExpression, REFRESH_PETS_EXPRESSION, selectPetExpression } from "../skill/codex-skin-studio/scripts/pet-desktop.mjs";
+import { buildMacOpenSettingsScript, buildWindowsOpenSettingsScript, OPEN_PETS_PANEL_EXPRESSION, OPEN_SETTINGS_EXPRESSION, petSelectionStateExpression, REFRESH_PETS_EXPRESSION, selectPetExpression } from "../skill/codex-skin-studio/scripts/pet-desktop.mjs";
 import { createPairBundle, switchPairBundle, validatePairBundle } from "../skill/codex-skin-studio/scripts/paired.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -1373,6 +1373,7 @@ test("uses visible ChatGPT Desktop Pets controls instead of private app state", 
   assert.match(buildWindowsOpenSettingsScript(), /AppActivate\('Codex'\)/);
   assert.match(OPEN_PETS_PANEL_EXPRESSION, /data-settings-panel-slug=\\?\"pets/);
   assert.match(OPEN_PETS_PANEL_EXPRESSION, /data-settings-panel-slug=\\?\"appearance/);
+  assert.match(OPEN_SETTINGS_EXPRESSION, /settings|preferences/);
   assert.match(REFRESH_PETS_EXPRESSION, /button,\[role=\\?\"button/);
   assert.match(REFRESH_PETS_EXPRESSION, /custom\\s/);
   assert.match(selectPetExpression("paired-demo"), /custom:paired-demo/);

@@ -58,6 +58,16 @@ export const OPEN_PETS_PANEL_EXPRESSION = `(() => {
   return { ok: true };
 })()`;
 
+export const OPEN_SETTINGS_EXPRESSION = `(() => {
+  const button = [...document.querySelectorAll('button,[role="button"],a')].find((candidate) => {
+    const value = ((candidate.getAttribute('aria-label') || '') + ' ' + (candidate.getAttribute('title') || '') + ' ' + (candidate.textContent || '')).replace(/\\s+/g, ' ').trim().toLowerCase();
+    return /^(settings|preferences|\\u504f\\u597d\\u8bbe\\u7f6e|\\u8bbe\\u7f6e)$/.test(value) || /(^|\\s)(settings|preferences)(\\s|$)/.test(value);
+  });
+  if (!button) return { ok: false, reason: "settings-control-not-found" };
+  button.click();
+  return { ok: true };
+})()`;
+
 export const REFRESH_PETS_EXPRESSION = `(() => {
   const labels = ${json([...REFRESH_LABELS])};
   const button = [...document.querySelectorAll('button,[role="button"]')].find((candidate) => {
@@ -175,14 +185,32 @@ async function waitForState(port, predicate, options = {}) {
   return waitForExpression(port, PET_UI_STATE_EXPRESSION, predicate, options);
 }
 
+async function openSettingsThroughVisibleControl(port) {
+  const target = await currentTarget(port);
+  const opened = await evaluateTarget(target, OPEN_SETTINGS_EXPRESSION);
+  if (!opened?.ok) throw petError("PET_NATIVE_UI_UNAVAILABLE", opened?.reason || "could not open ChatGPT Desktop Settings through visible UI");
+  return opened;
+}
+
 export async function selectPetInChatGptDesktop({ petId, port = DEFAULT_PORT, openSettingsFn = openChatGptSettings, restoreApp = true } = {}) {
   assertPetId(petId);
   let state = null;
   try {
     state = (await waitForState(port, (value) => value.settings, { timeoutMs: 300 })).value;
   } catch {
-    await openSettingsFn();
-    state = (await waitForState(port, (value) => value.settings)).value;
+    let nativeOpenError = null;
+    try { await openSettingsFn(); } catch (error) { nativeOpenError = error; }
+    try {
+      state = (await waitForState(port, (value) => value.settings, { timeoutMs: 1800 })).value;
+    } catch {
+      try {
+        await openSettingsThroughVisibleControl(port);
+        state = (await waitForState(port, (value) => value.settings)).value;
+      } catch (visibleError) {
+        if (nativeOpenError) throw commandFailure(nativeOpenError);
+        throw visibleError;
+      }
+    }
   }
 
   let target = await currentTarget(port);
