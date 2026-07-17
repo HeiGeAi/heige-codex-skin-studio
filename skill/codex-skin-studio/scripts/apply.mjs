@@ -128,6 +128,16 @@ function luminance(hex) {
   return 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
 }
 
+function contrastRatio(left, right) {
+  const brighter = Math.max(luminance(left), luminance(right));
+  const darker = Math.min(luminance(left), luminance(right));
+  return (brighter + 0.05) / (darker + 0.05);
+}
+
+function readableOn(background, candidates) {
+  return candidates.reduce((best, candidate) => contrastRatio(background, candidate) > contrastRatio(background, best) ? candidate : best);
+}
+
 async function loadTheme(themeDir) {
   if (!themeDir) throw new Error("theme directory is required");
   const root = resolve(themeDir);
@@ -406,6 +416,7 @@ async function dataUrl(file) {
 
 function css(theme, hero, logo = null, polaroid = null) {
   const dark = luminance(theme.colors.surface) < 0.35;
+  const onAccent = readableOn(theme.colors.accent, [theme.colors.surface, theme.colors.text]);
   const copyText = theme.copy ? [theme.copy.headline, theme.copy.tagline].filter(Boolean).join("\\A ") : "";
   const brandButtonSelector = '.app-shell-left-panel nav > div:first-child > div:first-child > button[aria-haspopup="menu"]';
   const brandFallbackCss = theme.copy?.brand && !logo ? `
@@ -511,11 +522,68 @@ body::before {
   --codex-skin-secondary: ${theme.colors.secondary};
   --codex-skin-surface: ${theme.colors.surface};
   --codex-skin-text: ${theme.colors.text};
+  --codex-skin-on-accent: ${onAccent};
+  --codex-skin-control-surface: color-mix(in srgb, var(--codex-skin-surface) 94%, var(--codex-skin-text) 6%);
+  --codex-skin-panel-surface: color-mix(in srgb, var(--codex-skin-surface) 98%, var(--codex-skin-text) 2%);
+  --codex-skin-control-hover: color-mix(in srgb, var(--codex-skin-accent) 22%, var(--codex-skin-control-surface) 78%);
+  --codex-skin-muted-text: color-mix(in srgb, var(--codex-skin-text) 78%, var(--codex-skin-surface) 22%);
   --color-background-surface: color-mix(in srgb, var(--codex-skin-surface) 90%, transparent) !important;
-  --color-background-panel: color-mix(in srgb, var(--codex-skin-surface) 94%, transparent) !important;
+  --color-background-panel: var(--codex-skin-panel-surface) !important;
+  --color-background-control: var(--codex-skin-control-surface) !important;
+  --color-background-control-opaque: var(--codex-skin-control-surface) !important;
+  --color-background-editor-opaque: var(--codex-skin-panel-surface) !important;
+  --color-background-elevated-primary: var(--codex-skin-panel-surface) !important;
+  --color-background-elevated-primary-opaque: var(--codex-skin-panel-surface) !important;
+  --color-background-elevated-secondary: var(--codex-skin-control-surface) !important;
+  --color-background-elevated-secondary-opaque: var(--codex-skin-control-surface) !important;
   --color-background-button-primary: var(--codex-skin-accent) !important;
+  --color-background-button-primary-hover: var(--codex-skin-control-hover) !important;
+  --color-background-button-primary-active: var(--codex-skin-control-hover) !important;
+  --color-text-button-primary: var(--codex-skin-on-accent) !important;
+  --color-text-button-secondary: var(--codex-skin-text) !important;
   --color-text-foreground: var(--codex-skin-text) !important;
+  --color-text-foreground-secondary: var(--codex-skin-muted-text) !important;
+  --color-text-foreground-tertiary: var(--codex-skin-muted-text) !important;
+  --color-text-on-accent: var(--codex-skin-on-accent) !important;
   --color-border: color-mix(in srgb, var(--codex-skin-accent) 45%, transparent) !important;
+  --color-border-focus: var(--codex-skin-accent) !important;
+  --color-token-dropdown-background: var(--codex-skin-panel-surface) !important;
+  --color-token-dropdown-foreground: var(--codex-skin-text) !important;
+  --color-token-menu-background: var(--codex-skin-panel-surface) !important;
+  --color-token-menu-border: color-mix(in srgb, var(--codex-skin-accent) 62%, var(--codex-skin-panel-surface)) !important;
+  --color-token-main-surface-primary: var(--codex-skin-panel-surface) !important;
+  --color-token-side-bar-background: var(--codex-skin-control-surface) !important;
+  --color-token-button-background: var(--codex-skin-accent) !important;
+  --color-token-button-foreground: var(--codex-skin-on-accent) !important;
+  --color-token-on-accent: var(--codex-skin-on-accent) !important;
+  --color-token-input-background: var(--codex-skin-control-surface) !important;
+  --color-token-input-foreground: var(--codex-skin-text) !important;
+  --color-token-input-placeholder-foreground: var(--codex-skin-muted-text) !important;
+  --color-token-text-primary: var(--codex-skin-text) !important;
+  --color-token-text-secondary: var(--codex-skin-muted-text) !important;
+  --color-token-text-tertiary: var(--codex-skin-muted-text) !important;
+  --color-token-foreground: var(--codex-skin-text) !important;
+  --color-token-list-hover-background: var(--codex-skin-control-hover) !important;
+  --color-token-list-active-selection-background: var(--codex-skin-control-hover) !important;
+  --color-token-list-active-selection-foreground: var(--codex-skin-text) !important;
+  --color-token-focus-border: var(--codex-skin-accent) !important;
+  --vscode-button-background: var(--codex-skin-accent) !important;
+  --vscode-button-foreground: var(--codex-skin-on-accent) !important;
+  --vscode-button-secondaryBackground: var(--codex-skin-control-surface) !important;
+  --vscode-button-secondaryForeground: var(--codex-skin-text) !important;
+  --vscode-dropdown-background: var(--codex-skin-panel-surface) !important;
+  --vscode-dropdown-foreground: var(--codex-skin-text) !important;
+  --vscode-editor-background: var(--codex-skin-panel-surface) !important;
+  --vscode-editor-foreground: var(--codex-skin-text) !important;
+  --vscode-editorWidget-background: var(--codex-skin-panel-surface) !important;
+  --vscode-editorWidget-foreground: var(--codex-skin-text) !important;
+  --vscode-input-background: var(--codex-skin-control-surface) !important;
+  --vscode-input-foreground: var(--codex-skin-text) !important;
+  --vscode-list-activeSelectionBackground: var(--codex-skin-control-hover) !important;
+  --vscode-list-activeSelectionForeground: var(--codex-skin-text) !important;
+  --vscode-list-hoverBackground: var(--codex-skin-control-hover) !important;
+  --vscode-sideBar-background: var(--codex-skin-control-surface) !important;
+  --vscode-sideBar-foreground: var(--codex-skin-text) !important;
 }
 
 #root {
@@ -546,6 +614,80 @@ body::before {
   background: color-mix(in srgb, var(--codex-skin-surface) 88%, transparent) !important;
   box-shadow: 0 8px 24px color-mix(in srgb, var(--codex-skin-accent) 18%, transparent) !important;
   backdrop-filter: blur(18px) saturate(1.08);
+}
+
+button.size-token-button-composer {
+  color: var(--codex-skin-text) !important;
+  border-color: color-mix(in srgb, var(--codex-skin-accent) 48%, var(--codex-skin-control-surface)) !important;
+  background: var(--codex-skin-control-surface) !important;
+  opacity: 1 !important;
+}
+
+button.size-token-button-composer.bg-token-foreground,
+button.size-token-button-composer.bg-token-button-background {
+  color: var(--codex-skin-on-accent) !important;
+  background: var(--codex-skin-accent) !important;
+  border: 1px solid color-mix(in srgb, var(--codex-skin-on-accent) 58%, var(--codex-skin-accent)) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--codex-skin-accent) 24%, transparent), 0 6px 16px color-mix(in srgb, var(--codex-skin-accent) 30%, transparent) !important;
+}
+
+button.size-token-button-composer.bg-token-foreground svg,
+button.size-token-button-composer.bg-token-button-background svg {
+  color: var(--codex-skin-on-accent) !important;
+}
+
+[role="menu"],
+[data-radix-menu-content],
+[class~="bg-token-dropdown-background"],
+[class~="bg-token-menu-background"],
+[role="dialog"] {
+  color: var(--codex-skin-text) !important;
+  background: var(--codex-skin-panel-surface) !important;
+  border-color: color-mix(in srgb, var(--codex-skin-accent) 58%, var(--codex-skin-panel-surface)) !important;
+  box-shadow: 0 16px 42px color-mix(in srgb, var(--codex-skin-surface) 58%, transparent) !important;
+}
+
+[role="menuitem"],
+[data-radix-menu-item],
+[data-slot="thread-summary-panel-item-button"],
+[data-slot="thread-summary-panel-icon-button"] {
+  color: var(--codex-skin-text) !important;
+}
+
+[role="menuitem"]:hover,
+[role="menuitem"][data-highlighted="true"],
+[data-radix-menu-item]:hover,
+[data-radix-menu-item][data-highlighted],
+[data-slot="thread-summary-panel-item-button"]:hover,
+[data-slot="thread-summary-panel-item-button"]:focus-visible {
+  color: var(--codex-skin-text) !important;
+  background: var(--codex-skin-control-hover) !important;
+}
+
+[data-testid*="file" i],
+[data-testid*="attachment" i],
+[data-testid*="preview" i],
+[data-slot*="file" i],
+[data-slot*="attachment" i],
+[data-slot*="preview" i],
+[class*="file-preview" i],
+[class*="attachment-preview" i] {
+  color: var(--codex-skin-text) !important;
+  background-color: var(--codex-skin-panel-surface) !important;
+  border-color: color-mix(in srgb, var(--codex-skin-accent) 52%, var(--codex-skin-panel-surface)) !important;
+}
+
+mark,
+[aria-selected="true"],
+[data-selected="true"],
+[data-state="checked"] {
+  color: var(--codex-skin-text) !important;
+  background: var(--codex-skin-control-hover) !important;
+}
+
+::selection {
+  color: var(--codex-skin-on-accent) !important;
+  background: var(--codex-skin-accent) !important;
 }
 
 [data-app-action-sidebar-thread-active="true"] {

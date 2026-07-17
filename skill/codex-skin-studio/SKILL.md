@@ -35,6 +35,17 @@ Every generated hero must be designed as a background for a layered ChatGPT Desk
 
 The generated image supplies the scene, atmosphere, subject, and negative space. The injector supplies the live logo, navigation styling, gradient safety layer, optional brand copy, composer treatment, and optional portrait card. Do not generate text, cards, menus, buttons, chat bubbles, or fake UI inside the hero image.
 
+## Runtime readability contract
+
+The hero is never the only contrast layer. The injector must keep live controls
+readable above the image by using opaque or nearly opaque theme-derived surfaces
+for the composer, send button, menus, dialogs, right-side file or document
+previews, selected items, and keyboard focus. Prefer the theme surface and text
+colors over white or black defaults. Pick a foreground for the accent button
+that has the strongest contrast against the accent. Never rely on opacity alone
+for disabled or secondary controls, and never allow a light default panel token
+to remain behind light theme text.
+
 ## Five-zone generation contract
 
 Every visual brief and image-generation prompt must explicitly reserve these five zones:

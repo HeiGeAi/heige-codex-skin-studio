@@ -133,6 +133,10 @@ Every generated hero is a background for the live ChatGPT Desktop workbench, not
 
 The hero must not contain fake menus, buttons, chat bubbles, code, text, watermarks, or a baked-in ChatGPT interface.
 
+## Readability and contrast
+
+The runtime owns the readability layer. It maps the selected theme to ChatGPT Desktop control tokens and uses opaque theme-derived surfaces for the composer, send button, menus, dialogs, right-side file or document previews, selected items, and focus states. Accent buttons receive a foreground chosen for contrast against the accent color instead of always using white. This keeps live UI readable even when the hero image is bright or visually dense.
+
 ## One-Shot Theme Creation And Apply
 
 After the final hero has been generated and inspected, the Skill can create and apply a theme in one command:

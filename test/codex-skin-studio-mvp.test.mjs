@@ -106,6 +106,17 @@ test("emits dark CSS variables and a quoted hero URL", () => {
   assert.match(value, /backdrop-filter: blur\(18px\) saturate\(1\.08\)/);
 });
 
+test("emits high-contrast workbench tokens for controls, menus, and previews", () => {
+  const value = css(validManifest, "data:image/png;base64,AA");
+  assert.match(value, /--codex-skin-on-accent: /);
+  assert.match(value, /--color-token-dropdown-background: var\(--codex-skin-panel-surface\)/);
+  assert.match(value, /--color-token-input-foreground: var\(--codex-skin-text\)/);
+  assert.match(value, /button\.size-token-button-composer\.bg-token-foreground/);
+  assert.match(value, /\[data-slot="thread-summary-panel-item-button"\]/);
+  assert.match(value, /\[data-testid\*="file" i\]/);
+  assert.match(value, /::selection/);
+});
+
 test("emits optional brand logo and polaroid asset layers", () => {
   const value = css(validManifest, "data:image/png;base64,AA", "data:image/png;base64,LOGO", "data:image/png;base64,POLAROID");
   assert.match(value, /nav > div:first-child > div:first-child > button\[aria-haspopup="menu"\]/);
