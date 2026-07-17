@@ -43,6 +43,16 @@ test("Windows Start Menu and legacy enable names are session-only apply", async 
 
   assert.match(prepare, /scripts\\windows\\apply\.bat/);
   assert.doesNotMatch(prepare, /\$target\s*=.*enable-skin\.bat/);
+  assert.match(startMenu, /IShellLinkW/);
+  assert.match(startMenu, /IPersistFile/);
+  assert.match(startMenu, /UnmanagedType\.LPWStr/);
+  assert.match(startMenu, /UnicodeShellLinkV1/);
+  assert.match(startMenu, /SHSimpleIDListFromPath/);
+  assert.match(startMenu, /SetIDList\(simpleIdList\)/);
+  assert.match(startMenu, /FreeCoTaskMem\(simpleIdList\)/);
+  assert.match(startMenu, /persistence\.Save\(path, false\)/);
+  assert.doesNotMatch(startMenu, /persistence\.SaveCompleted\(/);
+  assert.doesNotMatch(startMenu, /WScript\.Shell/);
   assert.match(installer, /\$targetPath\s*=\s*Join-Path\s+\$InstallRoot\s+"scripts\\windows\\apply\.bat"/);
   assert.doesNotMatch(applyWrapper, /\$Theme\s*=\s*"miku-488137"/);
   assert.match(applyWrapper, /PSBoundParameters\.ContainsKey\("Theme"\)/);

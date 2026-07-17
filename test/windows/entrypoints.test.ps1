@@ -649,7 +649,7 @@ try {
         Assert-Equal "session launcher" ([System.IO.File]::ReadAllText($shortcutPath))
     }
 
-    Test-Case "WScript no-icon serialization normalizes without hiding a custom icon" {
+    Test-Case "Shell link no-icon serialization normalizes without hiding a custom icon" {
         Assert-Equal "" (ConvertFrom-HeiGeWshIconLocation -IconLocation "")
         Assert-Equal "" (ConvertFrom-HeiGeWshIconLocation -IconLocation ", 0")
         Assert-Equal "" (ConvertFrom-HeiGeWshIconLocation -IconLocation "  ,0  ")
@@ -658,8 +658,8 @@ try {
         Assert-Equal ", 1" (ConvertFrom-HeiGeWshIconLocation -IconLocation ", 1")
     }
 
-    Test-Case "Default WScript shortcut round-trips the complete generated schema" {
-        $shortcutPath = Join-Path $script:Root "WScript Schema\HeiGe 皮肤启动器.lnk"
+    Test-Case "Default Unicode shortcut round-trips the complete generated schema" {
+        $shortcutPath = Join-Path $script:Root "Unicode Schema\HeiGe 皮肤启动器.lnk"
         New-Item -ItemType Directory -Path (Split-Path $shortcutPath -Parent) -Force | Out-Null
         try {
             New-DefaultHeiGeShortcut -Path $shortcutPath -Target $script:ApplyBat `
@@ -668,52 +668,34 @@ try {
         } catch {
             $creationError = $_
             $hresult = "0x{0:X8}" -f $creationError.Exception.HResult
-            $matrixRoot = Join-Path $env:RUNNER_TEMP ("heige-wsh-matrix-" + [guid]::NewGuid().ToString("N"))
-            $matrixResults = @()
-            try {
-                $unicodeRoot = Join-Path $matrixRoot "目标目录"
-                New-Item -ItemType Directory -Path $unicodeRoot -Force | Out-Null
-                $asciiEmpty = Join-Path $matrixRoot "ascii-empty.bat"
-                $asciiContent = Join-Path $matrixRoot "ascii-content.bat"
-                $unicodeEmpty = Join-Path $unicodeRoot "empty.bat"
-                $unicodeContent = Join-Path $unicodeRoot "content.bat"
-                New-Item -ItemType File -Path $asciiEmpty, $unicodeEmpty -Force | Out-Null
-                [System.IO.File]::WriteAllText($asciiContent, "@echo off`r`nexit /b 0`r`n")
-                [System.IO.File]::WriteAllText($unicodeContent, "@echo off`r`nexit /b 0`r`n")
-                $cases = [ordered]@{
-                    CmdExe = (Join-Path $env:SystemRoot "System32\cmd.exe")
-                    AsciiEmpty = $asciiEmpty
-                    AsciiContent = $asciiContent
-                    UnicodeEmpty = $unicodeEmpty
-                    UnicodeContent = $unicodeContent
-                }
-                foreach ($case in $cases.GetEnumerator()) {
-                    try {
-                        $matrixShell = New-Object -ComObject WScript.Shell
-                        $matrixShortcut = $matrixShell.CreateShortcut(
-                            (Join-Path $matrixRoot ($case.Key + ".lnk"))
-                        )
-                        $matrixShortcut.TargetPath = [string]$case.Value
-                        $matrixResults += "$($case.Key)=PASS"
-                    } catch {
-                        $caseHresult = "0x{0:X8}" -f $_.Exception.HResult
-                        $matrixResults += "$($case.Key)=FAIL:$caseHresult"
-                    }
-                }
-            } catch {
-                $matrixResults += "MatrixSetup=FAIL:$($_.Exception.GetType().FullName):$($_.Exception.Message)"
-            } finally {
-                Remove-Item -LiteralPath $matrixRoot -Recurse -Force -ErrorAction SilentlyContinue
-            }
-            throw "WScript shortcut creation failed：$($creationError.Exception.Message)；HRESULT=$hresult；matrix=$($matrixResults -join ',')`n$($creationError.InvocationInfo.PositionMessage)`n$($creationError.ScriptStackTrace)"
+            throw "Unicode shortcut creation failed：$($creationError.Exception.Message)；HRESULT=$hresult`n$($creationError.InvocationInfo.PositionMessage)`n$($creationError.ScriptStackTrace)"
         }
         try {
             $observed = Read-DefaultHeiGeShortcut -Path $shortcutPath
         } catch {
-            throw "WScript shortcut inspection failed：$($_.Exception.Message)"
+            throw "Unicode shortcut inspection failed：$($_.Exception.Message)"
         }
         Assert-Equal $script:ApplyBat $observed.TargetPath
         Assert-Equal (Split-Path $script:ApplyBat -Parent) $observed.WorkingDirectory
+        Assert-Equal $script:ShortcutDescription $observed.Description
+        Assert-Equal "" $observed.Arguments
+        Assert-Equal 1 $observed.WindowStyle
+        Assert-Equal "" $observed.Hotkey
+        Assert-Equal "" $observed.IconLocation
+    }
+
+    Test-Case "Default Unicode shortcut preserves an exact future target" {
+        $shortcutPath = Join-Path $script:Root "Future Unicode Schema\HeiGe 皮肤启动器.lnk"
+        $futureTarget = Join-Path $script:Root "尚未发布的安装目录\scripts\windows\apply.bat"
+        $futureWorking = Split-Path $futureTarget -Parent
+        New-Item -ItemType Directory -Path (Split-Path $shortcutPath -Parent) -Force | Out-Null
+        Assert-False (Test-Path -LiteralPath $futureTarget)
+        Assert-False (Test-Path -LiteralPath $futureWorking)
+        New-DefaultHeiGeShortcut -Path $shortcutPath -Target $futureTarget `
+            -WorkingDirectory $futureWorking -Description $script:ShortcutDescription
+        $observed = Read-DefaultHeiGeShortcut -Path $shortcutPath
+        Assert-Equal $futureTarget $observed.TargetPath
+        Assert-Equal $futureWorking $observed.WorkingDirectory
         Assert-Equal $script:ShortcutDescription $observed.Description
         Assert-Equal "" $observed.Arguments
         Assert-Equal 1 $observed.WindowStyle
@@ -934,7 +916,18 @@ try {
             (Join-Path $script:RepositoryRoot "scripts\windows\lib\start-menu.ps1")
         )
         Assert-Match 'launcher v1 \| current-user \| re-enable skin' $source
-        Assert-False ($source -match '\$shortcut\.(?:Arguments|WindowStyle|Hotkey|IconLocation)\s*=')
+        Assert-Match 'IShellLinkW' $source
+        Assert-Match 'IPersistFile' $source
+        Assert-Match 'UnmanagedType\.LPWStr' $source
+        Assert-Match 'UnicodeShellLinkV1.*::Create' $source
+        Assert-Match 'UnicodeShellLinkV1.*::Read' $source
+        Assert-Match 'FinalReleaseComObject' $source
+        Assert-Match 'SHSimpleIDListFromPath' $source
+        Assert-Match 'SetIDList\(simpleIdList\)' $source
+        Assert-Match 'FreeCoTaskMem\(simpleIdList\)' $source
+        Assert-Match 'persistence\.Save\(path, false\)' $source
+        Assert-False ($source -match 'persistence\.SaveCompleted\(')
+        Assert-False ($source -match 'WScript\.Shell')
         Assert-Match 'Arguments\s*=\s*\[string\]\$shortcut\.Arguments' $source
         Assert-Match 'WindowStyle\s*=\s*\[int\]\$shortcut\.WindowStyle' $source
         Assert-Match 'Hotkey\s*=\s*\[string\]\$shortcut\.Hotkey' $source

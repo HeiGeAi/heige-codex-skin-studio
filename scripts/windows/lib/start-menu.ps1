@@ -25,6 +25,314 @@ $script:HeiGeStartMenuParticipantKeys = @(
     "WorkingDirectory"
 )
 
+function Initialize-HeiGeUnicodeShellLink {
+    if ($null -ne ("HeiGe.CodexSkinStudio.Windows.UnicodeShellLinkV1" -as [type])) {
+        return
+    }
+    Add-Type -Language CSharp -ErrorAction Stop -TypeDefinition @'
+using System;
+using System.Globalization;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Text;
+
+namespace HeiGe.CodexSkinStudio.Windows
+{
+    [ComImport]
+    [Guid("000214F9-0000-0000-C000-000000000046")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    internal interface IShellLinkW
+    {
+        [PreserveSig]
+        int GetPath(
+            [Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder file,
+            int maxPath,
+            IntPtr findData,
+            uint flags);
+
+        [PreserveSig]
+        int GetIDList(out IntPtr itemIdList);
+
+        [PreserveSig]
+        int SetIDList(IntPtr itemIdList);
+
+        [PreserveSig]
+        int GetDescription(
+            [Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder name,
+            int maxName);
+
+        [PreserveSig]
+        int SetDescription([MarshalAs(UnmanagedType.LPWStr)] string name);
+
+        [PreserveSig]
+        int GetWorkingDirectory(
+            [Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder directory,
+            int maxPath);
+
+        [PreserveSig]
+        int SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string directory);
+
+        [PreserveSig]
+        int GetArguments(
+            [Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder arguments,
+            int maxPath);
+
+        [PreserveSig]
+        int SetArguments([MarshalAs(UnmanagedType.LPWStr)] string arguments);
+
+        [PreserveSig]
+        int GetHotkey(out short hotkey);
+
+        [PreserveSig]
+        int SetHotkey(short hotkey);
+
+        [PreserveSig]
+        int GetShowCmd(out int showCommand);
+
+        [PreserveSig]
+        int SetShowCmd(int showCommand);
+
+        [PreserveSig]
+        int GetIconLocation(
+            [Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder iconPath,
+            int maxPath,
+            out int iconIndex);
+
+        [PreserveSig]
+        int SetIconLocation(
+            [MarshalAs(UnmanagedType.LPWStr)] string iconPath,
+            int iconIndex);
+
+        [PreserveSig]
+        int SetRelativePath(
+            [MarshalAs(UnmanagedType.LPWStr)] string relativePath,
+            uint reserved);
+
+        [PreserveSig]
+        int Resolve(IntPtr window, uint flags);
+
+        [PreserveSig]
+        int SetPath([MarshalAs(UnmanagedType.LPWStr)] string file);
+    }
+
+    [ComImport]
+    [Guid("0000010B-0000-0000-C000-000000000046")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    internal interface IPersistFile
+    {
+        [PreserveSig]
+        int GetClassID(out Guid classId);
+
+        [PreserveSig]
+        int IsDirty();
+
+        [PreserveSig]
+        int Load(
+            [MarshalAs(UnmanagedType.LPWStr)] string fileName,
+            uint mode);
+
+        [PreserveSig]
+        int Save(
+            [MarshalAs(UnmanagedType.LPWStr)] string fileName,
+            [MarshalAs(UnmanagedType.Bool)] bool remember);
+
+        [PreserveSig]
+        int SaveCompleted([MarshalAs(UnmanagedType.LPWStr)] string fileName);
+
+        [PreserveSig]
+        int GetCurFile([MarshalAs(UnmanagedType.LPWStr)] out string fileName);
+    }
+
+    public sealed class ShellLinkDataV1
+    {
+        public string TargetPath { get; set; }
+        public string WorkingDirectory { get; set; }
+        public string Description { get; set; }
+        public string Arguments { get; set; }
+        public int WindowStyle { get; set; }
+        public string Hotkey { get; set; }
+        public string IconLocation { get; set; }
+    }
+
+    public static class UnicodeShellLinkV1
+    {
+        private const int PathCharacters = 32768;
+        private const int DescriptionCharacters = 1024;
+        private const uint RawPath = 0x00000004;
+        private static readonly Guid ShellLinkClassId =
+            new Guid("00021401-0000-0000-C000-000000000046");
+
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+        private static extern IntPtr SHSimpleIDListFromPath(
+            [MarshalAs(UnmanagedType.LPWStr)] string path);
+
+        private static object CreateInstance()
+        {
+            Type type = Type.GetTypeFromCLSID(ShellLinkClassId, true);
+            object instance = Activator.CreateInstance(type);
+            if (instance == null)
+            {
+                throw new InvalidOperationException("ShellLink COM activation returned null");
+            }
+            return instance;
+        }
+
+        private static void RequireSuccess(int result, string operation)
+        {
+            if (result < 0)
+            {
+                throw new COMException(operation + " failed", result);
+            }
+            if (result != 0)
+            {
+                throw new COMException(operation + " did not return S_OK", result);
+            }
+        }
+
+        private static void ThrowIfFailed(int result, string operation)
+        {
+            if (result < 0)
+            {
+                throw new COMException(operation + " failed", result);
+            }
+        }
+
+        private static void Release(object instance)
+        {
+            if (instance != null && Marshal.IsComObject(instance))
+            {
+                Marshal.FinalReleaseComObject(instance);
+            }
+        }
+
+        private static void SetTarget(IShellLinkW link, string target)
+        {
+            if (File.Exists(target))
+            {
+                RequireSuccess(link.SetPath(target), "IShellLinkW.SetPath");
+                return;
+            }
+            IntPtr simpleIdList = SHSimpleIDListFromPath(target);
+            if (simpleIdList == IntPtr.Zero)
+            {
+                throw new InvalidOperationException(
+                    "SHSimpleIDListFromPath could not represent the future target");
+            }
+            try
+            {
+                RequireSuccess(
+                    link.SetIDList(simpleIdList),
+                    "IShellLinkW.SetIDList");
+            }
+            finally
+            {
+                Marshal.FreeCoTaskMem(simpleIdList);
+            }
+        }
+
+        public static void Create(
+            string path,
+            string target,
+            string workingDirectory,
+            string description)
+        {
+            if (String.IsNullOrEmpty(path) ||
+                String.IsNullOrEmpty(target) ||
+                String.IsNullOrEmpty(workingDirectory) ||
+                description == null)
+            {
+                throw new ArgumentException("ShellLink arguments must be non-empty");
+            }
+            object instance = CreateInstance();
+            try
+            {
+                IShellLinkW link = (IShellLinkW)instance;
+                IPersistFile persistence = (IPersistFile)instance;
+                SetTarget(link, target);
+                RequireSuccess(
+                    link.SetWorkingDirectory(workingDirectory),
+                    "IShellLinkW.SetWorkingDirectory");
+                RequireSuccess(
+                    link.SetDescription(description),
+                    "IShellLinkW.SetDescription");
+                RequireSuccess(persistence.Save(path, false), "IPersistFile.Save");
+            }
+            finally
+            {
+                Release(instance);
+            }
+        }
+
+        public static ShellLinkDataV1 Read(string path)
+        {
+            if (String.IsNullOrEmpty(path))
+            {
+                throw new ArgumentException("ShellLink path must be non-empty");
+            }
+            object instance = CreateInstance();
+            try
+            {
+                IShellLinkW link = (IShellLinkW)instance;
+                IPersistFile persistence = (IPersistFile)instance;
+                RequireSuccess(persistence.Load(path, 0), "IPersistFile.Load");
+
+                StringBuilder target = new StringBuilder(PathCharacters);
+                StringBuilder workingDirectory = new StringBuilder(PathCharacters);
+                StringBuilder description = new StringBuilder(DescriptionCharacters);
+                StringBuilder arguments = new StringBuilder(PathCharacters);
+                StringBuilder iconPath = new StringBuilder(PathCharacters);
+                short hotkey;
+                int showCommand;
+                int iconIndex;
+
+                ThrowIfFailed(
+                    link.GetPath(target, target.Capacity, IntPtr.Zero, RawPath),
+                    "IShellLinkW.GetPath");
+                ThrowIfFailed(
+                    link.GetWorkingDirectory(
+                        workingDirectory,
+                        workingDirectory.Capacity),
+                    "IShellLinkW.GetWorkingDirectory");
+                ThrowIfFailed(
+                    link.GetDescription(description, description.Capacity),
+                    "IShellLinkW.GetDescription");
+                ThrowIfFailed(
+                    link.GetArguments(arguments, arguments.Capacity),
+                    "IShellLinkW.GetArguments");
+                ThrowIfFailed(link.GetShowCmd(out showCommand), "IShellLinkW.GetShowCmd");
+                ThrowIfFailed(link.GetHotkey(out hotkey), "IShellLinkW.GetHotkey");
+                ThrowIfFailed(
+                    link.GetIconLocation(iconPath, iconPath.Capacity, out iconIndex),
+                    "IShellLinkW.GetIconLocation");
+
+                string hotkeyText = hotkey == 0
+                    ? String.Empty
+                    : "0x" + ((ushort)hotkey).ToString("X4", CultureInfo.InvariantCulture);
+                string iconText = iconPath.Length == 0 && iconIndex == 0
+                    ? String.Empty
+                    : iconPath.ToString() + ", " +
+                        iconIndex.ToString(CultureInfo.InvariantCulture);
+                return new ShellLinkDataV1
+                {
+                    TargetPath = target.ToString(),
+                    WorkingDirectory = workingDirectory.ToString(),
+                    Description = description.ToString(),
+                    Arguments = arguments.ToString(),
+                    WindowStyle = showCommand,
+                    Hotkey = hotkeyText,
+                    IconLocation = iconText
+                };
+            }
+            finally
+            {
+                Release(instance);
+            }
+        }
+    }
+}
+'@
+}
+
 function Get-HeiGeStartMenuFullPath {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -120,18 +428,19 @@ function New-DefaultHeiGeShortcut {
         [Parameter(Mandatory = $true)][string]$WorkingDirectory,
         [Parameter(Mandatory = $true)][string]$Description
     )
-    $shell = New-Object -ComObject WScript.Shell
-    $shortcut = $shell.CreateShortcut($Path)
-    $shortcut.TargetPath = $Target
-    $shortcut.WorkingDirectory = $WorkingDirectory
-    $shortcut.Description = $Description
-    $shortcut.Save()
+    Initialize-HeiGeUnicodeShellLink
+    [HeiGe.CodexSkinStudio.Windows.UnicodeShellLinkV1]::Create(
+        $Path,
+        $Target,
+        $WorkingDirectory,
+        $Description
+    )
 }
 
 function Read-DefaultHeiGeShortcut {
     param([Parameter(Mandatory = $true)][string]$Path)
-    $shell = New-Object -ComObject WScript.Shell
-    $shortcut = $shell.CreateShortcut($Path)
+    Initialize-HeiGeUnicodeShellLink
+    $shortcut = [HeiGe.CodexSkinStudio.Windows.UnicodeShellLinkV1]::Read($Path)
     return [pscustomobject][ordered]@{
         TargetPath = [string]$shortcut.TargetPath
         WorkingDirectory = [string]$shortcut.WorkingDirectory
