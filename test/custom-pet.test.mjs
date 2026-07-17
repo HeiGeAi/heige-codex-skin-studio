@@ -72,6 +72,9 @@ test("custom-pet wrapper reports success only after installing files and config"
   assert.equal(stderr, "");
   assert.equal(result.installed, true);
   assert.equal(result.petId, "miku-future");
+  assert.equal(result.restartRequired, true);
+  assert.equal(result.effectivePetId, "custom:miku-future");
+  assert.match(result.nextAction, /重启 Codex/);
   assert.deepEqual(
     await readFile(join(home, ".codex/pets/miku-future/pet.json")),
     await readFile(join(repoRoot, "custom-pet/miku-future/pet.json")),

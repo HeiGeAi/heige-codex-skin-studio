@@ -58,6 +58,9 @@ test("missing config gets one desktop section and selected pet", async (t) => {
   assert.equal((await stat(paths.configPath)).mode & 0o777, 0o600);
   assert.deepEqual(await backupPaths(paths.codexRoot), []);
   assert.equal(result.configChanged, true);
+  assert.equal(result.restartRequired, true);
+  assert.equal(result.effectivePetId, "custom:miku-future");
+  assert.match(result.nextAction, /重启 Codex/);
 });
 
 test("setSelectedPet adds a missing desktop section without changing other keys", () => {
@@ -104,6 +107,9 @@ test("already-selected config and installed files make repeated installation ide
 
   assert.equal(result.configChanged, false);
   assert.equal(result.petChanged, false);
+  assert.equal(result.restartRequired, false);
+  assert.equal(result.effectivePetId, "custom:miku-future");
+  assert.equal(result.nextAction, null);
   assert.equal(after.ino, before.ino, "an identical pet directory must not be replaced");
   assert.deepEqual(await backupPaths(paths.codexRoot), []);
   assert.deepEqual(

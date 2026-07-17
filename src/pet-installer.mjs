@@ -493,13 +493,20 @@ export async function installPet({ sourceRoot, home, hooks } = {}) {
       await rm(petTransaction.retiredRoot, { recursive: true, force: true });
       await syncPath(petsRoot);
     }
+    const configChanged = Boolean(configTransaction?.changed);
+    const restartRequired = configChanged || petTransaction.changed;
     return Object.freeze({
       installed: true,
       petId: source.manifest.id,
+      effectivePetId: `custom:${source.manifest.id}`,
       targetRoot,
       configPath,
       petChanged: petTransaction.changed,
-      configChanged: Boolean(configTransaction?.changed),
+      configChanged,
+      restartRequired,
+      nextAction: restartRequired
+        ? "桌宠已安装并选中，请重启 Codex 使其生效。"
+        : null,
       backupPath: configTransaction?.backupPath ?? null,
     });
   } catch (error) {
