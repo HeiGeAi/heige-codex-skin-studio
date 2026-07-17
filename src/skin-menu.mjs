@@ -87,6 +87,9 @@ export function buildSkinMenuScript({
       id: String(entry.id),
       name: typeof entry.name === "string" && entry.name.trim() ? entry.name : String(entry.id),
       accent,
+      appearance: ["system", "light", "dark"].includes(entry.appearance)
+        ? entry.appearance
+        : "system",
       colors: {
         accent,
         secondary: colorValue(entry.colors?.secondary, "#ed6ec1"),
@@ -332,6 +335,11 @@ export function buildSkinMenuScript({
   heroName.style.cssText = "display:block;font-size:18px;text-shadow:0 1px 8px rgba(0,0,0,.24);";
   heroCopy.append(heroEyebrow, heroName);
   currentHero.appendChild(heroCopy);
+  const appearanceHelp = document.createElement("aside");
+  appearanceHelp.dataset.heigeRole = "appearance-help";
+  appearanceHelp.setAttribute("role", "note");
+  appearanceHelp.setAttribute("aria-label", "字体颜色显示异常处理");
+  appearanceHelp.textContent = "字体颜色显示不对？这通常是 Codex 本体的外观配色不匹配。点击左下角头像 → 设置 → 外观 → 选择浅色或深色主题即可。";
   const quickActions = document.createElement("section");
   quickActions.dataset.heigeRole = "quick-actions";
   const customSection = document.createElement("section");
@@ -348,7 +356,7 @@ export function buildSkinMenuScript({
   builtInHeading.style.cssText = "margin:0 0 9px;font-size:13px;";
   const themeGrid = document.createElement("section");
   themeGrid.dataset.heigeRole = "theme-grid";
-  scroll.append(currentHero, quickActions, customSection, builtInHeading, themeGrid);
+  scroll.append(currentHero, appearanceHelp, quickActions, customSection, builtInHeading, themeGrid);
   const footer = document.createElement("footer");
   footer.dataset.heigeRole = "theme-center-footer";
   panel.append(header, scroll, footer);
@@ -482,6 +490,37 @@ export function buildSkinMenuScript({
   // 卸载皮肤后 style 已脱离 DOM，任何脚本化调用不得再改 dataset/写存储，否则污染 status
   const alive = () => { assertCurrent(); return style.isConnected; };
   let paintCurrentTheme = () => {};
+  let lastRequestedAppearance = null;
+  const effectiveAppearance = (appearance) => {
+    if (appearance === "light" || appearance === "dark") return appearance;
+    try {
+      const system = globalThis.electronBridge?.getSystemThemeVariant?.();
+      if (system === "light" || system === "dark") return system;
+    } catch {}
+    return globalThis.matchMedia?.("(prefers-color-scheme: dark)")?.matches ? "dark" : "light";
+  };
+  const applyCodexAppearance = (appearance) => {
+    if (!["system", "light", "dark"].includes(appearance)) return false;
+    const effective = effectiveAppearance(appearance);
+    document.documentElement.classList.toggle("electron-dark", effective === "dark");
+    document.documentElement.classList.toggle("electron-light", effective === "light");
+    if (lastRequestedAppearance === appearance) return true;
+    const bridge = globalThis.electronBridge;
+    if (typeof bridge?.sendMessageFromView !== "function") return false;
+    lastRequestedAppearance = appearance;
+    const requestId = "heige-appearance-" + generation + "-" + globalThis.crypto.randomUUID();
+    void Promise.resolve(bridge.sendMessageFromView({
+      type: "fetch",
+      requestId,
+      url: "vscode://codex/set-setting",
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ key: "appearanceTheme", value: appearance }),
+    })).catch(() => {
+      if (lastRequestedAppearance === appearance) lastRequestedAppearance = null;
+    });
+    return true;
+  };
 
   const setTheme = (id, persist = true, broadcast = true) => {
     if (!alive()) return;
@@ -489,6 +528,7 @@ export function buildSkinMenuScript({
     if (!theme) return;
     style.textContent = theme.css;
     document.documentElement.dataset.heigeCodexSkin = theme.id;
+    applyCodexAppearance(theme.appearance);
     paint(theme.id);
     paintCurrentTheme(theme.id);
     if (persist) writeSelected(theme.id);
@@ -691,6 +731,14 @@ export function buildSkinMenuScript({
 
   const hex = (r, g, b) => "#" + [r, g, b].map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0")).join("");
   const mix = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
+  const appearanceFromColors = (colors) => {
+    const surface = typeof colors?.surface === "string" ? colors.surface : "";
+    if (!/^#[0-9a-f]{6}$/i.test(surface)) return "system";
+    const r = Number.parseInt(surface.slice(1, 3), 16);
+    const g = Number.parseInt(surface.slice(3, 5), 16);
+    const b = Number.parseInt(surface.slice(5, 7), 16);
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b > 128 ? "light" : "dark";
+  };
 
   const extractPalette = (canvas) => {
     const ctx = canvas.getContext("2d");
@@ -725,10 +773,13 @@ export function buildSkinMenuScript({
     const surface = light ? mix(accent, [252, 252, 255], 0.92) : mix(accent, [12, 12, 18], 0.86);
     const text = light ? mix(accent, [16, 24, 40], 0.82) : mix(accent, [244, 246, 252], 0.85);
     return {
-      accent: hex(...accent),
-      secondary: hex(...second),
-      surface: hex(...surface),
-      text: hex(...text),
+      appearance: light ? "light" : "dark",
+      colors: {
+        accent: hex(...accent),
+        secondary: hex(...second),
+        surface: hex(...surface),
+        text: hex(...text),
+      },
     };
   };
 
@@ -762,6 +813,7 @@ export function buildSkinMenuScript({
   const applyCustomTheme = (theme, persist = true, broadcast = true) => {
     if (!alive()) return;
     currentCustom = theme;
+    applyCodexAppearance(theme.appearance ?? appearanceFromColors(theme.colors));
     style.textContent = buildCustomCss(theme.dataUrl, theme.colors);
     document.documentElement.dataset.heigeCodexSkin = data.customId;
     ensureCustomRow(theme);
@@ -837,6 +889,9 @@ export function buildSkinMenuScript({
         name: typeof saved.name === "string" ? saved.name.slice(0, 120) : "我的图片",
         dataUrl: saved.dataUrl,
         colors: Object.fromEntries(["accent", "secondary", "surface", "text"].map((key) => [key, saved.colors[key]])),
+        appearance: ["light", "dark"].includes(saved.appearance)
+          ? saved.appearance
+          : appearanceFromColors(saved.colors),
       };
     } catch { return null; }
   };
@@ -932,10 +987,12 @@ export function buildSkinMenuScript({
         if (typeof encoded !== "string" || !encoded.startsWith("data:image/webp")) throw imageError("图片压缩失败");
         const encodedMetadata = parseDataUrlImage(encoded).metadata;
         if (encodedMetadata.width !== full.width || encodedMetadata.height !== full.height) throw imageError("图片压缩结果尺寸不一致");
+        const palette = extractPalette(sample);
         const theme = {
           name: name || "\\u6211\\u7684\\u56fe\\u7247",
           dataUrl: encoded,
-          colors: extractPalette(sample),
+          colors: palette.colors,
+          appearance: palette.appearance,
         };
         assertCurrent();
         const persisted = saveCustom(theme);
@@ -1210,7 +1267,14 @@ export function buildSkinMenuScript({
       renderThemeSelection(previousThemeId, false, false);
     };
     const queueControlRequest = (request) => {
-      if (controlRequest !== null) return false;
+      if (controlRequest !== null) {
+        if (
+          controlRequest.action !== "set-theme"
+          || request.action !== "set-theme"
+          || controlRequest.expectedRevision !== request.expectedRevision
+        ) return false;
+        clearControlRequest();
+      }
       controlRequest = request;
       controlRequestTimeout = later(() => {
         if (controlRequest?.requestId !== request.requestId) return;
@@ -1248,7 +1312,9 @@ export function buildSkinMenuScript({
         expectedRevision: requestRevision,
         themeId,
       };
-      optimisticPreviousThemeId = currentThemeId;
+      if (optimisticPreviousThemeId === null) {
+        optimisticPreviousThemeId = currentThemeId;
+      }
       paintSaveState("saving", "正在保存");
       renderThemeSelection(themeId, false, false);
       themePending = true;
@@ -1288,6 +1354,7 @@ export function buildSkinMenuScript({
           const message = typeof body?.message === "string" && body.message.length <= 160
             ? body.message
             : "后台拒绝了主题选择，界面未更改";
+          if (controlRequest?.action === "set-theme") clearControlRequest();
           rollbackOptimisticTheme();
           paintSaveState("error", "未保存，请重试");
           showAlert(message);
@@ -1304,6 +1371,7 @@ export function buildSkinMenuScript({
           throw new Error("后台未确认主题选择，界面未更改");
         }
         controlRevision = body.revision;
+        if (controlRequest?.action === "set-theme") clearControlRequest();
         publish("persistence", { enabled: persistenceEnabled, revision: controlRevision });
         optimisticPreviousThemeId = null;
         renderThemeSelection(themeId, true, true);
@@ -1324,10 +1392,8 @@ export function buildSkinMenuScript({
         clearLater(timeoutId);
         trackedControllers.delete(abortController);
         if (isCurrent()) {
-          if (!queued) {
-            themePending = false;
-            for (const item of rows.values()) item.disabled = false;
-          }
+          themePending = false;
+          for (const item of rows.values()) item.disabled = false;
         }
       }
     };

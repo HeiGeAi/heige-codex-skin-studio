@@ -158,6 +158,7 @@ function themeEntry(resources) {
     id: loadedTheme.manifest.id,
     name: loadedTheme.manifest.name,
     accent: loadedTheme.manifest.colors?.accent,
+    appearance: loadedTheme.manifest.appearance,
     colors: { ...loadedTheme.manifest.colors },
     css: buildSkinCss({
       theme: loadedTheme.manifest,

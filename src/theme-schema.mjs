@@ -27,6 +27,7 @@ const IMAGE_MIME = new Map([
   [".jpeg", "image/jpeg"],
   [".webp", "image/webp"],
 ]);
+const APPEARANCES = new Set(["system", "light", "dark"]);
 const HEX_COLOR = /^#[0-9A-F]{6}$/i;
 const THEME_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const DEFAULT_COLORS = {
@@ -115,6 +116,10 @@ export function validateThemeManifest(input) {
   if (typeof input.name !== "string" || !input.name.trim()) {
     throw new Error("theme name must be a non-empty string");
   }
+  const appearance = input.appearance ?? "system";
+  if (typeof appearance !== "string" || !APPEARANCES.has(appearance)) {
+    throw new Error("theme appearance must be system, light, or dark");
+  }
 
   return {
     schemaVersion: THEME_SCHEMA_VERSION,
@@ -123,6 +128,7 @@ export function validateThemeManifest(input) {
     hero: normalizeHero(input.hero),
     logo: input.logo === undefined || input.logo === null ? null : normalizeAssetPath(input.logo, "logo"),
     polaroid: input.polaroid === undefined || input.polaroid === null ? null : normalizeAssetPath(input.polaroid, "polaroid"),
+    appearance,
     colors: normalizeColors(input.colors),
     copy: normalizeCopy(input.copy),
   };

@@ -62,8 +62,12 @@ export async function menuWindow({
     css: "html { color: #123456; }",
   }],
   fetch,
+  electronBridgeFactory,
 } = {}) {
   const window = new Window({ url: "app://-/index.html" });
+  if (electronBridgeFactory) {
+    window.electronBridge = electronBridgeFactory(window);
+  }
   let backendPersistence = persistenceEnabled;
   let backendRevision = revision;
   window.fetch = fetch ?? (async (url, options) => {

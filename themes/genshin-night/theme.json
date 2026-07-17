@@ -3,6 +3,7 @@
   "id": "genshin-night",
   "name": "原神 · 星夜",
   "hero": "hero.webp",
+  "appearance": "dark",
   "colors": {
     "accent": "#e0b458",
     "secondary": "#7a86d8",

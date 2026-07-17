@@ -3,6 +3,7 @@
   "id": "naruto-hokage",
   "name": "火影 · 鸣人",
   "hero": "hero.webp",
+  "appearance": "dark",
   "colors": {
     "accent": "#f2801e",
     "secondary": "#ffd166",

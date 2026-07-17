@@ -3,6 +3,7 @@
   "id": "dalao-dianyan",
   "name": "大佬 · 点烟",
   "hero": "hero.webp",
+  "appearance": "dark",
   "colors": {
     "accent": "#e09a52",
     "secondary": "#9aa3b0",

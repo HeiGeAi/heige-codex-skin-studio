@@ -251,6 +251,10 @@ test("theme center renders native upload and built-in preview cards", async (t) 
   assert.match(cards[0].querySelector('[data-heige-role="theme-preview"]').style.backgroundImage, /data:image\/webp/);
   assert.match(cards[1].querySelector('[data-heige-role="theme-preview"]').dataset.fallbackColors, /#4455aa/i);
   assert.equal(page.currentHero.dataset.themeId, "miku-488137");
+  const appearanceHelp = page.document.querySelector('[data-heige-role="appearance-help"]');
+  assert.equal(appearanceHelp?.parentElement?.dataset.heigeRole, "theme-center-scroll");
+  assert.match(appearanceHelp?.textContent ?? "", /字体颜色显示不对/);
+  assert.match(appearanceHelp?.textContent ?? "", /左下角头像.*设置.*外观.*浅色.*深色主题/);
 });
 
 test("switch exposes programmatic state and permanent re-enable guidance", async (t) => {
@@ -687,8 +691,16 @@ test("browser upload timeout settles visibly without decoding", async (t) => {
 });
 
 test("validated upload scales within both canvas budgets and persists", async (t) => {
-  const page = await menuWindow();
+  const messages = [];
+  const page = await menuWindow({
+    electronBridgeFactory: () => ({
+      async sendMessageFromView(message) {
+        messages.push(structuredClone(message));
+      },
+    }),
+  });
   t.after(() => page.close());
+  messages.length = 0;
   const drawCalls = [];
   const restore = installSuccessfulImagePipeline(page, {
     decodedWidth: 4000,
@@ -715,6 +727,12 @@ test("validated upload scales within both canvas budgets and persists", async (t
     custom.querySelector('[data-heige-role="theme-preview"]').style.backgroundImage,
     /data:image\/webp/,
   );
+  assert.equal(page.document.documentElement.classList.contains("electron-dark"), true);
+  const savedCustom = JSON.parse(page.window.localStorage.getItem("heigeCodexCustomTheme"));
+  assert.equal(savedCustom.appearance, "dark");
+  const appearanceRequest = messages.find((message) =>
+    message.type === "fetch" && message.url === "vscode://codex/set-setting");
+  assert.equal(JSON.parse(appearanceRequest?.body ?? "null")?.value, "dark");
 });
 
 test("remote persistence changes close inline confirmation after restoring focus", async (t) => {
@@ -752,7 +770,7 @@ test("a newer window ACK clears a queued persistence request without leaving the
   assert.equal(left.window.__heigeCodexSkinRuntime.status().controlRequest, null);
 });
 
-test("a newer persistence revision cancels a stale queued theme request and unlocks its rows", async (t) => {
+test("a newer persistence revision cancels a stale queued theme request while rows stay interactive", async (t) => {
   SharedBroadcastChannel.reset();
   const entries = [
     { id: "miku-488137", name: "Miku", accent: "#19c9e5", css: "html { color: #123456; }" },
@@ -768,7 +786,7 @@ test("a newer persistence revision cancels a stale queued theme request and unlo
 
   await left.pickTheme("night-city");
   const nightRow = left.document.querySelector('[data-heige-theme-id="night-city"]');
-  assert.equal(nightRow.disabled, true);
+  assert.equal(nightRow.disabled, false);
 
   await right.disablePersistence();
   await left.flush();
@@ -964,6 +982,59 @@ test("a menu theme choice renders immediately while durable confirmation is pend
   assert.equal(page.backdrop.hidden, false);
 });
 
+test("a preset theme immediately updates Codex appearance and writes the native setting", async (t) => {
+  const messages = [];
+  const page = await menuWindow({
+    entries: [
+      {
+        id: "miku-488137",
+        name: "Miku",
+        accent: "#19c9e5",
+        appearance: "light",
+        css: "html { color: #123456; }",
+      },
+      {
+        id: "night-city",
+        name: "Night City",
+        accent: "#4455aa",
+        appearance: "dark",
+        css: "html { color: #eeeeee; }",
+      },
+    ],
+    electronBridgeFactory: (window) => ({
+      async sendMessageFromView(message) {
+        messages.push(structuredClone(message));
+        queueMicrotask(() => {
+          window.dispatchEvent(new window.MessageEvent("message", {
+            data: {
+              type: "fetch-response",
+              responseType: "success",
+              requestId: message.requestId,
+              status: 200,
+              headers: { "content-type": "application/json" },
+              bodyJsonString: JSON.stringify({ success: true }),
+            },
+          }));
+        });
+      },
+    }),
+  });
+  t.after(() => page.close());
+  messages.length = 0;
+
+  await page.pickTheme("night-city");
+
+  assert.equal(page.document.documentElement.classList.contains("electron-dark"), true);
+  assert.equal(page.document.documentElement.classList.contains("electron-light"), false);
+  const appearanceRequest = messages.find((message) =>
+    message.type === "fetch" && message.url === "vscode://codex/set-setting");
+  assert.ok(appearanceRequest);
+  assert.deepEqual(JSON.parse(appearanceRequest.body), {
+    key: "appearanceTheme",
+    value: "dark",
+  });
+});
+
 test("a menu theme choice persists the authoritative theme revision", async (t) => {
   const requests = [];
   const page = await menuWindow({
@@ -1036,6 +1107,39 @@ test("a renderer-blocked theme request keeps its optimistic theme until controll
   assert.match(page.alert.textContent, /后台确认/);
 });
 
+test("renderer fallback stays interactive and coalesces rapid theme choices to the latest one", async (t) => {
+  const page = await menuWindow({
+    persistenceEnabled: false,
+    revision: 7,
+    entries: [
+      { id: "miku-488137", name: "Miku", accent: "#19c9e5", css: "html { color: #123456; }" },
+      { id: "night-city", name: "Night City", accent: "#4455aa", css: "html { color: #eeeeee; }" },
+      { id: "dawn-city", name: "Dawn City", accent: "#e7bf68", css: "html { color: #222222; }" },
+    ],
+    fetch: async () => { throw new Error("Failed to fetch"); },
+  });
+  t.after(() => page.close());
+
+  await page.pickTheme("night-city");
+
+  assert.equal(
+    page.document.querySelector('[data-heige-theme-id="dawn-city"]').disabled,
+    false,
+  );
+
+  await page.pickTheme("dawn-city");
+
+  assert.equal(page.themeId, "dawn-city");
+  assert.equal(
+    page.window.__heigeCodexSkinRuntime.status().controlRequest.themeId,
+    "dawn-city",
+  );
+  assert.equal(
+    page.document.querySelector('[data-heige-theme-id="night-city"]').disabled,
+    false,
+  );
+});
+
 test("an authoritative formal theme replaces stale formal storage during background repair", async (t) => {
   const page = await menuWindow({
     activeId: "night-city",
@@ -1080,6 +1184,7 @@ test("background repair may restore a valid local quick image without changing f
   t.after(() => page.close());
 
   assert.equal(page.themeId, "custom-upload");
+  assert.equal(page.document.documentElement.classList.contains("electron-dark"), true);
   assert.equal(page.window.localStorage.getItem("heigeCodexSkinSelected"), "custom-upload");
 });
 

@@ -51,6 +51,7 @@ test("normalizes the minimal theme and supplies color defaults", () => {
     hero: "hero.png",
     logo: null,
     polaroid: null,
+    appearance: "system",
     colors: {
       accent: "#4BC2E0",
       secondary: "#AD7ED5",
@@ -59,6 +60,21 @@ test("normalizes the minimal theme and supplies color defaults", () => {
     },
     copy: null,
   });
+});
+
+test("normalizes and validates a theme appearance preference", () => {
+  assert.equal(
+    validateThemeManifest({ ...minimalManifest, appearance: "dark" }).appearance,
+    "dark",
+  );
+  assert.equal(
+    validateThemeManifest({ ...minimalManifest, appearance: "light" }).appearance,
+    "light",
+  );
+  assert.throws(
+    () => validateThemeManifest({ ...minimalManifest, appearance: "sepia" }),
+    /appearance/,
+  );
 });
 
 test("merges optional colors and preserves optional copy", () => {

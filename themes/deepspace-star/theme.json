@@ -3,6 +3,7 @@
   "id": "deepspace-star",
   "name": "恋与深空 · 星辰",
   "hero": "hero.webp",
+  "appearance": "dark",
   "colors": {
     "accent": "#9d8bff",
     "secondary": "#f097c8",

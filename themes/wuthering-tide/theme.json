@@ -3,6 +3,7 @@
   "id": "wuthering-tide",
   "name": "鸣潮 · 声骸",
   "hero": "hero.webp",
+  "appearance": "dark",
   "colors": {
     "accent": "#3fd6d0",
     "secondary": "#9aa8b0",

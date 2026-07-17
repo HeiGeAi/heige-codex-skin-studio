@@ -117,7 +117,17 @@ export const THEME_CENTER_STYLE = String.raw`
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
-  margin: 14px 0 20px;
+  margin: 10px 0 20px;
+}
+[data-heige-role="appearance-help"] {
+  margin: 10px 0 0;
+  padding: 9px 12px;
+  border: 1px solid rgba(25,122,139,.12);
+  border-radius: 12px;
+  background: rgba(255,255,255,.48);
+  color: rgba(23,52,79,.7);
+  font-size: 10px;
+  line-height: 1.55;
 }
 [data-heige-role="theme-grid"] {
   display: grid;

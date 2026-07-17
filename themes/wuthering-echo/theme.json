@@ -3,6 +3,7 @@
   "id": "wuthering-echo",
   "name": "鸣潮 · 共鸣",
   "hero": "hero.webp",
+  "appearance": "dark",
   "colors": {
     "accent": "#56e0d8",
     "secondary": "#a98fe8",

@@ -3,6 +3,7 @@
   "id": "deepspace-dawn",
   "name": "恋与深空 · 晨曦",
   "hero": "hero.webp",
+  "appearance": "light",
   "colors": {
     "accent": "#8f7fe8",
     "secondary": "#f097c8",

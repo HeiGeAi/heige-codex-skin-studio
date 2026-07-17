@@ -3,6 +3,7 @@
   "id": "miku-488137",
   "name": "Miku 488137",
   "hero": "hero.webp",
+  "appearance": "light",
   "logo": "logo.webp",
   "polaroid": "polaroid.webp",
   "colors": {
