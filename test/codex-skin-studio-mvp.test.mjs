@@ -1100,8 +1100,9 @@ test("restart-normal state reflects confirmed removal on pending and spawn failu
 });
 
 test("distribution files are English ASCII text and SKILL has valid frontmatter", async () => {
-  const expected = ["SKILL.md", "agents/openai.yaml", "examples/cyberpunk/prompt.md", "examples/cyberpunk/theme.json", "scripts/apply.mjs", "scripts/create-theme.mjs", "scripts/persist.mjs", "templates/theme.json"].sort((a, b) => a.localeCompare(b));
-  assert.deepEqual(await listFiles(skillRoot), expected);
+  const textExpected = ["SKILL.md", "agents/openai.yaml", "examples/cyberpunk/prompt.md", "examples/cyberpunk/theme.json", "examples/slayers-xellos-night/theme.json", "scripts/apply.mjs", "scripts/create-theme.mjs", "scripts/persist.mjs", "templates/theme.json"].sort((a, b) => a.localeCompare(b));
+  const binaryExpected = ["examples/slayers-xellos-night/hero.webp"];
+  assert.deepEqual(await listFiles(skillRoot), [...textExpected, ...binaryExpected].sort((a, b) => a.localeCompare(b)));
   const skill = await readFile(join(skillRoot, "SKILL.md"), "utf8");
   assert.match(skill, /^---\nname: codex-skin-studio\ndescription: [^\n]+\n---\n/);
   assert.match(skill, /invoke `\$imagegen` before creating theme files/);
@@ -1121,10 +1122,14 @@ test("distribution files are English ASCII text and SKILL has valid frontmatter"
   assert.match(skill, /Do not use a ChatGPT Scheduled Task/);
   assert.match(skill, /status.*active/);
   assert.match(await readFile(join(skillRoot, "agents/openai.yaml"), "utf8"), /invoke \$imagegen first/);
-  for (const relative of expected) {
+  for (const relative of textExpected) {
     const bytes = await readFile(join(skillRoot, relative));
     assert.ok(bytes.every((byte) => byte < 128), `${relative} must be ASCII-only`);
   }
+  const hero = await readFile(join(skillRoot, binaryExpected[0]));
+  assert.ok(hero.length > 0);
+  assert.equal(hero.subarray(0, 4).toString("ascii"), "RIFF");
+  assert.equal(hero.subarray(8, 12).toString("ascii"), "WEBP");
 });
 
 test("package script creates exactly the new Skill folder contents", async () => {
@@ -1145,6 +1150,9 @@ test("package script creates exactly the new Skill folder contents", async () =>
     "codex-skin-studio/examples/cyberpunk/",
     "codex-skin-studio/examples/cyberpunk/prompt.md",
     "codex-skin-studio/examples/cyberpunk/theme.json",
+    "codex-skin-studio/examples/slayers-xellos-night/",
+    "codex-skin-studio/examples/slayers-xellos-night/hero.webp",
+    "codex-skin-studio/examples/slayers-xellos-night/theme.json",
     "codex-skin-studio/scripts/",
     "codex-skin-studio/scripts/apply.mjs",
     "codex-skin-studio/scripts/create-theme.mjs",

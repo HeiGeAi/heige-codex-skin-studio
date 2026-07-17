@@ -8,6 +8,11 @@ description: Design, generate, validate, apply, inspect, or remove single-image 
 Let Codex handle visual decisions. Delegate file validation, application discovery,
 restart orchestration, and CDP injection to `scripts/apply.mjs`.
 
+The bundled default example is `examples/slayers-xellos-night/`. Use it as a
+known-good reference for the one-shot theme file layout and as the starter skin
+when a user asks to preview the included example. It is an example asset, not an
+automatic replacement for the user's active theme.
+
 ## Operating rules
 
 - Keep the runtime theme hero-led. Optional presentation assets are limited to a brand logo and one portrait card; do not create component packs, websites, or another runtime.

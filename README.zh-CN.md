@@ -64,7 +64,11 @@ skill/codex-skin-studio/
 │   ├── create-theme.mjs
 │   └── persist.mjs
 ├── templates/theme.json
-└── examples/cyberpunk/
+└── examples/
+    ├── cyberpunk/
+    └── slayers-xellos-night/
+        ├── hero.webp
+        └── theme.json
 
 scripts/
 └── package-codex-skin-studio.command
@@ -77,8 +81,15 @@ output/
 ```
 
 生成的主题属于用户数据，保存在
-`~/Library/Application Support/CodexSkinStudio/themes/`，不会打包进仓库。
-这样仓库不依赖任何角色、品牌或预设图片。
+`~/Library/Application Support/CodexSkinStudio/themes/`。仓库额外内置
+`examples/slayers-xellos-night/` 作为默认示例皮肤；示例资源的权利说明见
+[NOTICE.md](NOTICE.md)。
+
+### 默认示例皮肤
+
+`Slayers Xellos Night` 是仓库的默认示例皮肤，展示一次性生成结果应包含
+16:9 的 `hero.webp` 和匹配的 `theme.json`。它用于预览和开发；仍需用户
+明确执行 apply 请求后才会应用。
 
 ## 安装 Skill
 

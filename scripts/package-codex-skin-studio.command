@@ -13,6 +13,8 @@ EXPECTED=(
   "agents/openai.yaml"
   "examples/cyberpunk/prompt.md"
   "examples/cyberpunk/theme.json"
+  "examples/slayers-xellos-night/hero.webp"
+  "examples/slayers-xellos-night/theme.json"
   "scripts/apply.mjs"
   "scripts/create-theme.mjs"
   "scripts/persist.mjs"
@@ -36,6 +38,7 @@ expected_archive=$(printf '%s\n' \
   'codex-skin-studio/agents/' \
   'codex-skin-studio/examples/' \
   'codex-skin-studio/examples/cyberpunk/' \
+  'codex-skin-studio/examples/slayers-xellos-night/' \
   'codex-skin-studio/scripts/' \
   'codex-skin-studio/templates/' \
   $(printf 'codex-skin-studio/%s\n' $EXPECTED) | sort)

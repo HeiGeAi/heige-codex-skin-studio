@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "slayers-xellos-night",
+  "name": "Slayers Xellos Night",
+  "hero": "hero.webp",
+  "copy": {
+    "brand": "SLAYERS // XELLOS"
+  },
+  "colors": {
+    "accent": "#D76CFF",
+    "secondary": "#806CFF",
+    "surface": "#090D2A",
+    "text": "#FFFFFF"
+  }
+}

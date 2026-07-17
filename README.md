@@ -70,7 +70,11 @@ skill/codex-skin-studio/
 │   ├── create-theme.mjs
 │   └── persist.mjs
 ├── templates/theme.json
-└── examples/cyberpunk/
+└── examples/
+    ├── cyberpunk/
+    └── slayers-xellos-night/
+        ├── hero.webp
+        └── theme.json
 
 scripts/
 └── package-codex-skin-studio.command
@@ -83,9 +87,16 @@ output/
 ```
 
 Generated themes are user data, stored under
-`~/Library/Application Support/CodexSkinStudio/themes/`; they are not bundled
-in this repository. This keeps the repository independent of any character,
-brand, or preset artwork.
+`~/Library/Application Support/CodexSkinStudio/themes/`. The repository also
+includes `examples/slayers-xellos-night/` as the default bundled example skin;
+see [NOTICE.md](NOTICE.md) for the example asset rights notice.
+
+### Default Example Skin
+
+`Slayers Xellos Night` is the default example skin. It demonstrates the
+expected one-shot output: a 16:9 `hero.webp` and a matching `theme.json`.
+It is included for preview and development; applying it still requires an
+explicit `apply` request.
 
 ## Install The Skill
 
