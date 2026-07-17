@@ -23,6 +23,7 @@
 | `assets/previews/wuthering-waves-codex-ui-1.webp` | Wuthering Waves 预设预览 | 来源证据缺失，授权未验证 | 未知 | 公开再分发风险未解决 | 取得授权后保留，否则删除预览 |
 | `assets/previews/wuthering-waves-codex-ui-2.webp` | Wuthering Waves 预设预览 | 来源证据缺失，授权未验证 | 未知 | 公开再分发风险未解决 | 取得授权后保留，否则删除预览 |
 | `custom-pet/miku-future/spritesheet.webp` | Miku 宠物精灵图 | 来源证据缺失，授权未验证 | 未知 | 公开再分发风险未解决 | 发布前换成自制或取得明确授权的精灵图 |
+| `docs/images/appearance-theme-contrast.jpg` | 外观主题配色设置说明截图 | 仓库标注为运行截图，但原始采集与画面权利记录缺失，授权未验证 | 未知 | 文档再分发风险未解决 | 补充自有截图记录并替换其中未授权素材 |
 | `docs/images/dalao-live.jpg` | 大佬点烟主题运行截图 | 仓库标注为运行截图，但原始采集与画面权利记录缺失，授权未验证 | 未知 | 文档再分发风险未解决 | 补充自有截图记录并替换其中未授权素材 |
 | `docs/images/genshin-dawn-live.jpg` | Genshin Dawn 运行截图 | 仓库标注为运行截图，但原始采集与画面权利记录缺失，授权未验证 | 未知 | 文档再分发风险未解决 | 补充自有截图记录并替换其中未授权素材 |
 | `docs/images/genshin-night-live.jpg` | Genshin Night 运行截图 | 仓库标注为运行截图，但原始采集与画面权利记录缺失，授权未验证 | 未知 | 文档再分发风险未解决 | 补充自有截图记录并替换其中未授权素材 |
