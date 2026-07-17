@@ -1253,3 +1253,20 @@ test("reinjection removes the old theme center style backdrop and focus handlers
   assert.equal(page.document.querySelectorAll('[data-heige-role="theme-center-style"]').length, 1);
   assert.equal(page.document.querySelectorAll('[data-heige-role="theme-center-backdrop"]').length, 1);
 });
+
+test("shared signature-card style is generation-bound and disposed without residue", async (t) => {
+  const page = await menuWindow();
+  t.after(() => page.close());
+  const firstRuntime = page.window.__heigeCodexSkinRuntime;
+  const first = page.document.querySelector('[data-heige-role="signature-card-style"]');
+  assert.ok(first);
+  assert.equal(first.dataset.heigeGeneration, firstRuntime.generation);
+
+  const secondRuntime = await page.injectAgain();
+  const current = page.document.querySelector('[data-heige-role="signature-card-style"]');
+  assert.equal(page.document.querySelectorAll('[data-heige-role="signature-card-style"]').length, 1);
+  assert.equal(current.dataset.heigeGeneration, secondRuntime.generation);
+
+  secondRuntime.dispose();
+  assert.equal(page.document.querySelector('[data-heige-role="signature-card-style"]'), null);
+});

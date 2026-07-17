@@ -62,6 +62,7 @@ export async function menuWindow({
     css: "html { color: #123456; }",
   }],
   fetch,
+  sharedStyleCss = ':root{--heige-signature-card-frame-image:url("data:image/png;base64,RlJBTUU=");}',
 } = {}) {
   const window = new Window({ url: "app://-/index.html" });
   let backendPersistence = persistenceEnabled;
@@ -92,6 +93,7 @@ export async function menuWindow({
     menuId: "heige-codex-skin-menu",
     activeId,
     preferStored,
+    sharedStyleCss,
     entries,
     control: {
       available: true,

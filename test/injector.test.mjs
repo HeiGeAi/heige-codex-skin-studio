@@ -40,8 +40,12 @@ class FakeSession {
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "heige-injector-"));
-  await writeFile(join(root, "hero.png"), png(640, 360));
+  const hero = png(640, 360);
+  const frame = png(64, 96, 32);
+  await writeFile(join(root, "hero.png"), hero);
+  await writeFile(join(root, "frame.png"), frame);
   return {
+    frameDataUrl: `data:image/png;base64,${frame.toString("base64")}`,
     loaded: {
       root,
       heroPath: join(root, "hero.png"),
@@ -62,6 +66,7 @@ async function fixture() {
         { id: "one", type: "page", url: "app://-/index.html", webSocketDebuggerUrl: "ws://127.0.0.1:9341/devtools/page/one" },
       ],
       Session: FakeSession,
+      signatureCardFramePath: join(root, "frame.png"),
     },
   };
 }
@@ -92,7 +97,7 @@ test("keeps waiting when only the pet overlay renderer exists", async () => {
 
 test("injects the in-app switcher menu with every loaded theme", async () => {
   FakeSession.expressions = [];
-  const { loaded, deps } = await fixture();
+  const { loaded, deps, frameDataUrl } = await fixture();
   const second = structuredClone(loaded);
   second.manifest.id = "night-city";
   second.manifest.name = "Night City";
@@ -101,6 +106,12 @@ test("injects the in-app switcher menu with every loaded theme", async () => {
   assert.match(FakeSession.expressions[0], /heige-codex-skin-menu/);
   assert.match(FakeSession.expressions[0], /"activeId":"demo"/);
   assert.match(FakeSession.expressions[0], /"night-city"/);
+  assert.equal(
+    FakeSession.expressions[0].split(frameDataUrl).length - 1,
+    1,
+    "共享相框在 renderer 表达式中只能出现一次",
+  );
+  assert.match(FakeSession.expressions[0], /By@HeiGe/);
 });
 
 test("passes the read-only persistence control descriptor into every main menu", async () => {

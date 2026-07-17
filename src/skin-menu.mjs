@@ -73,11 +73,15 @@ export function buildSkinMenuScript({
   styleId,
   menuId,
   cssTemplate = "",
+  sharedStyleCss = "",
   preferStored = false,
   control = null,
 }) {
   if (!Array.isArray(entries) || entries.length === 0) {
     throw new Error("皮肤菜单至少需要一个主题");
+  }
+  if (typeof sharedStyleCss !== "string") {
+    throw new Error("签名卡共享样式必须是字符串");
   }
   const colorValue = (value, fallback) => HEX_COLOR.test(value ?? "") ? value : fallback;
   const themes = entries.map((entry) => {
@@ -105,6 +109,7 @@ export function buildSkinMenuScript({
     activeId,
     themes,
     cssTemplate,
+    sharedStyleCss,
     sentinels: CSS_SENTINELS,
     customId: "custom-upload",
     storageKey: "heigeCodexCustomTheme",
@@ -208,9 +213,13 @@ export function buildSkinMenuScript({
     const ownedChromeStyle = document.querySelector(
       '[data-heige-role="theme-center-style"][data-heige-generation="' + generation + '"]',
     );
+    const ownedSharedStyle = document.querySelector(
+      '[data-heige-role="signature-card-style"][data-heige-generation="' + generation + '"]',
+    );
     if (ownedMenu?.dataset.heigeGeneration === generation) ownedMenu.remove();
     if (ownedStyle?.dataset.heigeGeneration === generation) ownedStyle.remove();
     ownedChromeStyle?.remove();
+    ownedSharedStyle?.remove();
     if (window.__heigeCodexSkinRuntime === runtime) {
       delete document.documentElement.dataset.heigeCodexSkin;
       try { delete window.__heigeCodexSkin; } catch { window.__heigeCodexSkin = undefined; }
@@ -248,6 +257,15 @@ export function buildSkinMenuScript({
     document.head.appendChild(style);
   }
   style.dataset.heigeGeneration = generation;
+
+  document.querySelectorAll('[data-heige-role="signature-card-style"]').forEach((node) => node.remove());
+  if (data.sharedStyleCss) {
+    const sharedStyle = document.createElement("style");
+    sharedStyle.dataset.heigeRole = "signature-card-style";
+    sharedStyle.dataset.heigeGeneration = generation;
+    sharedStyle.textContent = data.sharedStyleCss;
+    document.head.appendChild(sharedStyle);
+  }
 
   document.querySelectorAll('[data-heige-role="theme-center-style"]').forEach((node) => node.remove());
   const chromeStyle = document.createElement("style");
