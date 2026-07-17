@@ -62,17 +62,35 @@ function Test-Cdp {
     }
 }
 
+function Get-CdpTargets {
+    try {
+        return @(Invoke-RestMethod -Uri "http://127.0.0.1:$Port/json/list" -TimeoutSec 2)
+    } catch {
+        return @()
+    }
+}
+
+function Wait-CdpPageTarget {
+    for ($index = 0; $index -lt 120; $index++) {
+        $targets = @(Get-CdpTargets | Where-Object { $_ -and $_.type -eq "page" -and $_.webSocketDebuggerUrl })
+        if ($targets.Count -gt 0) { return $true }
+        Start-Sleep -Milliseconds 500
+    }
+    return $false
+}
+
 function Get-CdpTargetSummary {
     try {
-        $targets = @(Invoke-RestMethod -Uri "http://127.0.0.1:$Port/json/list" -TimeoutSec 2)
-        $summary = foreach ($target in $targets) {
+        $targets = @(Get-CdpTargets | Where-Object { $_ })
+        $summary = @($targets | ForEach-Object {
             [ordered]@{
-                type = $target.type
-                title = $target.title
-                url = $target.url
-                hasWebSocket = [bool]$target.webSocketDebuggerUrl
+                type = $_.type
+                title = $_.title
+                url = $_.url
+                hasWebSocket = [bool]$_.webSocketDebuggerUrl
             }
-        }
+        })
+        if ($summary.Count -eq 0) { return "[]" }
         return ($summary | ConvertTo-Json -Depth 4 -Compress)
     } catch {
         return "unavailable: $($_.Exception.Message)"
@@ -231,6 +249,9 @@ try {
         if ($persistStatus.status -eq "disabled") { $null = Invoke-Node @($persistScript, "install", "--json") }
     }
 
+    if (-not (Wait-CdpPageTarget)) {
+        throw "Codex Desktop opened CDP port $Port but did not expose a page target within 60 seconds. Targets: $(Get-CdpTargetSummary)"
+    }
     Write-Output ("CDP targets before apply: " + (Get-CdpTargetSummary))
     $result = Invoke-Node @($applyScript, "apply", $ThemeDir, "--port", "$Port", "--json")
     Write-Output $result
