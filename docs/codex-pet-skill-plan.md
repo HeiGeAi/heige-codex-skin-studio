@@ -1,6 +1,6 @@
 # ChatGPT Desktop Codex Pet Skill 方案
 
-> 状态：MVP 实施中；Codex V2 Desktop 契约已冻结，macOS 可见 Settings > Pets Refresh、选择和 Pet Overlay 显示已完成真实验证；当前 Desktop 不识别 `/pet` 命令，Windows 手工验收仍待完成
+> 状态：MVP 实施中；Codex V2 Desktop 契约已冻结，macOS 可见 Settings > Pets Refresh、选择和自定义精灵资源加载已完成真实验证；当前 Desktop 不识别 `/pet` 命令，Windows 手工验收仍待完成
 > 研究日期：2026-07-17
 > 目标平台：ChatGPT Desktop macOS 和 Windows
 > 关联项目：`codex-skin-studio`
@@ -517,7 +517,7 @@ validate source
 - `paired-status.mjs`：合并报告主题 Renderer 状态、Pet 本地安装状态和 Bundle 状态；
 - `pet.mjs` / `paired.mjs`：提供共享校验、图集、路径和事务安装实现。
 
-当前 `switch-paired.mjs` 默认先尝试版本化的可见 UI 适配器。成功状态为 `theme-applied-pet-selected` 或 `theme-scheduled-pet-selected`，并要求真实的已选行 postcondition；UI 不可用时降级为 `theme-applied-pet-refresh-required` 或 `theme-scheduled-pet-refresh-required`。该适配器只操作 ChatGPT Desktop Settings > Pets 中的可见控件，不写私有状态、不修改应用资源。`--manual-pet` 可显式跳过适配器。完整配套激活还需要看到匹配的 Pet Overlay 和动画状态；如果当前版本不识别 `/pet`，必须记录该事实而不是伪造唤醒成功。
+当前 `switch-paired.mjs` 默认先尝试版本化的可见 UI 适配器。成功状态为 `theme-applied-pet-selected` 或 `theme-scheduled-pet-selected`，并要求真实的已选行和自定义精灵资源已加载 postcondition；UI 不可用时降级为 `theme-applied-pet-refresh-required` 或 `theme-scheduled-pet-refresh-required`。该适配器只操作 ChatGPT Desktop Settings > Pets 中的可见控件，不写私有状态、不修改应用资源。`--manual-pet` 可显式跳过适配器。完整配套激活还需要看到匹配的 Pet Overlay 和动画状态；如果当前版本不识别 `/pet`，必须记录该事实而不是伪造唤醒成功。
 
 ## 7. 用户体验
 
@@ -535,7 +535,7 @@ Codex：安装到本地 Pet 目录
 
 Codex：尝试通过可见 Settings > Pets 控件 Refresh 并选择匹配 Pet
 Codex：记录 `native-ui-confirmed` 或 `refresh-required` 降级状态
-Codex：检查匹配的 Pet Overlay、`data-avatar-asset-ref` 和动画状态
+Codex：检查匹配的 Pet 预览/Overlay、已加载的精灵资源和动画状态
 ```
 
 Skill 必须报告：
@@ -688,6 +688,6 @@ Codex 原生 Image Generation
 - 英文 `SKILL.md` 已加入 Pet 和配套 Bundle 编排规则；
 - 自动化回归测试为 `86/86`，Windows 路径、PowerShell 设置入口和安装契约测试为 `3/3`；
 - 当前模板 contract 已更新为随 ChatGPT Desktop 提供的 Codex V2 observed contract；`--allow-provisional` 仅保留给未来契约变更的开发测试；
-- 本机 ChatGPT Desktop `26.715.21316` 已发现官方 `hatch-pet` 资源契约；已通过当前 Renderer 的可见 Settings > Pets 控件真实完成 Refresh、匹配 Pet 选择、selected-row postcondition 和 Overlay 显示，适配器版本为 `chatgpt-desktop-pets-settings-v1`；实测 `/pet` 返回 “isn’t a recognized command here”，因此不作为当前版本唤醒路径，Windows 仍缺少本机手工验证。
+- 本机 ChatGPT Desktop `26.715.21316` 已发现官方 `hatch-pet` 资源契约；已通过当前 Renderer 的可见 Settings > Pets 控件真实完成 Refresh、匹配 Pet 选择、selected-row postcondition 和 embedded custom WebP sprite loaded postcondition，适配器版本为 `chatgpt-desktop-pets-settings-v1`；实测 `/pet` 返回 “isn’t a recognized command here”，因此不作为当前版本唤醒路径，Windows 仍缺少本机手工验证。
 
-契约冻结已经解除，剩余安全门是 Windows 手工验收。工具可以生成、安装并在当前 macOS UI 中确认 v2 Pet 已选择且 Overlay 显示；当前版本的 `/pet` 已被实测为无效命令，运行 postcondition 应使用 Overlay 的 `data-avatar-asset-ref`、`data-avatar-state` 和可见性，不得把无效命令响应误报为唤醒成功。
+契约冻结已经解除，剩余安全门是 Windows 手工验收。工具可以生成、安装并在当前 macOS UI 中确认 v2 Pet 已选择且自定义 WebP 精灵已加载；当前版本的 `/pet` 已被实测为无效命令，运行 postcondition 应使用可见 Pet 预览/Overlay、资源加载状态和动画状态，不得把无效命令响应误报为唤醒成功。

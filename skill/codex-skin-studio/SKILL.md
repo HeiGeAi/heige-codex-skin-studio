@@ -400,8 +400,8 @@ Use `--manual-pet` to skip native Pet selection and deliberately require the
 manual Refresh flow. The adapter is best-effort and versioned because ChatGPT
 Desktop does not expose a public third-party Pet selection API. Require a real
 visible selected-row postcondition before reporting native selection, and use
-a visible matching Pet Overlay as the runtime postcondition; never report a
-paired success from local file installation alone.
+a visible matching Pet preview/Overlay with a loaded sprite asset as the runtime
+postcondition; never report a paired success from local file installation alone.
 
 ## Validate
 

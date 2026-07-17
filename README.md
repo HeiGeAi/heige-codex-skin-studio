@@ -192,9 +192,10 @@ Create a matching ChatGPT Desktop theme and a cute anthropomorphic large-head/sm
 The Skill generates the hero and Pet action frames separately, validates both,
 creates a paired bundle, installs the Pet atomically, and applies the theme.
 The switch command then uses the versioned visible Settings > Pets adapter. A
-successful native result is `theme-applied-pet-selected`; if the UI cannot be
-automated it truthfully falls back to `theme-applied-pet-refresh-required`.
-Confirm the matching Pet Overlay after selection. The inspected Desktop build
+successful native result is `theme-applied-pet-selected` and includes a visible
+selected row plus a loaded custom sprite asset; if the UI cannot be automated
+it truthfully falls back to `theme-applied-pet-refresh-required`. Confirm the
+matching Pet preview/Overlay after selection. The inspected Desktop build
 does not recognize `/pet`, so an unrecognized `/pet` response is not treated as
 a wake-up success.
 

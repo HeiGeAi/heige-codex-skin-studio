@@ -33,7 +33,8 @@ The corresponding source files are inside the installed application at:
 The contract is format-level evidence from the official bundled Skill. It is
 expected to be shared by the macOS and Windows ChatGPT Desktop distributions.
 The macOS build was inspected and its visible Settings > Pets Refresh,
-selected-row, and Pet Overlay postconditions were verified. Windows path and
+selected-row, and embedded custom spritesheet loading postconditions were
+verified. Windows path and
 installation behavior is covered by automated tests; Windows application
 selection still requires a Windows Desktop manual run.
 

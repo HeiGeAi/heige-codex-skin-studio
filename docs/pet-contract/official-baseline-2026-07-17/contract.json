@@ -24,6 +24,7 @@
   ],
   "neutralLookFrame": { "row": 0, "column": 6 },
   "desktopRefreshE2E": "macos-refresh-selection-overlay-verified",
+  "customSpriteE2E": "macos-refresh-selection-embedded-sprite-loaded-verified",
   "windowsManualE2E": "pending",
   "petCommandProbe": "current-build-rejected-/pet-as-unrecognized-command",
   "nativeAdapterVersion": "chatgpt-desktop-pets-settings-v1",

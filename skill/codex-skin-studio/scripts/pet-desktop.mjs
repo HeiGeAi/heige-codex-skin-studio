@@ -89,9 +89,17 @@ export function petSelectionStateExpression(petId) {
   return `(() => {
     const avatar = document.querySelector(${JSON.stringify(selector)});
     const row = avatar?.closest('.flex.items-center.justify-between') || null;
+    const preview = avatar?.querySelector('[data-testid="codex-avatar"]') || null;
     const selected = ${json([...SELECTED_LABELS])};
     const rowText = (row?.textContent || '').replace(/\\s+/g, ' ').trim().toLowerCase();
-    return { exists: Boolean(avatar), selected: selected.some((label) => rowText.includes(label)), rowText };
+    const backgroundImage = preview ? getComputedStyle(preview).backgroundImage : '';
+    return {
+      exists: Boolean(avatar),
+      selected: selected.some((label) => rowText.includes(label)),
+      assetLoaded: Boolean(backgroundImage && backgroundImage !== 'none'),
+      assetSource: backgroundImage.startsWith('url("data:') || backgroundImage.startsWith('url(data:') ? 'embedded' : backgroundImage ? 'other' : 'none',
+      rowText,
+    };
   })()`;
 }
 
@@ -184,13 +192,13 @@ export async function selectPetInChatGptDesktop({ petId, port = DEFAULT_PORT, op
 
   const selected = await evaluateTarget(target, selectPetExpression(petId));
   if (!selected?.ok) throw petError("PET_NATIVE_UI_UNAVAILABLE", selected?.reason || "could not select the installed ChatGPT Desktop Pet");
-  await waitForExpression(port, petSelectionStateExpression(petId), (value) => value.exists && value.selected);
+  const selectionState = await waitForExpression(port, petSelectionStateExpression(petId), (value) => value.exists && value.selected && value.assetLoaded);
 
   if (restoreApp) {
     const appTarget = await currentTarget(port);
     await evaluateTarget(appTarget, RETURN_TO_APP_EXPRESSION).catch(() => null);
   }
-  return { status: "selected", selection: "native-ui-confirmed", petId, adapterVersion: ADAPTER_VERSION, refreshed: true };
+  return { status: "selected", selection: "native-ui-confirmed", petId, adapterVersion: ADAPTER_VERSION, refreshed: true, assetLoaded: selectionState.value.assetLoaded, assetSource: selectionState.value.assetSource };
 }
 
 export { ADAPTER_VERSION, DEFAULT_PORT, REFRESH_LABELS, SELECT_LABELS, SELECTED_LABELS };

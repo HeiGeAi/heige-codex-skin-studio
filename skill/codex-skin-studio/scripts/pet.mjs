@@ -449,16 +449,16 @@ export async function petStatus({ petsDir = defaultPetsDir() } = {}) {
   const root = resolve(petsDir);
   let state = null;
   try { state = await readJsonFile(join(root, ".codex-skin-studio-pet-state.json")); } catch { state = null; }
-  return { status: "ok", petsDir: root, active: state?.installedId || null, selection: state?.selection || "unknown", pets: await listInstalledPets({ petsDir: root }) };
+  return { status: "ok", petsDir: root, active: state?.installedId || null, selection: state?.selection || "unknown", assetLoaded: state?.assetLoaded ?? null, pets: await listInstalledPets({ petsDir: root }) };
 }
 
-export async function recordPetSelection({ petsDir = defaultPetsDir(), petId, selection = "native-ui-confirmed" } = {}) {
+export async function recordPetSelection({ petsDir = defaultPetsDir(), petId, selection = "native-ui-confirmed", assetLoaded = null } = {}) {
   assertPetId(petId);
   const root = resolve(petsDir);
   const statePath = join(root, ".codex-skin-studio-pet-state.json");
   let current = {};
   try { current = await readJsonFile(statePath); } catch { current = {}; }
-  const next = { ...current, schemaVersion: 1, installedId: petId, directory: join(root, petId), selection, selectedAt: new Date().toISOString() };
+  const next = { ...current, schemaVersion: 1, installedId: petId, directory: join(root, petId), selection, assetLoaded: typeof assetLoaded === "boolean" ? assetLoaded : current.assetLoaded ?? null, selectedAt: new Date().toISOString() };
   await writeJsonFile(statePath, next);
   return next;
 }

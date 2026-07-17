@@ -1363,6 +1363,7 @@ test("uses visible ChatGPT Desktop Pets controls instead of private app state", 
   assert.match(REFRESH_PETS_EXPRESSION, /button\[aria-label\]/);
   assert.match(selectPetExpression("paired-demo"), /custom:paired-demo/);
   assert.match(petSelectionStateExpression("paired-demo"), /已选/);
+  assert.match(petSelectionStateExpression("paired-demo"), /assetLoaded/);
 });
 
 test("paired switch records a native Pet selection postcondition", async () => {
@@ -1376,12 +1377,13 @@ test("paired switch records a native Pet selection postcondition", async () => {
       contract: observedPetContract,
       petsDir: join(root, "pets"),
       commandApplyFn: async () => ({ status: "applied", themeId: "paired-demo" }),
-      selectPetFn: async ({ petId }) => ({ status: "selected", selection: "native-ui-confirmed", petId, adapterVersion: "test", refreshed: true }),
+      selectPetFn: async ({ petId }) => ({ status: "selected", selection: "native-ui-confirmed", petId, adapterVersion: "test", refreshed: true, assetLoaded: true }),
       appDataRootFn: () => join(root, "app-data"),
     });
     assert.equal(result.status, "theme-applied-pet-selected");
     assert.equal(result.pairedState.petSelection, "native-ui-confirmed");
     assert.equal((await petStatus({ petsDir: join(root, "pets") })).selection, "native-ui-confirmed");
+    assert.equal((await petStatus({ petsDir: join(root, "pets") })).assetLoaded, true);
     assert.equal(JSON.parse(await readFile(join(root, "app-data", "paired-state.json"), "utf8")).petUi.selection, "native-ui-confirmed");
   });
 });

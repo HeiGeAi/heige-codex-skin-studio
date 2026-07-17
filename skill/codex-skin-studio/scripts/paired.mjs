@@ -103,7 +103,7 @@ export async function switchPairBundle(directory, { contract, petsDir = defaultP
     }
   }
   if (petSelection.selection === "native-ui-confirmed") {
-    await recordPetSelection({ petsDir, petId: bundle.bundle.petId, selection: petSelection.selection });
+    await recordPetSelection({ petsDir, petId: bundle.bundle.petId, selection: petSelection.selection, assetLoaded: petSelection.assetLoaded });
   }
   const stateRoot = appDataRootFn();
   await mkdir(stateRoot, { recursive: true });
