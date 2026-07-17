@@ -277,3 +277,9 @@ Skill 分发内容保持零依赖和英文 ASCII-only。主题名称和用户回
 项目代码使用 [MIT License](LICENSE)。角色名称、Logo 和第三方视觉素材仍受各自权利约束，详见 [NOTICE.md](NOTICE.md)。
 
 English guide: [README.md](README.md)
+
+## 联系方式
+
+项目联系方式和交流信息请扫描二维码：
+
+![联系方式二维码](codex-skin-skill-qrcode.jpg)

@@ -292,3 +292,9 @@ The Skill distribution is intentionally zero-dependency and English ASCII-only. 
 The project code is released under the [MIT License](LICENSE). Character names, logos, and third-party visual assets remain subject to their respective rights; see [NOTICE.md](NOTICE.md).
 
 For the Chinese guide, see [README.zh-CN.md](README.zh-CN.md).
+
+## Contact
+
+For project contact and community information, scan the QR code:
+
+![Contact QR code](codex-skin-skill-qrcode.jpg)
