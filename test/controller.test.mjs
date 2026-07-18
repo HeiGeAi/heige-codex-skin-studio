@@ -988,6 +988,117 @@ test("a polled menu theme request commits and reinjects the authoritative select
   assert.equal(fx.calls.inject.at(-1).preferStored, false);
 });
 
+test("serializes overlapping controller lease operations before theme selection", async () => {
+  const selected = "genshin-night";
+  const fx = fixture({
+    validateThemeSelection: async (themeId) => themeId === selected,
+  });
+  let activeOperation = null;
+  fx.deps.withLease = async (operation, action) => {
+    if (activeOperation !== null) {
+      const error = new Error(`operation ${activeOperation} is held`);
+      error.code = "LOCK_HELD";
+      throw error;
+    }
+    activeOperation = operation;
+    try {
+      return await action(Object.freeze({ operation }));
+    } finally {
+      activeOperation = null;
+    }
+  };
+  let releaseRemove;
+  let markRemoveStarted;
+  const removeStarted = new Promise((resolve) => { markRemoveStarted = resolve; });
+  const removeGate = new Promise((resolve) => { releaseRemove = resolve; });
+  fx.deps.removeSkin = async () => {
+    markRemoveStarted();
+    await removeGate;
+    return { removed: 1 };
+  };
+  const controller = createSkinController(fx.deps);
+
+  const pause = controller.pause();
+  await removeStarted;
+  const themeOutcome = controller.setThemeSelection({
+    expectedRevision: 1,
+    themeId: selected,
+  }).then(
+    (value) => ({ value }),
+    (error) => ({ error }),
+  );
+  const settledBeforeRelease = await Promise.race([
+    themeOutcome.then(() => true),
+    new Promise((resolve) => setImmediate(() => resolve(false))),
+  ]);
+  releaseRemove();
+  await pause;
+  const outcome = await themeOutcome;
+
+  assert.equal(settledBeforeRelease, false);
+  assert.equal(outcome.error, undefined);
+  assert.deepEqual(outcome.value, {
+    persistenceEnabled: true,
+    revision: 2,
+    selectedThemeId: selected,
+    lastNonNativeThemeId: selected,
+  });
+  assert.equal(fx.state.selectedThemeId, selected);
+});
+
+test("retries bounded live lock contention before theme selection", async () => {
+  const selected = "genshin-night";
+  const fx = fixture({
+    validateThemeSelection: async (themeId) => themeId === selected,
+  });
+  let attempts = 0;
+  fx.deps.withLease = async (operation, action) => {
+    attempts += 1;
+    if (attempts < 3) {
+      const error = new Error("another trusted process is finishing");
+      error.code = "LOCK_HELD";
+      throw error;
+    }
+    return action(Object.freeze({ operation }));
+  };
+
+  const changed = await createSkinController(fx.deps).setThemeSelection({
+    expectedRevision: 1,
+    themeId: selected,
+  });
+
+  assert.equal(attempts, 3);
+  assert.deepEqual(changed, {
+    persistenceEnabled: true,
+    revision: 2,
+    selectedThemeId: selected,
+    lastNonNativeThemeId: selected,
+  });
+});
+
+test("does not retry non-contention lease failures during theme selection", async () => {
+  const selected = "genshin-night";
+  const fx = fixture({
+    validateThemeSelection: async (themeId) => themeId === selected,
+  });
+  let attempts = 0;
+  const failure = new Error("lock chain is corrupt");
+  failure.code = "LOCK_CHAIN_CORRUPT";
+  fx.deps.withLease = async () => {
+    attempts += 1;
+    throw failure;
+  };
+
+  await assert.rejects(
+    createSkinController(fx.deps).setThemeSelection({
+      expectedRevision: 1,
+      themeId: selected,
+    }),
+    (error) => error === failure,
+  );
+  assert.equal(attempts, 1);
+});
+
 test("an idempotent polled theme request replaces a local quick image with the formal selection", async () => {
   const fx = fixture();
   const controller = createSkinController(fx.deps);

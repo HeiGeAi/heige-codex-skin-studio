@@ -21,6 +21,7 @@ const MENU_REQUEST_ID = /^[a-f0-9]{32}$/;
 const THEME_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const LOCAL_CUSTOM_THEME_ID = "custom-upload";
 const MAX_RELAUNCH_ATTEMPTS = 3;
+const LEASE_RETRY_DELAYS_MS = Object.freeze([20, 40, 80, 160, 320, 500]);
 const ACTIONS = new Set([
   "idle",
   "inject",
@@ -251,6 +252,49 @@ function noopLogger() {
   });
 }
 
+function sleep(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function isLockHeld(error) {
+  try {
+    return error?.code === "LOCK_HELD";
+  } catch {
+    return false;
+  }
+}
+
+function serializeLeaseOperations(withLease) {
+  const acquire = requireFunction(withLease, "withLease");
+  let tail = Promise.resolve();
+  return async (operation, action, context) => {
+    const previous = tail;
+    let release;
+    tail = new Promise((resolve) => { release = resolve; });
+    await previous;
+    try {
+      for (let attempt = 0; ; attempt += 1) {
+        let actionStarted = false;
+        try {
+          return await acquire(operation, (lease) => {
+            actionStarted = true;
+            return action(lease);
+          }, context);
+        } catch (error) {
+          if (
+            actionStarted ||
+            !isLockHeld(error) ||
+            attempt >= LEASE_RETRY_DELAYS_MS.length
+          ) throw error;
+          await sleep(LEASE_RETRY_DELAYS_MS[attempt]);
+        }
+      }
+    } finally {
+      release();
+    }
+  };
+}
+
 function normalizedDependencies(input) {
   if (!isRecord(input)) throw new Error("controller dependencies are required");
   const readState = input.readState ?? (() => readStudioState(input.statePath));
@@ -286,9 +330,10 @@ function normalizedDependencies(input) {
       );
     }
   }
+  withLease = serializeLeaseOperations(withLease);
 
   return Object.freeze({
-    withLease: requireFunction(withLease, "withLease"),
+    withLease,
     readState: requireFunction(readState, "readState"),
     readSession: requireFunction(readSession, "readSession"),
     readTransition: requireFunction(readTransition, "readTransition"),
