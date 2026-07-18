@@ -44,6 +44,7 @@ export function buildSkinCss({ theme, heroDataUrl, logoDataUrl = null, polaroidD
   --heige-secondary: ${colors.secondary};
   --heige-surface: ${colors.surface};
   --heige-text: ${colors.text};
+  --heige-native-light-ink: #172033;
   --color-background-surface: color-mix(in srgb, var(--heige-surface) 90%, transparent) !important;
   --color-background-panel: color-mix(in srgb, var(--heige-surface) 94%, transparent) !important;
   --color-background-button-primary: var(--heige-accent) !important;
@@ -135,6 +136,20 @@ export function buildSkinCss({ theme, heroDataUrl, logoDataUrl = null, polaroidD
 
 [data-app-action-sidebar-thread-active="false"]:hover span:has(svg[class*="pr-status-dot-color"]) {
   opacity: 1 !important;
+}
+
+/*
+ * Codex 的原生信息看板与顶部雾面按钮保持浅色背景。
+ * 深色主题不能让这些局部表面继续继承浅色主题正文，否则会失去对比度。
+ */
+[data-pip-obstacle="thread-summary-panel"] button,
+[data-pip-obstacle="thread-summary-panel"] .text-fade-truncate,
+[data-pip-obstacle="thread-summary-panel"] .text-token-foreground {
+  color: var(--heige-native-light-ink) !important;
+}
+
+div.no-drag.pointer-events-auto button.bg-token-bg-fog {
+  color: var(--heige-native-light-ink) !important;
 }
 ${logoDataUrl === null ? "" : `
 /* 侧栏工作区标题换品牌 Logo，按钮仍可点开模式切换 */

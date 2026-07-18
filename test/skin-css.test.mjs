@@ -58,6 +58,20 @@ test("builds one fast generic skin from a theme and image data URL", () => {
     css,
     /\[data-app-action-sidebar-thread-active="false"\]:hover\s+span:has\(svg\[class\*="pr-status-dot-color"\]\)\s*\{[^}]*opacity:\s*1/s,
   );
+  assert.match(css, /--heige-native-light-ink:\s*#172033/);
+  assert.match(
+    css,
+    /\[data-pip-obstacle="thread-summary-panel"\]\s+button,[\s\S]*\[data-pip-obstacle="thread-summary-panel"\]\s+\.text-fade-truncate,[\s\S]*\[data-pip-obstacle="thread-summary-panel"\]\s+\.text-token-foreground\s*\{[^}]*color:\s*var\(--heige-native-light-ink\)\s*!important/s,
+  );
+  assert.match(
+    css,
+    /div\.no-drag\.pointer-events-auto\s+button\.bg-token-bg-fog\s*\{[^}]*color:\s*var\(--heige-native-light-ink\)\s*!important/s,
+  );
+  assert.doesNotMatch(
+    css,
+    /\[data-pip-obstacle="thread-summary-panel"\]\s+\*\s*\{/,
+    "原生浅色面板不得用通配规则覆盖增删统计等语义颜色",
+  );
   assert.doesNotMatch(css, /https?:\/\//);
 });
 
