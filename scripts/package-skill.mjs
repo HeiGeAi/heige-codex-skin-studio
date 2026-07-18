@@ -498,6 +498,10 @@ async function assertOutputParentUnchanged(output, capability) {
   ) throw new Error("output parent 在打包期间发生变化");
 }
 
+function archiveMode(destination) {
+  return /\.(?:command|zsh)$/.test(destination) ? 0o100755 : 0o100644;
+}
+
 async function writeArchive(output, files, epoch, parentCapability) {
   await assertOutputParentUnchanged(output, parentCapability);
   const temporary = join(dirname(output), `.${output.split(sep).at(-1)}.${process.pid}.${Date.now()}.tmp`);
@@ -520,7 +524,7 @@ async function writeArchive(output, files, epoch, parentCapability) {
       }
       zip.addBuffer(bytes, file.destination, {
         ...options,
-        mode: file.destination.endsWith(".command") ? 0o100755 : options.mode,
+        mode: archiveMode(file.destination),
       });
     }
     zip.end();

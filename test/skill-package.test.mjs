@@ -226,12 +226,21 @@ test("archive is a strict runtime allowlist with fixed metadata", async (t) => {
     names.some((name) => /\.before-|reports\/|package-skill|check-asset-provenance|sync-llms|update-release-hash|\.git\/|node_modules\/|test\//.test(name)),
     false,
   );
+  const executableArchiveEntry = (name) => /\.(?:command|zsh)$/.test(name);
   for (const entry of entries) {
     assert.equal(entry.unixMtime, fixedEpoch, `fixed UTC mtime: ${entry.name}`);
     assert.equal(entry.dosTime, 0, `fixed UTC DOS time: ${entry.name}`);
     assert.equal(entry.dosDate, 0x5821, `fixed UTC DOS date: ${entry.name}`);
-    assert.equal(entry.mode, entry.name.endsWith(".command") ? 0o755 : 0o644, `fixed mode: ${entry.name}`);
+    assert.equal(
+      entry.mode,
+      executableArchiveEntry(entry.name) ? 0o755 : 0o644,
+      `fixed mode: ${entry.name}`,
+    );
   }
+  assert.equal(
+    entries.find(({ name }) => name.endsWith("/payload/scripts/lib/run-cli.zsh"))?.mode,
+    0o755,
+  );
   const runtimePackage = JSON.parse(await readZipText(
     archive,
     "heige-codex-skin-studio/payload/package.json",
