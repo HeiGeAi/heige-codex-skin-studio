@@ -778,6 +778,7 @@ test("a stale persistence response cannot mutate the new generation", async (t) 
     mode: "active",
     persistenceEnabled: true,
     revision: 7,
+    themeTransitionPending: false,
     controlRequest: null,
   });
   assert.equal(page.switch.getAttribute("aria-checked"), "true");
@@ -1215,6 +1216,7 @@ test("a menu theme choice renders immediately while durable confirmation is pend
     page.document.querySelector('[data-heige-theme-id="night-city"]').disabled,
     true,
   );
+  assert.equal(page.window.__heigeCodexSkinRuntime.status().themeTransitionPending, true);
 
   pending.resolve(jsonResponse(200, {
     ok: true,
@@ -1229,6 +1231,7 @@ test("a menu theme choice renders immediately while durable confirmation is pend
   assert.equal(page.saveState.dataset.state, "saved");
   assert.equal(page.saveState.textContent, "已保存");
   assert.equal(page.backdrop.hidden, false);
+  assert.equal(page.window.__heigeCodexSkinRuntime.status().themeTransitionPending, false);
 });
 
 test("a preset theme immediately updates Codex appearance and writes the native setting", async (t) => {
@@ -1317,10 +1320,11 @@ test("a menu theme choice persists the authoritative theme revision", async (t) 
 
   await page.pickTheme("night-city");
 
-  assert.deepEqual(requests, [{
-    url: "http://127.0.0.1:43123/v1/theme",
-    body: { revision: 7, themeId: "night-city" },
-  }]);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, "http://127.0.0.1:43123/v1/theme");
+  assert.equal(requests[0].body.revision, 7);
+  assert.equal(requests[0].body.themeId, "night-city");
+  assert.match(requests[0].body.requestId, /^[0-9a-f]{32}$/);
   assert.equal(page.themeId, "night-city");
   assert.equal(page.controlRevision, 8);
   assert.equal(page.window.localStorage.getItem("heigeCodexSkinSelected"), "night-city");
@@ -1354,6 +1358,11 @@ test("a renderer-blocked theme request keeps its optimistic theme until controll
   assert.equal(page.themeId, "night-city");
   assert.equal(page.window.localStorage.getItem("heigeCodexSkinSelected"), "miku-488137");
   assert.match(page.alert.textContent, /后台确认/);
+  assert.equal(page.window.__heigeCodexSkinRuntime.status().themeTransitionPending, true);
+  assert.equal(
+    page.document.querySelector('[data-heige-theme-id="night-city"]').disabled,
+    false,
+  );
 });
 
 test("renderer fallback stays interactive and coalesces rapid theme choices to the latest one", async (t) => {
@@ -1387,6 +1396,48 @@ test("renderer fallback stays interactive and coalesces rapid theme choices to t
     page.document.querySelector('[data-heige-theme-id="night-city"]').disabled,
     false,
   );
+});
+
+test("a delivered theme selection ACK clears the fallback queue as saved", async (t) => {
+  const page = await menuWindow({
+    persistenceEnabled: false,
+    revision: 7,
+    entries: [
+      { id: "miku-488137", name: "Miku", accent: "#19c9e5", css: "html { color: #123456; }" },
+      { id: "night-city", name: "Night City", accent: "#4455aa", css: "html { color: #eeeeee; }" },
+    ],
+    fetch: async () => { throw new Error("Failed to fetch"); },
+  });
+  t.after(() => page.close());
+
+  await page.openThemeCenter();
+  await page.pickTheme("night-city");
+
+  const pending = page.window.__heigeCodexSkinRuntime.status().controlRequest;
+  assert.equal(pending.action, "set-theme");
+  assert.equal(pending.themeId, "night-city");
+  assert.equal(page.saveState.dataset.state, "saving");
+  assert.match(page.alert.textContent, /正在等待后台确认/);
+
+  assert.equal(
+    page.window.__heigeCodexSkinRuntime.receiveThemeSelectionResult({
+      schemaVersion: 1,
+      requestId: pending.requestId,
+      themeId: "night-city",
+      revision: 8,
+      persistenceEnabled: false,
+    }),
+    true,
+  );
+  await page.flush();
+
+  assert.equal(page.window.__heigeCodexSkinRuntime.status().controlRequest, null);
+  assert.equal(page.controlRevision, 8);
+  assert.equal(page.themeId, "night-city");
+  assert.equal(page.window.localStorage.getItem("heigeCodexSkinSelected"), "night-city");
+  assert.equal(page.saveState.dataset.state, "saved");
+  assert.equal(page.saveState.textContent, "已保存");
+  assert.match(page.alert.textContent, /主题选择已保存/);
 });
 
 test("an authoritative formal theme replaces stale formal storage during background repair", async (t) => {
@@ -1606,4 +1657,28 @@ test("reinjection removes the old theme center style backdrop and focus handlers
   assert.throws(() => oldRuntime.status(), /disposed|generation/i);
   assert.equal(page.document.querySelectorAll('[data-heige-role="theme-center-style"]').length, 1);
   assert.equal(page.document.querySelectorAll('[data-heige-role="theme-center-backdrop"]').length, 1);
+});
+
+test("reinjection restores an open theme center after a mid-switch repair", async (t) => {
+  const page = await menuWindow();
+  t.after(() => page.close());
+  await page.openThemeCenter();
+  assert.equal(page.backdrop.hidden, false);
+  assert.equal(page.window.sessionStorage.getItem("heigeCodexThemeCenterOpen"), "1");
+
+  await page.injectAgain();
+  assert.equal(page.backdrop.hidden, false);
+  assert.equal(page.panel.style.display, "grid");
+  assert.equal(page.trigger.getAttribute("aria-expanded"), "true");
+});
+
+test("closing the theme center clears the reopen marker", async (t) => {
+  const page = await menuWindow();
+  t.after(() => page.close());
+  await page.openThemeCenter();
+  page.closeButton.click();
+  await page.flush();
+  assert.equal(page.window.sessionStorage.getItem("heigeCodexThemeCenterOpen"), null);
+  await page.injectAgain();
+  assert.equal(page.backdrop.hidden, true);
 });
