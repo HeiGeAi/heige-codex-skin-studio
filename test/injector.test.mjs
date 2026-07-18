@@ -6,6 +6,7 @@ import test from "node:test";
 
 import {
   applySkin,
+  deliverThemeSelectionResult,
   deliverUpdateCheckResult,
   removeSkin,
   skinStatus,
@@ -203,6 +204,24 @@ test("delivers an update result only through the current renderer callback", asy
   assert.equal(result.delivered, 1);
   assert.match(FakeSession.expressions.at(-1), /receiveUpdateCheckResult/);
   assert.match(FakeSession.expressions.at(-1), /"generation":"a{32}"/);
+});
+
+test("delivers a theme selection result through the current renderer callback", async () => {
+  FakeSession.expressions = [];
+  const { deps } = await fixture();
+  const result = await deliverThemeSelectionResult({
+    port: 9341,
+    requestId: "b".repeat(32),
+    themeId: "genshin-night",
+    revision: 8,
+    persistenceEnabled: false,
+    deps,
+  });
+
+  assert.equal(result.delivered, 1);
+  assert.match(FakeSession.expressions.at(-1), /receiveThemeSelectionResult/);
+  assert.match(FakeSession.expressions.at(-1), /"themeId":"genshin-night"/);
+  assert.match(FakeSession.expressions.at(-1), /"revision":8/);
 });
 
 test("rejects malformed update delivery before opening a renderer session", async () => {
