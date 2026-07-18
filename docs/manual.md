@@ -76,6 +76,14 @@ open "$HOME/.codex/heige-codex-skin-studio/scripts/restore.command"
 `apply.command` 只应用本次会话，不会暗中打开下次启动常驻。
 安装生成的本地「HeiGe 皮肤启动器」调用的就是这个入口：它会恢复 `lastNonNativeThemeId` 记录的最近非原生主题，但保持常驻选择不变。
 
+Codex 长时间运行后偶发合成器卡死：整窗帧率骤降到约 10 帧，输入和滚动全局迟滞，连新开的空白窗口也一样，与皮肤无关，只有冷重启能恢复。健康会话下 `apply.command` 是幂等的，不会重启进程，此时用 `--restart` 先彻底退出 Codex 再拉起注入：
+
+```bash
+"$HOME/.codex/heige-codex-skin-studio/scripts/apply.command" --restart
+```
+
+`--restart` 可与主题参数连用（`apply.command --restart theme-id`），同样只应用本次会话，不改变常驻选择；Codex 未运行时等同于普通 apply。退出步骤走正常退出并校验进程身份，绝不强杀，30 秒内未退出会明确报错。
+
 ## 常驻开关与恢复（macOS）
 
 只能在 Codex 顶部菜单打开「皮肤常驻」开关。打开后，当前用户的 LaunchAgent 运行统一控制器，负责状态恢复、目标识别和漂移修复。关闭开关时会先确认，并明确提醒：关闭后本次继续使用；下次启动恢复原生界面。关闭命令：

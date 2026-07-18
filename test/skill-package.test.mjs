@@ -258,7 +258,8 @@ test("archive is a strict runtime allowlist with fixed metadata", async (t) => {
     await readFile(join(repoRoot, "scripts/apply.command"), "utf8"),
     "the reusable skill must carry the audited launcher byte-for-byte",
   );
-  assert.match(packagedLauncher, /apply --prefer-stored --port/);
+  assert.match(packagedLauncher, /apply "\$\{RESTART_ARGS\[@\]\}" --prefer-stored --port/);
+  assert.match(packagedLauncher, /--restart/);
   assert.doesNotMatch(packagedLauncher, /\$\{1:-miku-488137\}/);
 
   const packagedMacosLauncher = await readZipText(

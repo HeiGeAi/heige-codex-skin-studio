@@ -129,12 +129,13 @@ export function buildSkinCss({ theme, heroDataUrl, logoDataUrl = null, polaroidD
   background: linear-gradient(90deg, color-mix(in srgb, var(--heige-accent) 22%, transparent), color-mix(in srgb, var(--heige-secondary) 16%, transparent)) !important;
 }
 
-/* 非当前任务不常驻展示共享工作区的 PR 状态，悬停时仍可检查 */
-[data-app-action-sidebar-thread-active="false"] span:has(svg[class*="pr-status-dot-color"]) {
+/* 非当前任务不常驻展示共享工作区的 PR 状态，悬停时仍可检查。
+ * 直接命中 svg 而不做父级反向匹配：流式输出高频改 DOM 时反向失效扫描代价最高。 */
+[data-app-action-sidebar-thread-active="false"] svg[class*="pr-status-dot-color"] {
   opacity: 0 !important;
 }
 
-[data-app-action-sidebar-thread-active="false"]:hover span:has(svg[class*="pr-status-dot-color"]) {
+[data-app-action-sidebar-thread-active="false"]:hover svg[class*="pr-status-dot-color"] {
   opacity: 1 !important;
 }
 

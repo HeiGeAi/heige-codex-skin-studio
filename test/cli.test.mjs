@@ -565,6 +565,23 @@ test("apply on a native Codex queues one detached CDP restart and applies only a
   });
 });
 
+test("apply --restart forces one detached restart even when the CDP session is healthy", async () => {
+  const fx = lifecycleDeps();
+  const result = await runCli(["apply", "--restart", "--theme", "miku-488137"], fx.deps);
+  assert.deepEqual(result, { mode: "restarting", persistenceEnabled: false, queued: true });
+  assert.equal(fx.calls.registerEphemeral.length, 0, "强制重启不得向旧会话注入");
+  assert.equal(fx.calls.detached.length, 1);
+  assert.equal(
+    fx.calls.detached[0].preflight.process.pid,
+    4242,
+    "分离动作必须携带在运行进程身份，供退出步骤校验",
+  );
+  assert.deepEqual(fx.calls.detached[0].afterLaunch, {
+    command: "apply",
+    themeId: "miku-488137",
+  });
+});
+
 test("apply starts a fully closed Codex through a launch-only detached action", async () => {
   const fx = lifecycleDeps({
     preflightLifecycle: async (input) => {

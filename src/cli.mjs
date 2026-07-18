@@ -96,13 +96,13 @@ import {
 
 const execFile = promisify(execFileCallback);
 const repositoryRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
-const BOOLEAN_FLAGS = new Set(["background", "ephemeral", "once", "prefer-stored"]);
+const BOOLEAN_FLAGS = new Set(["background", "ephemeral", "once", "prefer-stored", "restart"]);
 const COMMAND_OPTIONS = new Map([
   ["help", new Set()],
   ["list", new Set()],
   ["create", new Set(["image", "name"])],
   ["customize", new Set(["image", "name", "port"])],
-  ["apply", new Set(["port", "prefer-stored", "theme"])],
+  ["apply", new Set(["port", "prefer-stored", "restart", "theme"])],
   ["enable-skin", new Set(["port", "theme"])],
   ["set-persistence", new Set(["port", "revision"])],
   ["pause", new Set(["port"])],
@@ -2171,13 +2171,17 @@ async function preflightWithNativeFallback(deps, input) {
   }
 }
 
-async function applySelectedTheme({ deps, roots, command, port, preferStored, themeId }) {
+async function applySelectedTheme({ deps, roots, command, port, preferStored, themeId, forceRestart = false }) {
   const bundle = await themeBundle({ deps, roots, themeId });
-  const { preflight, restartRequired } = await preflightWithNativeFallback(deps, {
+  const fallback = await preflightWithNativeFallback(deps, {
     command,
     port,
     themeId,
   });
+  const preflight = fallback.preflight;
+  // 强制重启是合成器卡死（整窗低帧率）等疑难场景的恢复入口：
+  // 健康 CDP 会话下 apply 幂等不重启进程，救不了这种病，必须先退出再拉起。
+  const restartRequired = forceRestart || fallback.restartRequired;
   const before = await deps.readState();
   if (restartRequired) {
     assertDirectLifecycleRestartSupported(deps.platform, command);
@@ -2333,6 +2337,7 @@ export async function runCli(argv, overrides = {}) {
       port,
       preferStored,
       themeId,
+      forceRestart: Boolean(args.restart),
     });
   }
   if (command === "enable-skin") {

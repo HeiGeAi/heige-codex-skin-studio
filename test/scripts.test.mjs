@@ -920,8 +920,38 @@ test("macOS launcher defaults to the stored theme and uses an explicit theme onl
     "--port",
     "9341",
   ]);
+  await run("/bin/zsh", [launcher, "--restart"], {
+    env: { PATH: "/usr/bin:/bin", HEIGE_CAPTURE: capture },
+  });
+  assert.deepEqual((await readFile(capture, "utf8")).trim().split("\n"), [
+    "apply",
+    "--restart",
+    "--prefer-stored",
+    "--port",
+    "9341",
+  ]);
+
+  await run("/bin/zsh", [launcher, "--restart", "genshin-night"], {
+    env: { PATH: "/usr/bin:/bin", HEIGE_CAPTURE: capture },
+  });
+  assert.deepEqual((await readFile(capture, "utf8")).trim().split("\n"), [
+    "apply",
+    "--restart",
+    "--theme",
+    "genshin-night",
+    "--port",
+    "9341",
+  ]);
+
   await assert.rejects(
     run("/bin/zsh", [launcher, "one", "two"], {
+      env: { PATH: "/usr/bin:/bin", HEIGE_CAPTURE: capture },
+    }),
+    (error) => error.code === 64,
+  );
+
+  await assert.rejects(
+    run("/bin/zsh", [launcher, "--restart", "one", "two"], {
       env: { PATH: "/usr/bin:/bin", HEIGE_CAPTURE: capture },
     }),
     (error) => error.code === 64,

@@ -126,6 +126,7 @@ Windows 用 `scripts\windows\install.bat` 安装；日常入口是 `scripts/wind
 - 阅读增强默认开启：最终回复和过程回复都使用 90％ 主题自适应半透明底色，并保留对称留白保护文字可读性；可在主题中心随时关闭，不使用大面积实时模糊、阴影、观察器、滚动监听或后台请求。
 - 想让皮肤重启后一直在：先打开「HeiGe 皮肤启动器」恢复当前会话，再到顶部菜单打开开关进入常驻。
 - 「HeiGe 皮肤启动器」和兼容名 `enable-skin.command` 都只恢复当前会话；`enable-persist.command` 是弃用的非零退出入口，不再执行任何启用动作。
+- 整窗突然变卡（帧率骤降、输入滚动全局迟滞）：跑 `scripts/apply.command --restart` 先彻底退出 Codex 再拉起注入；健康会话下直接重跑 apply 是幂等的，不会重启进程。
 - 支持范围：macOS 有日期化真机验证；Windows 走跨 PowerShell 自动化，Microsoft Store/MSIX 真机待验证；使用系统 Node 时要求 Node.js 22 或更新版本。
 - 安全边界：CDP 即使只绑定本机回环也无认证，本机同权限进程在威胁边界内，完整说明见 [SECURITY.md](SECURITY.md)；素材来源逐文件登记在 [ASSET_PROVENANCE.md](ASSET_PROVENANCE.md)。
 - 命令行、主题 JSON 格式、常驻细节、全部 FAQ 和设计边界，都在[完整手册](docs/manual.md)。

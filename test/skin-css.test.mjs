@@ -52,11 +52,16 @@ test("builds one fast generic skin from a theme and image data URL", () => {
   assert.match(css, /pointer-events:\s*none/);
   assert.match(
     css,
-    /\[data-app-action-sidebar-thread-active="false"\]\s+span:has\(svg\[class\*="pr-status-dot-color"\]\)\s*\{[^}]*opacity:\s*0/s,
+    /\[data-app-action-sidebar-thread-active="false"\]\s+svg\[class\*="pr-status-dot-color"\]\s*\{[^}]*opacity:\s*0/s,
   );
   assert.match(
     css,
-    /\[data-app-action-sidebar-thread-active="false"\]:hover\s+span:has\(svg\[class\*="pr-status-dot-color"\]\)\s*\{[^}]*opacity:\s*1/s,
+    /\[data-app-action-sidebar-thread-active="false"\]:hover\s+svg\[class\*="pr-status-dot-color"\]\s*\{[^}]*opacity:\s*1/s,
+  );
+  assert.doesNotMatch(
+    css,
+    /:has\(/,
+    "皮肤样式禁用 :has()，流式输出高频 DOM 变更下反向失效扫描代价过高",
   );
   assert.match(css, /--heige-native-light-ink:\s*#172033/);
   assert.match(
