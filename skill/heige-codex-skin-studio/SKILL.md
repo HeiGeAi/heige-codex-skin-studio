@@ -102,7 +102,7 @@ Windows PowerShell 运行：
 
 ## 安装包自带的可选 Miku Future Pet
 
-发布包内自带 `Miku Future` 动画 Pet，但皮肤安装不会自动启用。仅当用户明确要求安装时才执行。macOS 优先使用统一 wrapper：
+发布包内自带 `Miku Future` 动画 Pet，但皮肤安装不会自动启用。仅当用户明确要求安装 Miku Future 时才执行。macOS 优先使用统一 wrapper：
 
 ```bash
 "$ROOT/scripts/install-pet.command"
