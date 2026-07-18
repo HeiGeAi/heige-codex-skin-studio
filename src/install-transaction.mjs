@@ -300,12 +300,7 @@ async function scanOwnedDirectory(root, relativePath, entries, budget) {
   }
 }
 
-async function validateOwnedTree(root, expectedManifestSha256 = null) {
-  const rootInfo = await lstat(root);
-  if (rootInfo.isSymbolicLink() || !rootInfo.isDirectory() || !modeMatches(rootInfo, 0o755)) {
-    throw new Error("existing target is not an owned real directory");
-  }
-  if (!sameCanonicalPath(await realpath(root), root)) throw new Error("existing target is not canonical");
+async function readOwnedInstallMarker(root) {
   const markerPath = join(root, INSTALL_MARKER_NAME);
   const markerInfo = await lstat(markerPath).catch((error) => {
     if (error?.code === "ENOENT") throw new Error("existing target requires an ownership marker");
@@ -327,6 +322,16 @@ async function validateOwnedTree(root, expectedManifestSha256 = null) {
   ) {
     throw new Error("ownership marker schema is invalid");
   }
+  return marker;
+}
+
+async function validateOwnedTree(root, expectedManifestSha256 = null) {
+  const rootInfo = await lstat(root);
+  if (rootInfo.isSymbolicLink() || !rootInfo.isDirectory() || !modeMatches(rootInfo, 0o755)) {
+    throw new Error("existing target is not an owned real directory");
+  }
+  if (!sameCanonicalPath(await realpath(root), root)) throw new Error("existing target is not canonical");
+  const marker = await readOwnedInstallMarker(root);
   const topLevel = (await readdir(root)).sort();
   const expectedTopLevel = [...SOURCE_ENTRIES.map((entry) => entry.name), INSTALL_MARKER_NAME].sort();
   if (
@@ -347,6 +352,30 @@ async function validateOwnedTree(root, expectedManifestSha256 = null) {
     throw new Error("owned tree manifest does not match the transaction");
   }
   return { manifestSha256, marker };
+}
+
+async function healDriftedOwnedTreeIfSafe(targetRoot, testMode) {
+  // 手工覆盖/半截同步会导致「标记哈希 ≠ 目录内容」。仅在当前用户规范安装根、
+  // 且顶层结构仍是我们的 owned tree 时，删掉后按 absent 重装。
+  await requireCurrentUserLegacyTarget(targetRoot, testMode);
+  const rootInfo = await lstat(targetRoot);
+  if (rootInfo.isSymbolicLink() || !rootInfo.isDirectory() || !modeMatches(rootInfo, 0o755)) {
+    throw new Error("existing target is not an owned real directory");
+  }
+  if (!sameCanonicalPath(await realpath(targetRoot), targetRoot)) {
+    throw new Error("existing target is not canonical");
+  }
+  await readOwnedInstallMarker(targetRoot);
+  const topLevel = (await readdir(targetRoot)).sort();
+  const expectedTopLevel = [...SOURCE_ENTRIES.map((entry) => entry.name), INSTALL_MARKER_NAME].sort();
+  if (
+    topLevel.length !== expectedTopLevel.length ||
+    !topLevel.every((name, index) => name === expectedTopLevel[index])
+  ) {
+    throw new Error("owned tree contains unexpected top-level content");
+  }
+  await rm(targetRoot, { recursive: true, force: false });
+  await syncDirectory(dirname(targetRoot));
 }
 
 function testCurrentUserHome(testMode) {
@@ -1193,8 +1222,22 @@ export async function prepareInstallTree({
   let beforeKind = "absent";
   if (existing !== null) {
     if (await pathInfo(join(targetRoot, INSTALL_MARKER_NAME))) {
-      before = await validateOwnedTree(targetRoot);
-      beforeKind = "owned";
+      try {
+        before = await validateOwnedTree(targetRoot);
+        beforeKind = "owned";
+      } catch (error) {
+        if (!/owned tree manifest does not match its ownership marker/.test(String(error?.message ?? ""))) {
+          throw error;
+        }
+        try {
+          await healDriftedOwnedTreeIfSafe(targetRoot, testMode);
+        } catch {
+          // 非当前用户规范安装根，或不满足安全结构：保留原始漂移错误。
+          throw error;
+        }
+        before = null;
+        beforeKind = "absent";
+      }
     } else {
       before = await validateLegacyTree(targetRoot, { requireCurrentTarget: true, testMode });
       beforeKind = "legacy";
