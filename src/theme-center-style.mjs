@@ -7,7 +7,6 @@ export const THEME_CENTER_STYLE = String.raw`
   color: #17344f;
   font: 500 13px/1.4 ui-rounded, "SF Pro Rounded", system-ui, sans-serif;
   user-select: none;
-  -webkit-app-region: no-drag;
 }
 #heige-codex-skin-menu [hidden] { display: none !important; }
 #heige-codex-skin-menu button { font: inherit; }
@@ -62,6 +61,7 @@ export const THEME_CENTER_STYLE = String.raw`
   padding: 48px 16px 16px;
   background: rgba(17,35,47,.22);
   backdrop-filter: blur(7px) saturate(.94);
+  -webkit-app-region: no-drag;
 }
 [data-heige-role="theme-center"] {
   width: min(70vw,1100px);
