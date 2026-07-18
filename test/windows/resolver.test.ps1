@@ -280,6 +280,22 @@ process.stdout.write(JSON.stringify(app));
         Assert-Throws { Resolve-CodexApp -OverridePath $null -Packages $script:Packages -ProcessProvider { $reverse } } "进程归属不唯一"
     }
 
+    Test-Case "Store UI plus LOCALAPPDATA Codex bin backend is not treated as mixed installs" {
+        $backend = Join-Path $script:LocalAppData "OpenAI\Codex\bin\deadbeef\codex.exe"
+        New-Item -ItemType Directory -Path (Split-Path $backend -Parent) -Force | Out-Null
+        New-Item -ItemType File -Path $backend -Force | Out-Null
+        Assert-True (Test-HeiGeCodexInternalBackendPath -Path $backend)
+        $processes = @(
+            [pscustomobject]@{ Path = $script:CodexExe; Id = 44; ProcessName = "Codex" },
+            [pscustomobject]@{ Path = $backend; Id = 45; ProcessName = "codex" }
+        )
+        $app = Resolve-CodexApp -OverridePath $null -Packages $script:Packages -ProcessProvider { $processes }
+        Assert-Equal "StoreAumid" $app.Kind
+        Assert-Equal $script:Package2Root $app.InstallPath
+        Assert-False (Test-HeiGeCodexInternalBackendPath -Path $script:CodexExe)
+        Assert-False (Test-HeiGeCodexInternalBackendPath -Path $script:Win32Exe)
+    }
+
     Test-Case "Store alias is preferred when it exists" {
         $alias = Join-Path $script:LocalAppData ("Microsoft\WindowsApps\" + $script:Packages[1].PackageFamilyName + "\Codex.exe")
         New-Item -ItemType Directory -Path (Split-Path $alias -Parent) -Force | Out-Null
@@ -426,6 +442,28 @@ process.stdout.write(JSON.stringify(app));
         Assert-True $fileAcl.AreAccessRulesProtected
         Assert-Equal @($currentSid) $directorySids
         Assert-Equal @($currentSid) $fileSids
+    }
+
+    Test-Case "Private state directory falls back to icacls when Set-Acl lacks privilege" {
+        $state = Join-Path $script:Root "State Icacls Fallback"
+        New-Item -ItemType Directory -Path $state -Force | Out-Null
+        $stateFile = Join-Path $state "state.json"
+        New-Item -ItemType File -Path $stateFile -Force | Out-Null
+        $currentSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        Protect-HeiGeStateDirectory -Path $state -CurrentUserSid $currentSid -SetAclProvider {
+            param($Path, $AclObject)
+            throw (New-Object -TypeName System.Security.AccessControl.PrivilegeNotHeldException -ArgumentList "SeSecurityPrivilege")
+        } | Out-Null
+        $acl = Get-Acl -LiteralPath $state
+        $fileAcl = Get-Acl -LiteralPath $stateFile
+        $directorySids = @($acl.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier]) | ForEach-Object {
+            $_.IdentityReference.Value
+        })
+        $fileSids = @($fileAcl.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier]) | ForEach-Object {
+            $_.IdentityReference.Value
+        })
+        Assert-True ($directorySids -contains $currentSid)
+        Assert-True ($fileSids -contains $currentSid)
     }
 
     Test-Case "Private state directory refuses reparse points" {
