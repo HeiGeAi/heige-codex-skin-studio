@@ -206,13 +206,17 @@ test("Windows ACL adapter protects files explicitly and bounds trusted PowerShel
     powershellPath: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
     execFileImpl: async (file, args, options) => {
       calls.push({ file, args, options });
+      const payload = JSON.parse(Buffer.from(args.at(-1), "base64").toString("utf8"));
       return {
         stdout: JSON.stringify({
           schemaVersion: 1,
-          action: args.at(-2),
-          path: args.at(-1),
-          ownerSid: "S-1-5-21-1",
-          private: true,
+          results: payload.operations.map((operation) => ({
+            schemaVersion: 1,
+            action: operation.action,
+            path: operation.path,
+            ownerSid: "S-1-5-21-1",
+            private: true,
+          })),
         }),
         stderr: "",
       };
@@ -221,11 +225,10 @@ test("Windows ACL adapter protects files explicitly and bounds trusted PowerShel
   await adapter.protectFile(path);
   await adapter.migrateFile(path);
   await adapter.verifyFile(path);
-  assert.deepEqual(calls.map((entry) => entry.args.at(-2)), [
-    "protect-file",
-    "migrate-file",
-    "verify-file",
-  ]);
+  assert.deepEqual(
+    calls.map((entry) => JSON.parse(Buffer.from(entry.args.at(-1), "base64").toString("utf8")).operations[0].action),
+    ["protect-file", "migrate-file", "verify-file"],
+  );
   assert.equal(calls.every((entry) => entry.file.endsWith("\\powershell.exe")), true);
   assert.equal(calls.every((entry) => entry.options.timeout === 15_000), true);
   assert.equal(calls.every((entry) => entry.options.maxBuffer === 256 * 1024), true);
@@ -245,13 +248,17 @@ test("Windows ACL adapter isolates Windows PowerShell modules from the parent ru
     },
     execFileImpl: async (file, args, options) => {
       calls.push({ file, args, options });
+      const payload = JSON.parse(Buffer.from(args.at(-1), "base64").toString("utf8"));
       return {
         stdout: JSON.stringify({
           schemaVersion: 1,
-          action: args.at(-2),
-          path: args.at(-1),
-          ownerSid: "S-1-5-21-1",
-          private: true,
+          results: payload.operations.map((operation) => ({
+            schemaVersion: 1,
+            action: operation.action,
+            path: operation.path,
+            ownerSid: "S-1-5-21-1",
+            private: true,
+          })),
         }),
         stderr: "",
       };
@@ -276,20 +283,47 @@ test("Windows ACL adapter isolates Windows PowerShell modules from the parent ru
 
 test("Windows ACL adapter preserves the canonical request path instead of rewriting 8.3 aliases", async () => {
   const path = "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\heige-state";
+  const ownerPath = `${path}\\owner.json`;
   const powershellPath = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
-  const result = {
+  const directoryResult = {
     schemaVersion: 1,
     action: "verify-directory",
     path,
     ownerSid: "S-1-5-21-1",
     private: true,
   };
+  const fileResult = {
+    schemaVersion: 1,
+    action: "protect-file",
+    path: ownerPath,
+    ownerSid: "S-1-5-21-1",
+    private: true,
+  };
   const adapter = createWindowsSecurityAdapter({
     powershellPath,
-    execFileImpl: async () => ({ stdout: JSON.stringify(result), stderr: "" }),
+    execFileImpl: async (_file, args) => {
+      const payload = JSON.parse(Buffer.from(args.at(-1), "base64").toString("utf8"));
+      assert.equal(payload.schemaVersion, 1);
+      assert.ok(Array.isArray(payload.operations));
+      const results = payload.operations.map((operation) => ({
+        schemaVersion: 1,
+        action: operation.action,
+        path: operation.path,
+        ownerSid: "S-1-5-21-1",
+        private: true,
+      }));
+      return {
+        stdout: JSON.stringify({ schemaVersion: 1, results }),
+        stderr: "",
+      };
+    },
   });
 
-  assert.deepEqual(await adapter.verifyDirectory(path), result);
+  assert.deepEqual(await adapter.verifyDirectory(path), directoryResult);
+  assert.deepEqual(await adapter.batch([
+    { action: "verify-directory", path },
+    { action: "protect-file", path: ownerPath },
+  ]), [directoryResult, fileResult]);
   assert.match(windowsAclPowerShellScript, /path = \$TargetPath/);
   assert.doesNotMatch(windowsAclPowerShellScript, /path = \[System\.IO\.Path\]::GetFullPath/);
 });
@@ -301,10 +335,13 @@ test("Windows ACL adapter rejects a rewritten path without reflecting sensitive 
     execFileImpl: async () => ({
       stdout: JSON.stringify({
         schemaVersion: 1,
-        action: "verify-directory",
-        path: "C:\\Users\\runneradmin\\AppData\\Local\\Temp\\heige-state",
-        ownerSid: "S-1-5-21-1",
-        private: true,
+        results: [{
+          schemaVersion: 1,
+          action: "verify-directory",
+          path: "C:\\Users\\runneradmin\\AppData\\Local\\Temp\\heige-state",
+          ownerSid: "S-1-5-21-1",
+          private: true,
+        }],
       }),
       stderr: "",
     }),
