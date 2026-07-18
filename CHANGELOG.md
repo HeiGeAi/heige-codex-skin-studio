@@ -1,5 +1,21 @@
 # 更新日志
 
+## 5.2.5 - 2026-07-18
+
+### 修复
+
+- 修复 Windows PowerShell 5.1 的 Skill 文档契约失败：明确写出仅当用户主动要求安装 Miku Future 时才执行宠物安装。
+- 保持皮肤安装与宠物安装相互独立，不因安装或应用皮肤自动启用可选宠物。
+
+### 测试
+
+- 重新执行 Node、macOS lifecycle、Windows PowerShell parity 和可复现 `.skill` 制品四组 GitHub Actions 门禁。
+- Windows 门禁要求 PowerShell 5.1、PowerShell 7、32 位解析、确定性制品安装和隔离 Scheduled Task 集成全部实际执行。
+
+### 发布说明
+
+- 本版本包含 5.2.4 的换肤锁竞争修复；安装包继续使用本机回环 CDP，不修改 Codex 的 `app.asar`、应用二进制或签名资源。
+
 ## 5.2.4 - 2026-07-18
 
 ### 修复
