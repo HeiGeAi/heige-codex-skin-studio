@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { createSingleImageTheme, listThemes } from "../src/theme-store.mjs";
+import { createSingleImageTheme, listThemes, resolveAndLoadTheme } from "../src/theme-store.mjs";
 
 async function temporaryRoot(prefix) {
   return realpath(await mkdtemp(join(tmpdir(), prefix)));
@@ -69,6 +69,38 @@ test("listThemes skips well-formed JSON with a bad shape instead of crashing", a
 
   const themes = await listThemes({ roots: [root] });
   assert.deepEqual(themes.map((t) => t.name), ["Good"]);
+});
+
+test("resolveAndLoadTheme loads only the target theme by id", async () => {
+  const root = await temporaryRoot("heige-resolve-");
+  const storeRoot = join(root, "themes");
+  const image = join(root, "source.png");
+  await writeFile(image, png(640, 360));
+  const first = await createSingleImageTheme({
+    imagePath: image,
+    name: "Resolve One",
+    storeRoot,
+  });
+  const second = await createSingleImageTheme({
+    imagePath: image,
+    name: "Resolve Two",
+    storeRoot,
+  });
+  assert.notEqual(first.id, second.id);
+
+  const resolved = await resolveAndLoadTheme({ roots: [storeRoot], id: second.id });
+  assert.equal(resolved.selected.id, second.id);
+  assert.equal(resolved.loadedTheme.manifest.id, second.id);
+  assert.equal(resolved.selected.path, second.path);
+
+  await assert.rejects(
+    resolveAndLoadTheme({ roots: [storeRoot], id: "missing-theme" }),
+    /找不到主题/,
+  );
+  await assert.rejects(
+    resolveAndLoadTheme({ roots: [storeRoot], id: "../escape" }),
+    /invalid/,
+  );
 });
 
 test("createSingleImageTheme rejects oversized source images", async () => {
