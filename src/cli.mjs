@@ -2,7 +2,7 @@
 import { execFile as execFileCallback, spawn } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
-import { dirname, isAbsolute, join, normalize, resolve, win32 } from "node:path";
+import { dirname, isAbsolute, join, normalize, posix, resolve, win32 } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
@@ -33,6 +33,7 @@ import {
 import { createSkinController } from "./controller.mjs";
 import {
   applySkin,
+  deliverThemeSelectionResult,
   deliverUpdateCheckResult,
   removeSkin,
   skinStatus,
@@ -83,7 +84,7 @@ import {
 } from "./state-store.mjs";
 import { createStudioLogger } from "./studio-logger.mjs";
 import { loadTheme } from "./theme-schema.mjs";
-import { createSingleImageTheme, listThemes } from "./theme-store.mjs";
+import { createSingleImageTheme, listThemes, resolveAndLoadTheme } from "./theme-store.mjs";
 import {
   classifyWindowsPreflightSnapshot,
   queryWindowsRuntimeSnapshot,
@@ -601,19 +602,81 @@ export function createWindowsRuntimeProbe({ port, queryWindowsRuntime }) {
   if (typeof queryWindowsRuntime !== "function") {
     throw new Error("Windows controller runtime query is required");
   }
-  return async () => {
+  // 同一次 probe 结果可在紧随其后的 validatePortOwner 中单次复用，
+  // 避免主题保存临界路径连续冷启动两次 PowerShell runtime snapshot。
+  let reusable = null;
+  const probe = async () => {
     const snapshot = await queryWindowsRuntime({ port });
     if (Array.isArray(snapshot?.listeners) && snapshot.listeners.length === 0) {
       classifyWindowsPreflightSnapshot(snapshot, {
         port,
         requirePort: false,
       });
+      reusable = { process: null, portProven: false };
       return null;
     }
-    return classifyWindowsPreflightSnapshot(snapshot, {
+    const processIdentity = classifyWindowsPreflightSnapshot(snapshot, {
       port,
       requirePort: true,
     }).process;
+    reusable = { process: processIdentity, portProven: true };
+    return processIdentity;
+  };
+  probe.consumePortProof = (candidate) => {
+    const current = reusable;
+    reusable = null;
+    if (current === null || current.portProven !== true) return false;
+    return sameProcessIdentity(current.process, candidate);
+  };
+  // Healthy ticks probe again after renderer inspection and leave an unused
+  // proof. Discard it so a later validatePortOwner cannot accept a stale claim.
+  probe.discardPortProof = () => {
+    reusable = null;
+  };
+  return probe;
+}
+
+export function createControllerPortOwnerValidator({
+  platform,
+  port,
+  probe,
+  windowsProbe = null,
+  validatePortOwnerImpl = validatePortOwner,
+}) {
+  if (platform !== "win32" && platform !== "darwin") {
+    throw new Error(`不支持的平台：${platform}`);
+  }
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error("controller port is invalid");
+  }
+  if (typeof probe !== "function") {
+    throw new Error("controller process probe is required");
+  }
+  if (typeof validatePortOwnerImpl !== "function") {
+    throw new Error("controller port owner validator is required");
+  }
+
+  return async (candidate, { reuseCurrentProcessSnapshot = false } = {}) => {
+    if (platform === "win32") {
+      if (
+        typeof windowsProbe?.consumePortProof === "function" &&
+        windowsProbe.consumePortProof(candidate) === true
+      ) {
+        return true;
+      }
+      const current = await probe();
+      return sameProcessIdentity(current, candidate);
+    }
+
+    // A healthy tick supplies the process identity captured immediately before
+    // this check and performs another exact probe after renderer inspection.
+    // Reuse only in that bounded path; every mutation path still re-probes here.
+    if (reuseCurrentProcessSnapshot !== true) {
+      const current = await probe();
+      if (!sameProcessIdentity(current, candidate)) return false;
+    }
+    // The process snapshot proves identity, not socket ownership. Keep lsof.
+    return validatePortOwnerImpl(port, candidate, { platform });
   };
 }
 
@@ -631,6 +694,15 @@ function macosInstallFenceError(operation) {
   );
   error.code = "MACOS_INSTALL_IN_PROGRESS";
   return error;
+}
+
+function isCanonicalAuthorizationPath(pathValue) {
+  if (typeof pathValue !== "string" || pathValue.includes("\0")) return false;
+  // 生产仅在 macOS；单测也可能在 Windows 上用本机绝对路径构造 journalPath。
+  if (posix.isAbsolute(pathValue) && posix.normalize(pathValue) === pathValue) return true;
+  return process.platform === "win32" &&
+    win32.isAbsolute(pathValue) &&
+    win32.normalize(pathValue) === pathValue;
 }
 
 export function parseMacosInstallAuthorization(value) {
@@ -656,10 +728,7 @@ export function parseMacosInstallAuthorization(value) {
     parsed.role !== "macos-install-ready-foreground" ||
     typeof parsed.transactionId !== "string" ||
     !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(parsed.transactionId) ||
-    typeof parsed.journalPath !== "string" ||
-    !isAbsolute(parsed.journalPath) ||
-    normalize(parsed.journalPath) !== parsed.journalPath ||
-    parsed.journalPath.includes("\0") ||
+    !isCanonicalAuthorizationPath(parsed.journalPath) ||
     !Number.isSafeInteger(parsed.expectedRevision) ||
     parsed.expectedRevision < 0 ||
     typeof parsed.expectedControlToken !== "string" ||
@@ -823,6 +892,56 @@ export async function enforceLegacyMigrationFence({
   throw migrationFenceError(operation);
 }
 
+const PRODUCTION_LEASE_RETRY_DELAYS_MS = Object.freeze([
+  100, 200, 400, 800, 1600, 3200,
+]);
+const LOCK_HELD_ACTION_STARTED = Symbol("heige.lockHeldActionStarted");
+
+function sleep(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function isLockHeldError(error) {
+  try {
+    return error?.code === "LOCK_HELD";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Retry only while lock acquisition itself fails with LOCK_HELD.
+ * Once the protected action has started, failures fail closed without retry.
+ */
+export async function withLockHeldRetry(
+  run,
+  {
+    delaysMs = PRODUCTION_LEASE_RETRY_DELAYS_MS,
+    wait = sleep,
+  } = {},
+) {
+  if (typeof run !== "function") throw new TypeError("run must be a function");
+  if (!Array.isArray(delaysMs) || delaysMs.some((value) => !Number.isSafeInteger(value) || value < 0)) {
+    throw new TypeError("delaysMs must be an array of non-negative safe integers");
+  }
+  if (typeof wait !== "function") throw new TypeError("wait must be a function");
+
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await run();
+    } catch (error) {
+      if (
+        error?.[LOCK_HELD_ACTION_STARTED] === true ||
+        !isLockHeldError(error) ||
+        attempt >= delaysMs.length
+      ) {
+        throw error;
+      }
+      await wait(delaysMs[attempt]);
+    }
+  }
+}
+
 async function withProductionStateLease({
   paths,
   options,
@@ -833,28 +952,39 @@ async function withProductionStateLease({
   backgroundIdentity = null,
   requestContext = {},
 }, action) {
-  return withOperationLock({ ...options, operation }, async (lease) => {
-    await enforceLegacyMigrationFence({
-      journalPath: legacyMigrationJournalPath(paths.stateRoot),
-      statePath: paths.statePath,
-      transitionPath: paths.transitionPath,
-      lease,
-      operation,
-      authorization,
-      startupHandshake,
-    });
-    await enforceMacosInstallFence({
-      journalPath: macosInstallJournalPath(paths.stateRoot),
-      statePath: paths.statePath,
-      transitionPath: paths.transitionPath,
-      lease,
-      operation,
-      authorization: installAuthorization,
-      startupHandshake,
-      backgroundIdentity,
-      requestContext,
-    });
-    return action(lease);
+  return withLockHeldRetry(async () => {
+    let actionStarted = false;
+    try {
+      return await withOperationLock({ ...options, operation }, async (lease) => {
+        await enforceLegacyMigrationFence({
+          journalPath: legacyMigrationJournalPath(paths.stateRoot),
+          statePath: paths.statePath,
+          transitionPath: paths.transitionPath,
+          lease,
+          operation,
+          authorization,
+          startupHandshake,
+        });
+        await enforceMacosInstallFence({
+          journalPath: macosInstallJournalPath(paths.stateRoot),
+          statePath: paths.statePath,
+          transitionPath: paths.transitionPath,
+          lease,
+          operation,
+          authorization: installAuthorization,
+          startupHandshake,
+          backgroundIdentity,
+          requestContext,
+        });
+        actionStarted = true;
+        return action(lease);
+      });
+    } catch (error) {
+      if (actionStarted && error && typeof error === "object") {
+        error[LOCK_HELD_ACTION_STARTED] = true;
+      }
+      throw error;
+    }
   });
 }
 
@@ -1094,6 +1224,12 @@ export async function productionController({
     if (candidates.length !== 1) throw new Error("Codex 进程身份不唯一");
     return publicProcess(candidates[0]);
   };
+  const controllerPortOwnerValidator = createControllerPortOwnerValidator({
+    platform,
+    port,
+    probe,
+    windowsProbe: probeWindows,
+  });
   // 用户正常启动的 Codex 不带任何 CDP 端口，这正是常驻要接管的那一个。
   const probeNative = async () => {
     const app = await resolveCodexApp({ platform });
@@ -1128,6 +1264,10 @@ export async function productionController({
     currentVersion,
     checkForUpdate,
     deliverUpdateCheckResult: (payload) => deps.deliverUpdateCheckResult({
+      port,
+      ...payload,
+    }),
+    deliverThemeSelectionResult: (payload) => deps.deliverThemeSelectionResult({
       port,
       ...payload,
     }),
@@ -1166,19 +1306,18 @@ export async function productionController({
         },
       }
       : {}),
-    validatePortOwner: async (candidate) => {
-      const current = await probe();
-      if (!sameProcessIdentity(current, candidate)) return false;
-      if (platform === "win32") return true;
-      return validatePortOwner(port, candidate, { platform });
-    },
+    validatePortOwner: controllerPortOwnerValidator,
+    ...(typeof probeWindows?.discardPortProof === "function"
+      ? { discardPortProof: () => probeWindows.discardPortProof() }
+      : {}),
     inspectSkin: (options = {}) => deps.skinStatus({
       port,
       includeControlRequest: options?.purpose === "renderer-control-request",
     }),
     validateThemeSelection: async (themeId) => {
       try {
-        await themeBundle({ deps, roots, themeId });
+        const resolve = deps.resolveAndLoadTheme ?? resolveAndLoadTheme;
+        await resolve({ roots, id: themeId });
         return true;
       } catch {
         return false;
@@ -1427,8 +1566,14 @@ export async function waitForAppliedSkin({
   deps,
   port,
   themeId,
-  attempts = 80,
+  // Store/cold-start Codex can take >20s before the main renderer answers CDP.
+  attempts = 160,
   wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+  progress = (message) => {
+    try {
+      process.stderr.write(`${message}\n`);
+    } catch {}
+  },
 }) {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
@@ -1449,6 +1594,11 @@ export async function waitForAppliedSkin({
         return true;
       }
     } catch {}
+    if (attempt === 0 || (attempt + 1) % 20 === 0) {
+      progress(
+        `确认：仍在等待皮肤生效… ${attempt + 1}/${attempts}（无需点击）`,
+      );
+    }
     await wait(250);
   }
   throw new Error("ephemeral controller 未确认皮肤已应用");
@@ -2092,12 +2242,14 @@ function defaults(overrides, {
     nodeVersion: process.versions.node,
     loadTheme,
     listThemes,
+    resolveAndLoadTheme,
     createSingleImageTheme,
     installPet,
     applySkin,
     removeSkin,
     skinStatus,
     deliverUpdateCheckResult,
+    deliverThemeSelectionResult,
     readCurrentPackageVersion,
     createCachedUpdateChecker,
     readState: () => readStudioState(paths.statePath),
@@ -2267,7 +2419,8 @@ export async function runCli(argv, overrides = {}) {
         ? "Windows 生命周期请使用 scripts/windows/apply.ps1 或 scripts/windows/apply.bat、" +
           "scripts/windows/enable-skin.ps1 或 scripts/windows/enable-skin.bat、" +
           "scripts/windows/pause.ps1、scripts/windows/resume.ps1，以及 " +
-          "scripts/windows/restore.ps1 或 scripts/windows/restore.bat"
+          "scripts/windows/restore.ps1 或 scripts/windows/restore.bat；完整卸载请使用 " +
+          "scripts/windows/uninstall.ps1 或 scripts/windows/uninstall.bat"
         : "macOS 生命周期请优先使用 scripts 下对应的 .command 稳定入口",
       commands: [
         "list",
