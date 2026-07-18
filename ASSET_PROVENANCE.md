@@ -31,7 +31,7 @@
 | `docs/images/genshin-night-live.jpg` | Genshin Night 运行截图 | 仓库标注为运行截图，但原始采集与画面权利记录缺失，授权未验证 | 未知 | 项目所有者确认公开发布 | 后续补充自有截图与来源记录 |
 | `docs/images/theme-center-live.webp` | HeiGe 主题中心运行截图 | 项目所有者于 2026-07-18 提供当前 Mac 真机 PNG，并明确要求发布到 GitHub；仓库保存压缩 WebP | 截图内第三方角色、标识及界面元素的权利不随截图转移 | 项目所有者确认公开发布 | 保留原始截图与本条提供记录 |
 | `docs/images/theme-switcher-live.webp` | Miku 主题及顶部切换入口运行截图 | 项目所有者于 2026-07-18 提供当前 Mac 真机 PNG，并明确要求发布到 GitHub；仓库保存压缩 WebP | 截图内第三方角色、标识及界面元素的权利不随截图转移 | 项目所有者确认公开发布 | 保留原始截图与本条提供记录 |
-| `docs/images/wechat-group-qr.png` | 微信交流群二维码 | 来源证据缺失，授权未验证 | 未知 | 项目所有者确认公开发布 | 后续由群管理员补充发布记录 |
+| `docs/images/wechat-group-qr.png` | 微信交流群二维码 | 项目所有者于 2026-07-18 提供当前个人微信二维码 PNG，并明确要求替换 GitHub 项目介绍图片 | 个人头像、昵称及二维码由项目所有者提供 | 项目所有者确认公开发布 | 保留本条提供记录；二维码失效时及时替换 |
 | `docs/images/wuthering-live.jpg` | Wuthering Waves 主题运行截图 | 仓库标注为运行截图，但原始采集与画面权利记录缺失，授权未验证 | 未知 | 项目所有者确认公开发布 | 后续补充自有截图与来源记录 |
 | `themes/dalao-dianyan/hero.webp` | Dalao Dianyan 主题主视觉 | 来源证据缺失，授权未验证 | 未知 | 项目所有者确认公开发布 | 后续补充人物及图像权利记录 |
 | `themes/deepspace-dawn/hero.webp` | Deepspace Dawn 主题主视觉 | 来源证据缺失，授权未验证 | 未知 | 项目所有者确认公开发布 | 后续可替换为权利记录更完整的素材 |
