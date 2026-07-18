@@ -3,12 +3,12 @@
   "id": "dragonball-super-saiyan",
   "name": "龙珠 · 超级赛亚人",
   "hero": "hero.webp",
-  "appearance": "dark",
+  "appearance": "light",
   "previewFocus": { "x": 67, "y": 43 },
   "colors": {
     "accent": "#F5C451",
     "secondary": "#52C7F2",
-    "surface": "#10172B",
-    "text": "#FFF8E8"
+    "surface": "#FFF8E8",
+    "text": "#282033"
   }
 }

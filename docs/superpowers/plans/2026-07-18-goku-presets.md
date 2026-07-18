@@ -78,13 +78,13 @@ Expected: 两张输出均为 1600×900，且每张小于 1 MB。
   "id": "dragonball-nimbus",
   "name": "龙珠 · 筋斗云",
   "hero": "hero.webp",
-  "appearance": "dark",
+  "appearance": "light",
   "previewFocus": { "x": 72, "y": 43 },
   "colors": {
     "accent": "#4FC3F7",
     "secondary": "#F6C445",
-    "surface": "#101A36",
-    "text": "#F3F7FF"
+    "surface": "#F3F7FF",
+    "text": "#14213D"
   }
 }
 ```
@@ -97,13 +97,13 @@ Expected: 两张输出均为 1600×900，且每张小于 1 MB。
   "id": "dragonball-super-saiyan",
   "name": "龙珠 · 超级赛亚人",
   "hero": "hero.webp",
-  "appearance": "dark",
+  "appearance": "light",
   "previewFocus": { "x": 67, "y": 43 },
   "colors": {
     "accent": "#F5C451",
     "secondary": "#52C7F2",
-    "surface": "#10172B",
-    "text": "#FFF8E8"
+    "surface": "#FFF8E8",
+    "text": "#282033"
   }
 }
 ```
