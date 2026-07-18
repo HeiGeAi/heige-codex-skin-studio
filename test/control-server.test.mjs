@@ -173,6 +173,28 @@ test("accepts an exact theme selection request and returns an authoritative revi
   assert.ok(fx.themeCalls[0].signal instanceof AbortSignal);
 });
 
+test("forwards an exact theme requestId into the durable selection commit", async (t) => {
+  const fx = await startFixture(t, {
+    state: {
+      persistenceEnabled: false,
+      selectedThemeId: "miku-488137",
+      lastNonNativeThemeId: "miku-488137",
+      revision: 3,
+    },
+  });
+  const requestId = "c".repeat(32);
+
+  const response = await request(fx.server, {
+    path: "/v1/theme",
+    body: { revision: 3, themeId: "genshin-night", requestId },
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(fx.themeCalls.length, 1);
+  assert.equal(fx.themeCalls[0].requestId, requestId);
+  assert.equal(fx.themeCalls[0].themeId, "genshin-night");
+});
+
 test("accepts native theme exactly and preserves the last formal launcher theme", async (t) => {
   const fx = await startFixture(t, {
     state: {
@@ -214,6 +236,8 @@ test("rejects custom quick images and malformed theme protocol bodies", async (t
     { revision: 3, themeId: "" },
     { revision: 3, themeId: null },
     { revision: 3, themeId: "miku-488137", extra: true },
+    { revision: 3, themeId: "miku-488137", requestId: "not-hex" },
+    { revision: 3, themeId: "miku-488137", requestId: "c".repeat(31) },
     { themeId: "miku-488137" },
   ];
 
