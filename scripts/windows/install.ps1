@@ -11,6 +11,7 @@ $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 . (Join-Path $PSScriptRoot "lib\common.ps1")
 . (Join-Path $PSScriptRoot "lib\start-menu.ps1")
+. (Join-Path $PSScriptRoot "lib\bat-exit.ps1")
 
 $script:HeiGeInstallProduct = "heige-codex-skin-studio"
 $script:HeiGeInstallJournalLimit = 131072
@@ -453,11 +454,39 @@ function Enter-HeiGeInstallMutex {
 
 function Invoke-HeiGePostCommitApply {
     param([Parameter(Mandatory = $true)][string]$ApplyScript)
+    if (-not (Test-Path -LiteralPath $ApplyScript -PathType Leaf)) {
+        throw "安装已完成，但找不到首次应用脚本：$ApplyScript"
+    }
+    # 子进程执行 apply：apply.ps1 会 exit，不可 & 进当前安装进程，否则会跳过 mutex finally。
+    # 嵌套时关掉暂停提示，避免与外层 install 页脚重复。
+    $powershell = Join-Path $PSHOME "powershell.exe"
+    $previousNoPause = $env:HEIGE_NO_PAUSE
+    $previousHint = $env:HEIGE_SHOW_PAUSE_HINT
+    $env:HEIGE_NO_PAUSE = "1"
+    Remove-Item Env:HEIGE_SHOW_PAUSE_HINT -ErrorAction SilentlyContinue
     try {
-        & $ApplyScript
-        if (-not $?) { throw "Windows apply did not complete successfully" }
-    } catch {
-        throw "安装已完成，但首次应用失败，可重试 scripts\windows\apply.ps1：$($_.Exception.Message)"
+        $process = Start-Process -FilePath $powershell -ArgumentList @(
+            "-NoProfile",
+            "-ExecutionPolicy", "Bypass",
+            "-File", $ApplyScript
+        ) -Wait -PassThru -NoNewWindow
+    } finally {
+        if ($null -eq $previousNoPause -or $previousNoPause -eq "") {
+            Remove-Item Env:HEIGE_NO_PAUSE -ErrorAction SilentlyContinue
+        } else {
+            $env:HEIGE_NO_PAUSE = $previousNoPause
+        }
+        if ($null -eq $previousHint -or $previousHint -eq "") {
+            Remove-Item Env:HEIGE_SHOW_PAUSE_HINT -ErrorAction SilentlyContinue
+        } else {
+            $env:HEIGE_SHOW_PAUSE_HINT = $previousHint
+        }
+    }
+    if ($null -eq $process) {
+        throw "安装已完成，但首次应用未能启动，可重试 scripts\windows\apply.ps1"
+    }
+    if ([int]$process.ExitCode -ne 0) {
+        throw "安装已完成，但首次应用失败，可重试 scripts\windows\apply.ps1（退出码 $($process.ExitCode)）"
     }
 }
 
@@ -593,5 +622,8 @@ function Invoke-HeiGeWindowsInstall {
 }
 
 if ($MyInvocation.InvocationName -ne ".") {
-    Invoke-HeiGeWindowsInstall @PSBoundParameters
+    $boundParameters = $PSBoundParameters
+    Invoke-HeiGeBatEntrypoint {
+        Invoke-HeiGeWindowsInstall @boundParameters
+    }
 }
