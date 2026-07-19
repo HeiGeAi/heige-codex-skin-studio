@@ -2070,7 +2070,7 @@ test("an interactive controller tick uses the one-second cadence before the next
   assert.deepEqual(waits, [1_000, 1_000]);
 });
 
-test("Windows background readiness verifier waits up to thirty-five seconds for handshake", async () => {
+test("Windows background readiness verifier covers a ninety-second cold task start", async () => {
   const waits = [];
   const verifier = createBackgroundReadinessVerifier({
     stateRoot: "/private/state",
@@ -2093,7 +2093,7 @@ test("Windows background readiness verifier waits up to thirty-five seconds for 
     pid: 73001,
     startedAt: "2026-07-19T00:00:00.000Z",
   });
-  assert.deepEqual(waits, [35_000]);
+  assert.deepEqual(waits, [90_000]);
 });
 
 function postControl(control, input) {

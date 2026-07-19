@@ -661,6 +661,60 @@ test("Windows operation lease publishes atomically and releases its exact privat
   assert.equal(securityEvents.some(([action]) => action === "verify-file"), true);
 });
 
+test("Windows owner publication batches ACL work without duplicate read verification", async (t) => {
+  const { root } = await fixture(t);
+  const stateRoot = join(root, "batched-windows-state");
+  const lockPath = join(stateRoot, "operation.lock");
+  const batches = [];
+  const security = {
+    ...fakeWindowsSecurity(),
+    async batch(operations) {
+      batches.push(operations.map((entry) => entry.action));
+      return operations.map(() => undefined);
+    },
+  };
+  const lease = await acquireOperationLock(acquisitionOptions(lockPath, {
+    platform: "win32",
+    stateRoot,
+    windowsSecurity: security,
+  }));
+  t.after(() => lease.release());
+
+  assert.deepEqual(batches, [
+    ["protect-directory", "verify-directory"],
+    ["protect-directory", "protect-file", "verify-directory", "verify-file"],
+    ["protect-directory", "protect-file", "verify-directory", "verify-file"],
+  ]);
+});
+
+test("Windows state root ACL is reused after its directory identity is verified", async (t) => {
+  const { root } = await fixture(t);
+  const stateRoot = join(root, "cached-windows-state");
+  const lockPath = join(stateRoot, "operation.lock");
+  const batches = [];
+  const security = {
+    ...fakeWindowsSecurity(),
+    async batch(operations) {
+      batches.push(operations.map((entry) => ({ ...entry })));
+      return operations.map(() => undefined);
+    },
+  };
+  const options = acquisitionOptions(lockPath, {
+    platform: "win32",
+    stateRoot,
+    windowsSecurity: security,
+  });
+
+  const first = await acquireOperationLock(options);
+  assert.equal(await first.release(), true);
+  const second = await acquireOperationLock(options);
+  t.after(() => second.release());
+
+  const stateRootBatches = batches.filter((operations) =>
+    operations.some((entry) => entry.path === stateRoot));
+  assert.equal(stateRootBatches.length, 1);
+});
+
 test("Windows operation lease safely migrates a current-user-owned legacy state root ACL", async (t) => {
   const { root } = await fixture(t);
   const stateRoot = join(root, "legacy-windows-state");

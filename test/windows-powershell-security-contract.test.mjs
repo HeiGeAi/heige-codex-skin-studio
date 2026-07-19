@@ -42,6 +42,15 @@ test("Windows bound resolver is token-directed and the runtime rejects foreign a
   );
 });
 
+test("Windows controller runtime probes listeners with netstat before loading NetTCPIP", async () => {
+  const runtime = await source("src/windows-runtime.mjs");
+  const netstat = runtime.indexOf("$netstat = Join-Path $env:SystemRoot");
+  const moduleImport = runtime.indexOf("Import-Module NetTCPIP");
+  assert.ok(netstat >= 0, "runtime snapshot must use the native netstat fast path");
+  assert.ok(moduleImport > netstat, "NetTCPIP must remain a fallback after netstat");
+  assert.match(runtime, /if \(-not \$netstatSucceeded\)/);
+});
+
 test("Windows PowerShell process mode traverses every owned node and rejects cycles", async () => {
   const entrypoints = await source("scripts/windows/lib/entrypoints.ps1");
   assert.match(entrypoints, /ownership cycle|归属环|进程图.*环/i);

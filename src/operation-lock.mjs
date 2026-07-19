@@ -22,7 +22,7 @@ import {
   sep,
 } from "node:path";
 
-import { createWindowsSecurityAdapter } from "./windows-secure-fs.mjs";
+import { windowsSecurityAdapter } from "./windows-secure-fs.mjs";
 
 const LOCK_SCHEMA_VERSION = 2;
 const QUARANTINE_SCHEMA_VERSION = 1;
@@ -2315,6 +2315,7 @@ async function compactOwnershipChain({
 const WINDOWS_OWNER_FILE = "owner.json";
 const WINDOWS_HEARTBEAT_FILE = "heartbeat.json";
 const WINDOWS_ARTIFACT_PREFIX = ".operation-lock.windows-";
+const preparedWindowsStateRoots = new WeakMap();
 
 async function windowsSecurityBatch(security, operations) {
   if (typeof security.batch === "function") {
@@ -2349,7 +2350,7 @@ async function windowsSecurityBatch(security, operations) {
 }
 
 function validateWindowsSecurity(value) {
-  const security = value ?? createWindowsSecurityAdapter();
+  const security = value ?? windowsSecurityAdapter();
   if (
     security === null ||
     typeof security !== "object" ||
@@ -2378,7 +2379,11 @@ function validateWindowsSecurity(value) {
   return security;
 }
 
-async function readWindowsOwnerDirectory(path, security, { allowMissing = false } = {}) {
+async function readWindowsOwnerDirectory(
+  path,
+  security,
+  { allowMissing = false, aclAlreadyVerified = false } = {},
+) {
   let directory;
   try {
     directory = await lstat(path, { bigint: true });
@@ -2402,13 +2407,15 @@ async function readWindowsOwnerDirectory(path, security, { allowMissing = false 
   if (!file.isFile() || file.isSymbolicLink() || file.size <= 0n || file.size > 64n * 1024n) {
     throw lockError("LOCK_MALFORMED", `Windows owner.json is not one bounded regular file: ${ownerPath}`);
   }
-  try {
-    await windowsSecurityBatch(security, [
-      { action: "verify-directory", path },
-      { action: "verify-file", path: ownerPath },
-    ]);
-  } catch (cause) {
-    throw lockError("LOCK_PERMISSIONS", `Windows owner ACL is not private: ${path}`, cause);
+  if (!aclAlreadyVerified) {
+    try {
+      await windowsSecurityBatch(security, [
+        { action: "verify-directory", path },
+        { action: "verify-file", path: ownerPath },
+      ]);
+    } catch (cause) {
+      throw lockError("LOCK_PERMISSIONS", `Windows owner ACL is not private: ${path}`, cause);
+    }
   }
   let handle;
   let raw;
@@ -2474,6 +2481,9 @@ async function prepareWindowsStateRoot(stateRoot, security) {
   if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
     throw lockError("LOCK_PATH_INVALID", `Windows state root must be a real directory: ${stateRoot}`);
   }
+  const prepared = preparedWindowsStateRoots.get(security);
+  const cached = prepared?.get(stateRoot);
+  if (cached?.dev === metadata.dev && cached?.ino === metadata.ino) return;
   try {
     await windowsSecurityBatch(security, [
       {
@@ -2485,6 +2495,9 @@ async function prepareWindowsStateRoot(stateRoot, security) {
   } catch (cause) {
     throw lockError("LOCK_PERMISSIONS", `Windows state root ACL is not private: ${stateRoot}`, cause);
   }
+  const roots = prepared ?? new Map();
+  roots.set(stateRoot, { dev: metadata.dev, ino: metadata.ino });
+  if (prepared === undefined) preparedWindowsStateRoots.set(security, roots);
 }
 
 async function writeWindowsOwnerStaging({ path, owner, security }) {
@@ -2494,10 +2507,6 @@ async function writeWindowsOwnerStaging({ path, owner, security }) {
     throw lockError("LOCK_STAGING_WRITE_FAILED", `could not create Windows owner staging ${path}`, cause);
   }
   try {
-    await windowsSecurityBatch(security, [
-      { action: "protect-directory", path },
-      { action: "verify-directory", path },
-    ]);
     const ownerPath = join(path, WINDOWS_OWNER_FILE);
     const handle = await open(ownerPath, "wx");
     try {
@@ -2507,10 +2516,12 @@ async function writeWindowsOwnerStaging({ path, owner, security }) {
       await handle.close();
     }
     await windowsSecurityBatch(security, [
+      { action: "protect-directory", path },
       { action: "protect-file", path: ownerPath },
+      { action: "verify-directory", path },
       { action: "verify-file", path: ownerPath },
     ]);
-    return await readWindowsOwnerDirectory(path, security);
+    return await readWindowsOwnerDirectory(path, security, { aclAlreadyVerified: true });
   } catch (error) {
     await rm(path, { recursive: true, force: true }).catch(() => {});
     if (error instanceof OperationLockError) throw error;
@@ -2804,12 +2815,16 @@ async function acquireWindowsOperationLock(options) {
         throw lockError("LOCK_PUBLISH_FAILED", "could not atomically publish Windows owner", error);
       }
       published = true;
-      // 发布后再保护一次：防止个别卷上 rename 重新引入继承 ACE。
+      // Reapply and verify in one PowerShell process after the atomic rename.
       await windowsSecurityBatch(security, [
         { action: "protect-directory", path: lockPath },
         { action: "protect-file", path: join(lockPath, WINDOWS_OWNER_FILE) },
+        { action: "verify-directory", path: lockPath },
+        { action: "verify-file", path: join(lockPath, WINDOWS_OWNER_FILE) },
       ]);
-      const claim = await readWindowsOwnerDirectory(lockPath, security);
+      const claim = await readWindowsOwnerDirectory(lockPath, security, {
+        aclAlreadyVerified: true,
+      });
       if (!sameWindowsClaim(staging, claim)) {
         throw lockError("LOCK_PUBLISH_VERIFY_FAILED", "published Windows owner changed before lease creation");
       }

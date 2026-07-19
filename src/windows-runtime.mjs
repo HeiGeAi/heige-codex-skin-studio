@@ -74,11 +74,16 @@ foreach ($record in $rawProcesses) {
 }
 $listeners = @()
 $connections = @()
+$netstatSucceeded = $false
 try {
-  Import-Module NetTCPIP -ErrorAction SilentlyContinue | Out-Null
-  $connections = @(Get-NetTCPConnection -State Listen -ErrorAction Stop | Where-Object { [int]$_.LocalPort -eq $port })
-} catch {
-  foreach ($line in @(netstat -ano -p tcp 2>$null)) {
+  $netstat = Join-Path $env:SystemRoot 'System32\netstat.exe'
+  if (-not (Test-Path -LiteralPath $netstat -PathType Leaf)) {
+    throw 'netstat.exe is unavailable'
+  }
+  $lines = @(& $netstat -ano -p tcp 2>$null)
+  if ($LASTEXITCODE -ne 0) { throw 'netstat.exe failed' }
+  $netstatSucceeded = $true
+  foreach ($line in $lines) {
     if ($line -notmatch '^\s*TCP\s+(\S+):(\d+)\s+\S+\s+LISTENING\s+(\d+)\s*$') { continue }
     if ([int]$Matches[2] -ne $port) { continue }
     $connections += [pscustomobject]@{
@@ -87,6 +92,15 @@ try {
       LocalPort = [int]$port
     }
   }
+} catch {
+  $netstatSucceeded = $false
+}
+if (-not $netstatSucceeded) {
+  Import-Module NetTCPIP -ErrorAction SilentlyContinue | Out-Null
+  $connections = @(
+    Get-NetTCPConnection -State Listen -ErrorAction Stop |
+      Where-Object { [int]$_.LocalPort -eq $port }
+  )
 }
 foreach ($connection in $connections) {
   $owner = Get-Process -Id ([int]$connection.OwningProcess) -ErrorAction SilentlyContinue

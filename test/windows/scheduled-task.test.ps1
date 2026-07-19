@@ -66,6 +66,8 @@ try {
         Assert-Match ([regex]::Escape($script:Controller)) $definition.Action.Arguments
         Assert-Match ([regex]::Escape($script:ProductionTask)) $definition.Action.Arguments
         Assert-Match '\-Action run' $definition.Action.Arguments
+        Assert-Match '\-NodePath' $definition.Action.Arguments
+        Assert-Match ([regex]::Escape($script:Node)) $definition.Action.Arguments
         Assert-Match '\-AppIdentityToken' $definition.Action.Arguments
         Assert-Match ([regex]::Escape($script:AppIdentityToken)) $definition.Action.Arguments
         Assert-Match '\-WindowStyle Hidden' $definition.Action.Arguments
@@ -646,7 +648,7 @@ try {
                 New-Item -ItemType Directory -Path $stateDirectory -Force | Out-Null
                 [System.IO.File]::WriteAllText(
                     $inertController,
-                    'param([string]$Action, [string]$TaskName, [int]$Port, [string]$StateDirectory, [string]$AppIdentityToken); exit 0',
+                    'param([string]$Action, [string]$NodePath, [string]$TaskName, [int]$Port, [string]$StateDirectory, [string]$AppIdentityToken); exit 0',
                     (New-Object -TypeName System.Text.UTF8Encoding -ArgumentList $true)
                 )
                 $registered = Register-HeiGeScheduledTask -TaskName $TaskName -NodePath $nativePowerShell `

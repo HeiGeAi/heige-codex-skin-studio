@@ -1380,8 +1380,10 @@ export function createBackgroundReadinessVerifier({
     async verify({ revision, transitionNonce, handshakeRequest }) {
       verified = null;
       const notBefore = handshakeRequest?.notBefore;
-      // Windows 注册/拉起计划任务 + Node 冷启动 + 锁争用重试常超过 10s。
-      const timeoutMs = platform === "win32" ? 35_000 : 10_000;
+      // Windows 注册/拉起计划任务 + Node 冷启动 + 锁争用重试在部分 Store
+      // 环境会超过 35s。等待窗口必须覆盖真实冷启动，否则已经运行的后台任务
+      // 会被前台误判失败并补偿关闭。
+      const timeoutMs = platform === "win32" ? 90_000 : 10_000;
       const observed = await wait({
         stateRoot,
         expected: expected({ revision, transitionNonce }),

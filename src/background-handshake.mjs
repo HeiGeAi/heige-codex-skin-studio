@@ -711,7 +711,7 @@ export async function waitForBackgroundHandshake({
     throw new Error("foreground PID is invalid");
   }
   if (!Number.isFinite(notBefore)) throw new Error("handshake notBefore is invalid");
-  if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60_000) {
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120_000) {
     throw new Error("handshake timeout is invalid");
   }
   if (!Number.isInteger(pollIntervalMs) || pollIntervalMs < 1 || pollIntervalMs > timeoutMs) {

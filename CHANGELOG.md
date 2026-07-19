@@ -7,6 +7,8 @@
 - Windows 已激活会话的启动入口增加精确 CDP 归属与页面状态快速路径：皮肤已生效时跳过重复 doctor、进程清理和注入，实机热启动由约 95 秒降至约 4 秒。
 - Windows 状态目录 ACL 改为“先精确校验、仅不合规时修复”，避免每次启动递归重写权限；CDP 监听归属优先使用 `netstat`，仅在失败时加载较慢的 NetTCPIP 模块。
 - 新增 `apply-hidden.vbs`，开始菜单默认直接使用隐藏启动器并直达 `apply.ps1`，不再显示命令行窗口；脚本保持纯 ASCII，兼容 Windows Script Host 的 ANSI 解析。
+- Windows 后台任务握手窗口由 35 秒提升到 90 秒，覆盖 Store 环境实测约 37 秒的首次冷启动，避免任务已经运行却被误判失败并补偿关闭常驻。
+- Windows 操作锁复用同一安全适配器与已验证的状态目录身份，并把 owner 发布中的重复 ACL 校验由 5 批合并为 3 批；安全边界不变，同时减少 PowerShell 冷启动开销。
 
 ### 修复
 
@@ -19,6 +21,7 @@
 - Windows 运行时快照在不可变桌面身份校验前排除编辑器扩展和应用内置的无头 Codex CLI，避免 Cursor/VS Code/Antigravity 正在使用时阻断皮肤启动。
 - Windows ACL 校验器固定以 UTF-8 输出 JSON，修复中文用户名路径被 PowerShell 5.1 控制台编码改写后误报 `LOCK_PERMISSIONS`。
 - Windows ACL 回退改用安装器已验证的 `icacls /inheritance:r /grant:r` 形式，并由后续精确校验确认 owner 与唯一授权规则，修复无提升权限会话中的无效 `/setowner` 组合。
+- Windows 计划任务现在显式保存并传入注册时已验证的 Node 绝对路径，修复任务计划程序环境未刷新 PATH 时任务以代码 1 立即退出、常驻开关长期等待后回退的问题。
 - 发布哈希更新器兼容 Windows 不支持目录 `fsync` 的行为，文件自身仍在原子替换前完成同步。
 
 ### 同步说明

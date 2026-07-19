@@ -5,6 +5,7 @@
     [string]$TaskName = "HeiGe Codex Skin Studio Controller",
     [ValidateRange(1024, 65535)]
     [int]$Port = 9341,
+    [string]$NodePath,
     [string]$StateDirectory,
     [string]$AppIdentityToken,
     [Nullable[long]]$ExpectedRevision,
@@ -111,7 +112,21 @@ try {
         $boundIdentityToken,
         [System.EnvironmentVariableTarget]::Process
     )
-    $node = Get-NodeRuntime -App $app
+    if ($NodePath) {
+        if (-not [System.IO.Path]::IsPathRooted($NodePath) -or
+            -not (Test-Path -LiteralPath $NodePath -PathType Leaf)) {
+            throw "NodePath must identify one absolute executable file"
+        }
+        $NodePath = [System.IO.Path]::GetFullPath($NodePath)
+        $versionText = [string]((& $NodePath --version 2>&1) -join "")
+        if ($LASTEXITCODE -ne 0 -or $versionText.Trim() -notmatch '^v(\d+)\.(\d+)\.(\d+)(?:[-+].+)?$' -or
+            [int]$Matches[1] -lt 22) {
+            throw "NodePath must provide Node.js 22 or newer"
+        }
+        $node = [pscustomobject]@{ Path = $NodePath }
+    } else {
+        $node = Get-NodeRuntime -App $app
+    }
 
     if ($Action -eq "register") {
         Register-HeiGeScheduledTask -TaskName $TaskName -NodePath $node.Path `

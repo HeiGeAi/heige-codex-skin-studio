@@ -233,6 +233,8 @@ function New-HeiGeTaskDefinition {
         (ConvertTo-HeiGeQuotedArgument -Value $ControllerPath),
         "-Action",
         "run",
+        "-NodePath",
+        (ConvertTo-HeiGeQuotedArgument -Value $NodePath),
         "-TaskName",
         (ConvertTo-HeiGeQuotedArgument -Value $TaskName),
         "-Port",
