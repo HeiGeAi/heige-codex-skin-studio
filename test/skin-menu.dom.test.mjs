@@ -904,7 +904,31 @@ test("dispose aborts an active FileReader and its stale callback becomes inert",
   assert.equal(page.window.localStorage.getItem("heigeCodexCustomTheme"), null);
 });
 
-test("browser upload rejects byte and dimension bombs before decode", async (t) => {
+test("browser upload accepts source images larger than 8 MiB", async (t) => {
+  const page = await menuWindow();
+  t.after(() => page.close());
+  const restore = installSuccessfulImagePipeline(page, {
+    decodedWidth: 10,
+    decodedHeight: 10,
+  });
+  t.after(restore);
+
+  await upload(page, {
+    bytes: png(10, 10, (8 * 1024 * 1024) + 1),
+    name: "large-source.png",
+  });
+
+  assert.equal(
+    page.document.documentElement.dataset.heigeCodexSkin,
+    "uploaded-skin-0123456789abcdef",
+  );
+  assert.doesNotMatch(
+    page.document.querySelector('[data-heige-role="upload-alert"]').textContent,
+    /8 MiB|8388608/,
+  );
+});
+
+test("browser upload still rejects dimension bombs before decode", async (t) => {
   const page = await menuWindow();
   t.after(() => page.close());
   let imageCalls = 0;
@@ -912,16 +936,7 @@ test("browser upload rejects byte and dimension bombs before decode", async (t) 
   page.window.Image = class CountingImage { constructor() { imageCalls += 1; } };
   page.window.FileReader = class CountingReader { constructor() { readerCalls += 1; } };
 
-  await upload(page, {
-    bytes: png(10, 10),
-    size: (8 * 1024 * 1024) + 1,
-  });
   const alert = page.document.querySelector('[data-heige-role="upload-alert"]');
-  assert.match(alert.textContent, /8 MiB|8388608/);
-  assert.equal(page.backdrop.hidden, false);
-  assert.equal(imageCalls, 0);
-  assert.equal(readerCalls, 0);
-
   await upload(page, { bytes: png(8000, 8000, 1024) });
   assert.match(alert.textContent, /像素|pixel/i);
   assert.equal(imageCalls, 0);

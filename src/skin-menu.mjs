@@ -832,7 +832,6 @@ export function buildSkinMenuScript({
   };
   const validateBrowserImage = (input, expectedMime) => {
     const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
-    if (bytes.byteLength > data.limits.assetBytes) throw imageError("图片超过 8388608 bytes（8 MiB）");
     const metadata = parseBrowserImage(bytes);
     if (expectedMime && metadata.mime !== expectedMime) throw imageError("MIME 不匹配：期望 " + expectedMime + "，实际 " + metadata.mime);
     if (metadata.width > data.limits.imageWidth) throw imageError("图片宽度 width 超过 " + data.limits.imageWidth);
@@ -844,7 +843,7 @@ export function buildSkinMenuScript({
     return metadata;
   };
   const parseDataUrlImage = (dataUrl) => {
-    if (typeof dataUrl !== "string" || dataUrl.length > 12_000_000 || !dataUrl.startsWith("data:image/")) throw imageError("图片 data URL 无效或过大");
+    if (typeof dataUrl !== "string" || !dataUrl.startsWith("data:image/")) throw imageError("图片 data URL 无效");
     const marker = ";base64,";
     const split = dataUrl.indexOf(marker);
     if (split < 0) throw imageError("图片 data URL 必须使用 base64");
@@ -853,7 +852,6 @@ export function buildSkinMenuScript({
     let binary;
     try { binary = atob(dataUrl.slice(split + marker.length)); }
     catch { throw imageError("图片 base64 无效"); }
-    if (binary.length > data.limits.assetBytes) throw imageError("图片超过 8388608 bytes（8 MiB）");
     const bytes = new Uint8Array(binary.length);
     for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
     return { bytes, metadata: validateBrowserImage(bytes, mime) };
@@ -1297,7 +1295,6 @@ export function buildSkinMenuScript({
   const uploadFile = async (file) => {
     assertCurrent();
     if (!Number.isSafeInteger(file.size) || file.size < 1) throw imageError("图片文件大小无效");
-    if (file.size > data.limits.assetBytes) throw imageError("图片超过 8388608 bytes（8 MiB）");
     if (typeof file.arrayBuffer !== "function") throw imageError("浏览器无法读取图片文件");
     const expectedMime = expectedUploadMime(file);
     const arrayBuffer = await boundedOperation(() => file.arrayBuffer(), "文件读取");
