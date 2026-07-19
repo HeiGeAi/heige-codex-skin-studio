@@ -19,6 +19,19 @@ function copy(value, fallback = "") {
 
 const DATA_URL = /^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/=]+$/i;
 
+function isDarkAppearance(theme) {
+  if (theme.appearance === "dark") return true;
+  if (theme.appearance === "light") return false;
+  const surface = theme.colors?.surface ?? "";
+  if (/^#[0-9a-f]{6}$/i.test(surface)) {
+    const r = Number.parseInt(surface.slice(1, 3), 16);
+    const g = Number.parseInt(surface.slice(3, 5), 16);
+    const b = Number.parseInt(surface.slice(5, 7), 16);
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b <= 128;
+  }
+  return false;
+}
+
 export function buildSkinCss({ theme, heroDataUrl, logoDataUrl = null, polaroidDataUrl = null }) {
   if (!DATA_URL.test(heroDataUrl)) {
     throw new Error("hero 必须是本地 PNG、JPEG 或 WebP 数据");
@@ -36,15 +49,18 @@ export function buildSkinCss({ theme, heroDataUrl, logoDataUrl = null, polaroidD
     text: color(theme.colors?.text, DEFAULT_COLORS.text),
   };
   const id = String(theme.id ?? "custom").replace(/[^a-z0-9_-]/gi, "");
+  const dark = isDarkAppearance(theme);
+  const nativeInk = dark ? "#e8ecf0" : "#172033";
+  const textShadowColor = dark ? "rgba(0,0,0,.6)" : "white";
 
   return `/* HEIGE_CODEX_SKIN:${id} */
 :root[data-codex-window-type="electron"] {
-  color-scheme: light !important;
+  color-scheme: ${dark ? "dark" : "light"} !important;
   --heige-accent: ${colors.accent};
   --heige-secondary: ${colors.secondary};
   --heige-surface: ${colors.surface};
   --heige-text: ${colors.text};
-  --heige-native-light-ink: #172033;
+  --heige-native-ink: ${nativeInk};
   --color-background-surface: color-mix(in srgb, var(--heige-surface) 90%, transparent) !important;
   --color-background-panel: color-mix(in srgb, var(--heige-surface) 94%, transparent) !important;
   --color-background-button-primary: var(--heige-accent) !important;
@@ -69,7 +85,7 @@ export function buildSkinCss({ theme, heroDataUrl, logoDataUrl = null, polaroidD
   content: ${copy(theme.copy?.brand)};
   color: var(--heige-accent);
   font: 800 clamp(16px, 2vw, 30px)/1.2 ui-rounded, system-ui;
-  text-shadow: 0 2px 10px white;
+  text-shadow: 0 2px 10px ${textShadowColor};
   pointer-events: none;
 }
 
@@ -82,7 +98,7 @@ export function buildSkinCss({ theme, heroDataUrl, logoDataUrl = null, polaroidD
   content: ${copy(theme.copy?.headline)};
   color: var(--heige-text);
   font: 750 clamp(18px, 2.7vw, 42px)/1.15 ui-rounded, system-ui;
-  text-shadow: 0 2px 12px white;
+  text-shadow: 0 2px 12px ${textShadowColor};
   pointer-events: none;
 }
 
@@ -143,17 +159,17 @@ export function buildSkinCss({ theme, heroDataUrl, logoDataUrl = null, polaroidD
 }
 
 /*
- * Codex 的原生信息看板与顶部雾面按钮保持浅色背景。
- * 深色主题不能让这些局部表面继续继承浅色主题正文，否则会失去对比度。
+ * Codex 的原生信息看板与顶部雾面按钮。
+ * 浅色主题使用深色墨水，暗色主题使用浅色墨水，保持可读对比度。
  */
 [data-pip-obstacle="thread-summary-panel"] button,
 [data-pip-obstacle="thread-summary-panel"] .text-fade-truncate,
 [data-pip-obstacle="thread-summary-panel"] .text-token-foreground {
-  color: var(--heige-native-light-ink) !important;
+  color: var(--heige-native-ink) !important;
 }
 
 div.no-drag.pointer-events-auto button.bg-token-bg-fog {
-  color: var(--heige-native-light-ink) !important;
+  color: var(--heige-native-ink) !important;
 }
 ${logoDataUrl === null ? "" : `
 /* 侧栏工作区标题换品牌 Logo，按钮仍可点开模式切换 */

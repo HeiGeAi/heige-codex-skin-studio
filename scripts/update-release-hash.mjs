@@ -49,7 +49,15 @@ function sameSnapshot(info, snapshot) {
 
 async function syncDirectory(path) {
   const handle = await open(path, "r");
-  try { await handle.sync(); } finally { await handle.close(); }
+  try {
+    await handle.sync();
+  } catch (error) {
+    // Windows permits opening directories but does not support fsync on them.
+    // The file itself was already synced before the atomic rename.
+    if (process.platform !== "win32" || !["EPERM", "EACCES"].includes(error?.code)) throw error;
+  } finally {
+    await handle.close();
+  }
 }
 
 export async function updateReleaseHash({ artifact, disposition } = {}) {

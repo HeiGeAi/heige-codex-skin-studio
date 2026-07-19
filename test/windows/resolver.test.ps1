@@ -296,6 +296,22 @@ process.stdout.write(JSON.stringify(app));
         Assert-False (Test-HeiGeCodexInternalBackendPath -Path $script:Win32Exe)
     }
 
+    Test-Case "Editor extension Codex CLIs are not treated as desktop installs" {
+        foreach ($editor in @(".cursor", ".vscode", ".antigravity")) {
+            $cli = Join-Path $script:Root "$editor\extensions\openai.chatgpt-0.4.5-win32-x64\bin\windows-x86_64\codex.exe"
+            Assert-True (Test-HeiGeCodexInternalBackendPath -Path $cli)
+        }
+
+        $antigravityCli = Join-Path $script:Root ".antigravity\extensions\openai.chatgpt-0.4.5-win32-x64\bin\windows-x86_64\codex.exe"
+        $processes = @(
+            [pscustomobject]@{ Path = $script:CodexExe; Id = 46; ProcessName = "Codex" },
+            [pscustomobject]@{ Path = $antigravityCli; Id = 47; ProcessName = "codex" }
+        )
+        $app = Resolve-CodexApp -OverridePath $null -Packages $script:Packages -ProcessProvider { $processes }
+        Assert-Equal "StoreAumid" $app.Kind
+        Assert-Equal $script:Package2Root $app.InstallPath
+    }
+
     Test-Case "Store alias is preferred when it exists" {
         $alias = Join-Path $script:LocalAppData ("Microsoft\WindowsApps\" + $script:Packages[1].PackageFamilyName + "\Codex.exe")
         New-Item -ItemType Directory -Path (Split-Path $alias -Parent) -Force | Out-Null

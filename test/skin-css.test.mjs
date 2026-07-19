@@ -73,14 +73,14 @@ test("builds one fast generic skin from a theme and image data URL", () => {
     /:has\(/,
     "皮肤样式禁用 :has()，流式输出高频 DOM 变更下反向失效扫描代价过高",
   );
-  assert.match(css, /--heige-native-light-ink:\s*#172033/);
+  assert.match(css, /--heige-native-ink:\s*#172033/);
   assert.match(
     css,
-    /\[data-pip-obstacle="thread-summary-panel"\]\s+button,[\s\S]*\[data-pip-obstacle="thread-summary-panel"\]\s+\.text-fade-truncate,[\s\S]*\[data-pip-obstacle="thread-summary-panel"\]\s+\.text-token-foreground\s*\{[^}]*color:\s*var\(--heige-native-light-ink\)\s*!important/s,
+    /\[data-pip-obstacle="thread-summary-panel"\]\s+button,[\s\S]*\[data-pip-obstacle="thread-summary-panel"\]\s+\.text-fade-truncate,[\s\S]*\[data-pip-obstacle="thread-summary-panel"\]\s+\.text-token-foreground\s*\{[^}]*color:\s*var\(--heige-native-ink\)\s*!important/s,
   );
   assert.match(
     css,
-    /div\.no-drag\.pointer-events-auto\s+button\.bg-token-bg-fog\s*\{[^}]*color:\s*var\(--heige-native-light-ink\)\s*!important/s,
+    /div\.no-drag\.pointer-events-auto\s+button\.bg-token-bg-fog\s*\{[^}]*color:\s*var\(--heige-native-ink\)\s*!important/s,
   );
   assert.doesNotMatch(
     css,
@@ -112,4 +112,32 @@ test("rejects 5 and 7 digit hex colors that CSS cannot parse", () => {
       `${good} 应通过`,
     );
   }
+});
+
+test("dark theme uses dark color-scheme and light native ink", () => {
+  const css = buildSkinCss({
+    theme: {
+      id: "dalao-dianyan",
+      appearance: "dark",
+      colors: { accent: "#e09a52", secondary: "#9aa3b0", surface: "#111111", text: "#f2e8da" },
+    },
+    heroDataUrl: "data:image/webp;base64,AAAA",
+  });
+
+  assert.match(css, /color-scheme:\s*dark\s*!important/);
+  assert.match(css, /--heige-native-ink:\s*#e8ecf0/);
+  assert.doesNotMatch(css, /text-shadow:[^;]*white/);
+});
+
+test("infers dark appearance from surface luminance when appearance is absent", () => {
+  const css = buildSkinCss({
+    theme: {
+      id: "custom-dark",
+      colors: { accent: "#aabbcc", secondary: "#ccbbaa", surface: "#1a1a1a", text: "#eeeeee" },
+    },
+    heroDataUrl: "data:image/webp;base64,AAAA",
+  });
+
+  assert.match(css, /color-scheme:\s*dark\s*!important/);
+  assert.match(css, /--heige-native-ink:\s*#e8ecf0/);
 });

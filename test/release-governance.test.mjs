@@ -126,7 +126,11 @@ test("release hash updater replaces exactly one marker atomically and rejects al
   const expected = createHash("sha256").update(bytes).digest("hex");
   assert.equal(await updateReleaseHash({ artifact, disposition }), expected);
   assert.match(await readFile(disposition, "utf8"), new RegExp(`${expected}$`, "m"));
-  assert.equal((await lstat(disposition)).mode & 0o777, 0o640);
+  const updatedInfo = await lstat(disposition);
+  assert.equal(updatedInfo.isFile(), true);
+  if (process.platform !== "win32") {
+    assert.equal(updatedInfo.mode & 0o777, 0o640);
+  }
   assert.equal(await updateReleaseHash({ artifact, disposition }), expected, "idempotent refresh");
 
   const duplicate = join(root, "duplicate.md");
@@ -135,8 +139,16 @@ test("release hash updater replaces exactly one marker atomically and rejects al
   await assert.rejects(updateReleaseHash({ artifact, disposition: duplicate }), /恰好包含一个/);
 
   const linked = join(root, "linked.md");
-  await symlink(disposition, linked);
-  await assert.rejects(updateReleaseHash({ artifact, disposition: linked }), /符号链接/);
+  let linkedCreated = false;
+  try {
+    await symlink(disposition, linked);
+    linkedCreated = true;
+  } catch (error) {
+    if (process.platform !== "win32" || !["EPERM", "EACCES"].includes(error?.code)) throw error;
+  }
+  if (linkedCreated) {
+    await assert.rejects(updateReleaseHash({ artifact, disposition: linked }), /符号链接/);
+  }
   assert.equal(await readFile(disposition, "utf8"), `# Release\n\n${MARKER_FOR_TEST(expected)}\n`);
 });
 

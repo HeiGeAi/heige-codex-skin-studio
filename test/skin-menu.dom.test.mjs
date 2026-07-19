@@ -1068,10 +1068,9 @@ test("CSP-blocked upload ACK upserts a formal user theme row", async (t) => {
   await page.flush();
   row.querySelector('[data-heige-role="theme-option"]').click();
   await page.flush();
-  assert.equal(
-    page.window.__heigeCodexSkinRuntime.status().controlRequest?.themeId,
-    themeId,
-  );
+  assert.equal(page.window.__heigeCodexSkinRuntime.status().controlRequest, null);
+  assert.equal(page.themeId, themeId);
+  assert.equal(page.window.localStorage.getItem("heigeCodexSkinSelected"), themeId);
 });
 
 test("remote persistence changes close inline confirmation after restoring focus", async (t) => {
@@ -1109,7 +1108,7 @@ test("a newer window ACK clears a queued persistence request without leaving the
   assert.equal(left.window.__heigeCodexSkinRuntime.status().controlRequest, null);
 });
 
-test("a newer persistence revision cancels a stale queued theme request while rows stay interactive", async (t) => {
+test("a newer persistence revision does not replace a locally selected theme", async (t) => {
   SharedBroadcastChannel.reset();
   const entries = [
     { id: "miku-488137", name: "Miku", accent: "#19c9e5", css: "html { color: #123456; }" },
@@ -1130,7 +1129,8 @@ test("a newer persistence revision cancels a stale queued theme request while ro
   await right.disablePersistence();
   await left.flush();
 
-  assert.equal(left.themeId, "miku-488137");
+  assert.equal(left.themeId, "night-city");
+  assert.equal(left.window.localStorage.getItem("heigeCodexSkinSelected"), "night-city");
   assert.equal(nightRow.disabled, false);
   assert.equal(left.window.__heigeCodexSkinRuntime.status().controlRequest, null);
 });
@@ -1294,7 +1294,7 @@ test("disposing the current generation removes its readability marker", async ()
   page.window.close();
 });
 
-test("a menu theme choice renders immediately while durable confirmation is pending", async (t) => {
+test("a menu theme choice is saved locally without waiting for durable confirmation", async (t) => {
   const pending = deferredResponse();
   const page = await menuWindow({
     persistenceEnabled: false,
@@ -1312,15 +1312,15 @@ test("a menu theme choice renders immediately while durable confirmation is pend
 
   assert.equal(page.themeId, "night-city");
   assert.equal(page.backdrop.hidden, false);
-  assert.equal(page.saveState.dataset.state, "saving");
-  assert.match(page.saveState.textContent, /正在保存/);
+  assert.equal(page.saveState.dataset.state, "saved");
+  assert.equal(page.saveState.textContent, "已本地切换");
   assert.equal(page.currentHero.dataset.themeId, "night-city");
-  assert.equal(page.window.localStorage.getItem("heigeCodexSkinSelected"), "miku-488137");
+  assert.equal(page.window.localStorage.getItem("heigeCodexSkinSelected"), "night-city");
   assert.equal(
     page.document.querySelector('[data-heige-theme-id="night-city"]').disabled,
-    true,
+    false,
   );
-  assert.equal(page.window.__heigeCodexSkinRuntime.status().themeTransitionPending, true);
+  assert.equal(page.window.__heigeCodexSkinRuntime.status().themeTransitionPending, false);
 
   pending.resolve(jsonResponse(200, {
     ok: true,
@@ -1439,7 +1439,7 @@ test("a menu theme choice persists the authoritative theme revision", async (t) 
   assert.equal(page.window.localStorage.getItem("heigeCodexSkinSelected"), "night-city");
 });
 
-test("a renderer-blocked theme request keeps its optimistic theme until controller confirmation", async (t) => {
+test("a renderer-blocked theme request keeps the local theme without controller confirmation", async (t) => {
   const page = await menuWindow({
     persistenceEnabled: false,
     revision: 7,
@@ -1453,28 +1453,20 @@ test("a renderer-blocked theme request keeps its optimistic theme until controll
 
   await page.pickTheme("night-city");
 
-  const request = page.window.__heigeCodexSkinRuntime.status().controlRequest;
-  assert.deepEqual(JSON.parse(JSON.stringify(request)), {
-    schemaVersion: 1,
-    requestId: request.requestId,
-    action: "set-theme",
-    capability: request.capability,
-    expectedRevision: 7,
-    themeId: "night-city",
-  });
-  assert.match(request.requestId, /^[0-9a-f]{32}$/);
-  assert.match(request.capability, /^[A-Za-z0-9_-]{43}$/);
+  assert.equal(page.window.__heigeCodexSkinRuntime.status().controlRequest, null);
   assert.equal(page.themeId, "night-city");
-  assert.equal(page.window.localStorage.getItem("heigeCodexSkinSelected"), "miku-488137");
-  assert.match(page.alert.textContent, /后台确认/);
-  assert.equal(page.window.__heigeCodexSkinRuntime.status().themeTransitionPending, true);
+  assert.equal(page.window.localStorage.getItem("heigeCodexSkinSelected"), "night-city");
+  assert.equal(page.alert.textContent, "");
+  assert.equal(page.saveState.dataset.state, "saved");
+  assert.equal(page.saveState.textContent, "已本地切换");
+  assert.equal(page.window.__heigeCodexSkinRuntime.status().themeTransitionPending, false);
   assert.equal(
     page.document.querySelector('[data-heige-theme-id="night-city"]').disabled,
     false,
   );
 });
 
-test("renderer fallback stays interactive and coalesces rapid theme choices to the latest one", async (t) => {
+test("rapid local-first theme choices stay interactive and keep the latest one", async (t) => {
   const page = await menuWindow({
     persistenceEnabled: false,
     revision: 7,
@@ -1497,17 +1489,15 @@ test("renderer fallback stays interactive and coalesces rapid theme choices to t
   await page.pickTheme("dawn-city");
 
   assert.equal(page.themeId, "dawn-city");
-  assert.equal(
-    page.window.__heigeCodexSkinRuntime.status().controlRequest.themeId,
-    "dawn-city",
-  );
+  assert.equal(page.window.localStorage.getItem("heigeCodexSkinSelected"), "dawn-city");
+  assert.equal(page.window.__heigeCodexSkinRuntime.status().controlRequest, null);
   assert.equal(
     page.document.querySelector('[data-heige-theme-id="night-city"]').disabled,
     false,
   );
 });
 
-test("a delivered theme selection ACK clears the fallback queue as saved", async (t) => {
+test("theme switching does not enqueue an ACK while user-theme operations retain their callback", async (t) => {
   const page = await menuWindow({
     persistenceEnabled: false,
     revision: 7,
@@ -1522,34 +1512,16 @@ test("a delivered theme selection ACK clears the fallback queue as saved", async
   await page.openThemeCenter();
   await page.pickTheme("night-city");
 
-  const pending = page.window.__heigeCodexSkinRuntime.status().controlRequest;
-  assert.equal(pending.action, "set-theme");
-  assert.equal(pending.themeId, "night-city");
-  assert.equal(page.saveState.dataset.state, "saving");
-  assert.match(page.alert.textContent, /正在等待后台确认/);
-
-  assert.equal(
-    page.window.__heigeCodexSkinRuntime.receiveThemeSelectionResult({
-      schemaVersion: 1,
-      requestId: pending.requestId,
-      themeId: "night-city",
-      revision: 8,
-      persistenceEnabled: false,
-    }),
-    true,
-  );
-  await page.flush();
-
   assert.equal(page.window.__heigeCodexSkinRuntime.status().controlRequest, null);
-  assert.equal(page.controlRevision, 8);
+  assert.equal(typeof page.window.__heigeCodexSkinRuntime.receiveThemeSelectionResult, "function");
   assert.equal(page.themeId, "night-city");
   assert.equal(page.window.localStorage.getItem("heigeCodexSkinSelected"), "night-city");
   assert.equal(page.saveState.dataset.state, "saved");
-  assert.equal(page.saveState.textContent, "已保存");
-  assert.match(page.alert.textContent, /主题选择已保存/);
+  assert.equal(page.saveState.textContent, "已本地切换");
+  assert.equal(page.alert.textContent, "");
 });
 
-test("an authoritative formal theme replaces stale formal storage during background repair", async (t) => {
+test("a valid locally stored formal theme wins during background repair", async (t) => {
   const page = await menuWindow({
     activeId: "night-city",
     preferStored: true,
@@ -1563,8 +1535,8 @@ test("an authoritative formal theme replaces stale formal storage during backgro
   });
   t.after(() => page.close());
 
-  assert.equal(page.themeId, "night-city");
-  assert.equal(page.window.localStorage.getItem("heigeCodexSkinSelected"), "night-city");
+  assert.equal(page.themeId, "miku-488137");
+  assert.equal(page.window.localStorage.getItem("heigeCodexSkinSelected"), "miku-488137");
 });
 
 test("background repair prefers durable launcher theme over a leftover local quick image", async (t) => {
@@ -1596,7 +1568,7 @@ test("background repair prefers durable launcher theme over a leftover local qui
   assert.equal(page.window.localStorage.getItem("heigeCodexSkinSelected"), "night-city");
 });
 
-test("a rejected theme request leaves the renderer unchanged and refreshes its revision", async (t) => {
+test("a rejected background save keeps the local theme and refreshes its revision", async (t) => {
   const page = await menuWindow({
     persistenceEnabled: false,
     revision: 7,
@@ -1615,13 +1587,13 @@ test("a rejected theme request leaves the renderer unchanged and refreshes its r
 
   await page.pickTheme("night-city");
 
-  assert.equal(page.themeId, "miku-488137");
-  assert.equal(page.window.localStorage.getItem("heigeCodexSkinSelected"), "miku-488137");
+  assert.equal(page.themeId, "night-city");
+  assert.equal(page.window.localStorage.getItem("heigeCodexSkinSelected"), "night-city");
   assert.equal(page.controlRevision, 8);
-  assert.equal(page.alert.textContent, "状态已发生变化，请重试");
-  assert.equal(page.currentHero.dataset.themeId, "miku-488137");
-  assert.equal(page.saveState.dataset.state, "error");
-  assert.match(page.saveState.textContent, /未保存|重试/);
+  assert.equal(page.alert.textContent, "");
+  assert.equal(page.currentHero.dataset.themeId, "night-city");
+  assert.equal(page.saveState.dataset.state, "saved");
+  assert.equal(page.saveState.textContent, "已本地切换");
   assert.equal(
     page.document.querySelector('[data-heige-theme-id="night-city"]').disabled,
     false,
@@ -1649,11 +1621,11 @@ test("an idempotent theme ACK can restore a formal theme over a local quick imag
 
   assert.equal(page.themeId, "miku-488137");
   assert.equal(page.controlRevision, 7);
-  assert.match(page.alert.textContent, /已恢复启动器主题|主题选择已保存/);
-  assert.match(page.saveState.textContent, /已确认启动器主题|已保存/);
+  assert.equal(page.alert.textContent, "");
+  assert.equal(page.saveState.textContent, "已保存");
 });
 
-test("custom quick image then another formal theme shows saving and persists after ACK", async (t) => {
+test("custom quick image then another formal theme switches locally without waiting for ACK", async (t) => {
   const custom = {
     name: "Local image",
     dataUrl: `data:image/png;base64,${png(1, 1).toString("base64")}`,
@@ -1694,13 +1666,13 @@ test("custom quick image then another formal theme shows saving and persists aft
   const pickPromise = page.pickTheme("night-city");
   await page.flush();
   assert.equal(page.themeId, "night-city");
-  assert.equal(page.saveState.dataset.state, "saving");
-  assert.match(page.saveState.textContent, /正在保存/);
+  assert.equal(page.saveState.dataset.state, "saved");
+  assert.equal(page.saveState.textContent, "已本地切换");
   assert.equal(
     page.document.querySelector('[data-heige-theme-id="night-city"]').disabled,
-    true,
+    false,
   );
-  assert.equal(page.window.localStorage.getItem("heigeCodexSkinSelected"), "custom-upload");
+  assert.equal(page.window.localStorage.getItem("heigeCodexSkinSelected"), "night-city");
 
   pending.resolve(jsonResponse(200, {
     ok: true,
@@ -1716,7 +1688,7 @@ test("custom quick image then another formal theme shows saving and persists aft
   assert.equal(page.window.localStorage.getItem("heigeCodexSkinSelected"), "night-city");
   assert.equal(page.controlRevision, 8);
   assert.equal(page.saveState.dataset.state, "saved");
-  assert.match(page.alert.textContent, /主题选择已保存/);
+  assert.equal(page.alert.textContent, "");
 });
 
 test("broadcast protocol rejects loops stale sequences unknown fields and malformed values", async (t) => {

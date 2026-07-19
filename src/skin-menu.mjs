@@ -1430,7 +1430,6 @@ export function buildSkinMenuScript({
     let persistenceEnabled = data.control.persistenceEnabled;
     let controlRevision = data.control.revision;
     let pending = false;
-    let optimisticPreviousThemeId = null;
     let controlRequestTimeout = null;
     const themeEndpoint = data.control.endpoint.slice(0, -"/v1/persistence".length) + "/v1/theme";
     const userThemeEndpoint = data.control.endpoint.slice(0, -"/v1/persistence".length) + "/v1/user-theme";
@@ -1578,7 +1577,6 @@ export function buildSkinMenuScript({
       assertCurrent();
       const pendingRequest = controlRequest;
       if (
-        pendingRequest?.action !== "set-theme" &&
         pendingRequest?.action !== "publish-user-theme" &&
         pendingRequest?.action !== "delete-user-theme"
       ) return false;
@@ -1593,9 +1591,7 @@ export function buildSkinMenuScript({
         || result.revision < pendingRequest.expectedRevision
         || result.revision < controlRevision
       ) return false;
-      if (pendingRequest.action === "set-theme") {
-        if (result.themeId !== pendingRequest.themeId) return false;
-      } else if (typeof result.themeId !== "string" || result.themeId.length === 0) {
+      if (typeof result.themeId !== "string" || result.themeId.length === 0) {
         return false;
       }
       const keys = Object.keys(result).sort();
@@ -1607,7 +1603,6 @@ export function buildSkinMenuScript({
       clearControlRequest();
       persistenceEnabled = result.persistenceEnabled;
       controlRevision = result.revision;
-      optimisticPreviousThemeId = null;
       themePending = false;
       for (const item of rows.values()) item.disabled = false;
       if (pendingRequest.action === "delete-user-theme") {
@@ -1641,10 +1636,6 @@ export function buildSkinMenuScript({
         }
         paintSaveState("saved", "已保存");
         showAlert("自定义主题已保存到启动器。", "success");
-      } else {
-        renderThemeSelection(result.themeId, true, false);
-        paintSaveState("saved", "已保存");
-        showAlert("主题选择已保存。", "success");
       }
       paintPersistence();
       return true;
@@ -1730,21 +1721,8 @@ export function buildSkinMenuScript({
       if (themeId === data.nativeSel) clearTheme(persist, broadcast);
       else setTheme(themeId, persist, broadcast);
     };
-    const rollbackOptimisticTheme = () => {
-      if (optimisticPreviousThemeId === null) return;
-      const previousThemeId = optimisticPreviousThemeId;
-      optimisticPreviousThemeId = null;
-      renderThemeSelection(previousThemeId, false, false);
-    };
     const queueControlRequest = (request) => {
-      if (controlRequest !== null) {
-        if (
-          controlRequest.action !== "set-theme"
-          || request.action !== "set-theme"
-          || controlRequest.expectedRevision !== request.expectedRevision
-        ) return false;
-        clearControlRequest();
-      }
+      if (controlRequest !== null) return false;
       controlRequest = request;
       // 常驻 CDP 兜底不宜拖太久；主题 / 用户主题发布仍保留较长窗口。
       const fallbackTimeoutMs = request.action === "set-persistence" ? 20_000 : 60_000;
@@ -1761,7 +1739,6 @@ export function buildSkinMenuScript({
           themePending = false;
           for (const item of rows.values()) item.disabled = false;
         } else {
-          rollbackOptimisticTheme();
           paintSaveState("error", "未保存，请重试");
           themePending = false;
           for (const item of rows.values()) item.disabled = false;
@@ -1776,34 +1753,20 @@ export function buildSkinMenuScript({
       assertCurrent();
       const currentThemeId = document.documentElement.dataset.heigeCodexSkin ?? data.nativeSel;
       if (themeId === currentThemeId) return false;
-      // HTTP 进行中禁止重入；已排队 CDP 兜底时允许合并到最新主题选择。
-      if (themePending && controlRequest?.action !== "set-theme") return false;
       if (
         themeId !== data.nativeSel &&
         !themes.some((theme) => theme.id === themeId)
       ) return false;
       const requestRevision = controlRevision;
-      const fallbackRequest = {
-        schemaVersion: 1,
-        requestId: newRequestId(),
-        action: "set-theme",
-        capability: data.control.token,
-        expectedRevision: requestRevision,
-        themeId,
-      };
-      if (optimisticPreviousThemeId === null) {
-        optimisticPreviousThemeId = currentThemeId;
-      }
-      const savingStartedAt = Date.now();
-      paintSaveState("saving", "正在保存启动器主题…");
-      renderThemeSelection(themeId, false, false);
-      themePending = true;
-      let queued = false;
+      const requestId = newRequestId();
+      // 主题选择是前端优先操作：当前 renderer 与本地选择立即生效，
+      // 后台提交只负责静默保存，不能决定或回退用户已经看到的主题。
+      renderThemeSelection(themeId, true, true);
+      paintSaveState("saved", "已本地切换");
       hideAlert();
-      for (const item of rows.values()) item.disabled = true;
       const abortController = childController();
-      // 主题提交含进程探测与校验，3s 过短会误走 CDP 兜底并触发 reinject，把打开中的主题中心拆掉。
       const timeoutId = later(() => abortController.abort(), 15000);
+      void (async () => {
       try {
         const response = await fetch(themeEndpoint, {
           method: "POST",
@@ -1819,7 +1782,7 @@ export function buildSkinMenuScript({
           body: JSON.stringify({
             revision: requestRevision,
             themeId,
-            requestId: fallbackRequest.requestId,
+            requestId,
           }),
           signal: abortController.signal,
         });
@@ -1836,14 +1799,8 @@ export function buildSkinMenuScript({
             controlRevision = body.revision;
             publish("persistence", { enabled: persistenceEnabled, revision: controlRevision });
           }
-          const message = typeof body?.message === "string" && body.message.length <= 160
-            ? body.message
-            : "后台拒绝了主题选择，界面未更改";
-          if (controlRequest?.action === "set-theme") clearControlRequest();
-          rollbackOptimisticTheme();
-          paintSaveState("error", "未保存，请重试");
-          showAlert(message);
-          return false;
+          paintSaveState("saved", "已本地切换");
+          return true;
         }
         if (
           body?.ok !== true ||
@@ -1853,54 +1810,24 @@ export function buildSkinMenuScript({
           body.revision < requestRevision ||
           body.revision < controlRevision
         ) {
-          throw new Error("后台未确认主题选择，界面未更改");
+          throw new Error("后台未确认主题选择");
         }
         controlRevision = body.revision;
-        if (controlRequest?.action === "set-theme") clearControlRequest();
         publish("persistence", { enabled: persistenceEnabled, revision: controlRevision });
-        optimisticPreviousThemeId = null;
-        // 先落盘；「正在保存」再亮满最短时长，避免幂等路径一闪而过。
-        renderThemeSelection(themeId, true, true);
-        const confirmedExisting = body.revision === requestRevision;
-        const savedLabel = confirmedExisting ? "已确认启动器主题" : "已保存";
-        const savedAlert = confirmedExisting
-          ? "已恢复启动器主题（状态未变）。自定义图片仍只在本机快捷槽。"
-          : "主题选择已保存。";
-        const remainingMs = Math.max(0, 450 - (Date.now() - savingStartedAt));
-        if (remainingMs === 0) {
-          paintSaveState("saved", savedLabel);
-          showAlert(savedAlert, "success");
-        } else {
-          later(() => {
-            if (!isCurrent()) return;
-            paintSaveState("saved", savedLabel);
-            showAlert(savedAlert, "success");
-          }, remainingMs);
-        }
+        paintSaveState("saved", "已保存");
         return true;
       } catch (error) {
         if (isCurrent()) {
-          // 与 HTTP 使用同一 requestId，后端可合并进行中的提交，避免超时后重复 CAS/重注入。
-          queued = queueControlRequest(fallbackRequest);
-          if (!queued) {
-            rollbackOptimisticTheme();
-            paintSaveState("error", "未保存，请重试");
-            showAlert(safeClientError(error));
-          }
+          // 后台保存失败保持静默；本地主题已经持久化，不参与回退。
+          paintSaveState("saved", "已本地切换");
         }
-        return false;
+        return true;
       } finally {
         clearLater(timeoutId);
         trackedControllers.delete(abortController);
-        if (!isCurrent()) return;
-        // 排队等待 ACK 时保持 themePending（阻止 tick reinject），但恢复主题行以便合并选择。
-        if (queued) {
-          for (const item of rows.values()) item.disabled = false;
-          return;
-        }
-        themePending = false;
-        for (const item of rows.values()) item.disabled = false;
       }
+      })();
+      return true;
     };
 
     publishUserThemeToLauncher = async (theme) => {
@@ -2206,11 +2133,9 @@ export function buildSkinMenuScript({
       const cleared = clearControlRequest();
       if (cleared?.action === "set-persistence") pending = false;
       if (
-        cleared?.action === "set-theme" ||
         cleared?.action === "publish-user-theme" ||
         cleared?.action === "delete-user-theme"
       ) {
-        if (cleared.action === "set-theme") rollbackOptimisticTheme();
         paintSaveState(
           "error",
           cleared.action === "delete-user-theme" ? "未删除，请重试" : "未保存，请重试",
@@ -2392,20 +2317,22 @@ export function buildSkinMenuScript({
 
   root.append(button, backdrop, picker);
   document.body.appendChild(root);
-  // 正式主题始终服从 controller 的 activeId；旧版 custom-upload 快捷槽仅在原生态下作兼容恢复。
+  // 自动补针优先恢复本地可验证选择；后台状态可能因静默保存尚未完成而暂时落后。
   const restore = () => {
-    if (data.activeId !== null) {
-      setTheme(data.activeId, true, false);
-      return;
-    }
     if (data.preferStored) {
       const sel = readSelected();
-      if (sel === data.customId) {
+      if (sel === data.customId && data.activeId === null) {
         const custom = currentCustom ?? loadCustom();
         if (custom) { applyCustomTheme(custom, false, false); return; }
       }
+      if (sel === data.nativeSel || themes.some((theme) => theme.id === sel)) {
+        if (sel === data.nativeSel) clearTheme(false, false);
+        else setTheme(sel, false, false);
+        return;
+      }
     }
-    clearTheme(true, false);
+    if (data.activeId !== null) setTheme(data.activeId, true, false);
+    else clearTheme(true, false);
   };
   restore();
   if (readHidden()) setHidden(true, false, false);
@@ -2425,7 +2352,6 @@ export function buildSkinMenuScript({
       persistenceEnabled: persistence?.persistenceEnabled ?? false,
       revision: persistence?.revision ?? 0,
       themeTransitionPending: themePending === true ||
-        controlRequest?.action === "set-theme" ||
         controlRequest?.action === "publish-user-theme" ||
         controlRequest?.action === "delete-user-theme",
       controlRequest: controlRequest === null ? null : { ...controlRequest },

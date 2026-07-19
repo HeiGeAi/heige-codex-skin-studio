@@ -356,6 +356,11 @@ function Test-HeiGeCodexInternalBackendPath {
         $binRoot = Join-Path $env:LOCALAPPDATA "OpenAI\Codex\bin"
         if (Test-HeiGePathWithin -Root $binRoot -Path $full) { return $true }
     }
+    # Editor extensions ship a headless Codex CLI beside the extension. It is
+    # not a second Codex desktop installation and must not create mixed evidence.
+    if ($full -match '(?i)[\\/]\.(?:cursor|vscode|antigravity)[\\/]extensions[\\/]openai\.chatgpt-[^\\/]+[\\/]bin[\\/](?:windows-x86_64[\\/])?codex\.exe$') {
+        return $true
+    }
     return $false
 }
 
