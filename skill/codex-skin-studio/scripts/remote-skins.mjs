@@ -91,7 +91,9 @@ function assertTrustedOrigin(value) {
 
 function assertTrustedDownload(value) {
   const url = assertTrustedOrigin(value);
-  if (!url.pathname.startsWith("/download/") || url.search || url.hash) throw error("the skin download URL is not a direct archive URL", "UNTRUSTED_DOWNLOAD");
+  if (!url.pathname.startsWith("/download/") || url.hash) throw error("the skin download URL is not an official archive URL", "UNTRUSTED_DOWNLOAD");
+  const grant = url.searchParams.get("grant");
+  if (!grant || [...url.searchParams.keys()].some((key) => key !== "grant")) throw error("the skin download URL does not contain a short-lived grant", "UNTRUSTED_DOWNLOAD");
   return url;
 }
 
@@ -344,12 +346,27 @@ function appDataRoot() {
   return process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
 }
 
+async function requestDownloadGrant(endpoint, slug) {
+  const response = await fetchResponse(endpointUrl(endpoint, `/api/skins/${encodeURIComponent(slug)}/download-grant`), {
+    method: "POST",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify({ confirm: true }),
+  });
+  let grant;
+  try { grant = await response.json(); } catch { throw error("download grant response was not valid JSON", "REMOTE_RESPONSE_INVALID"); }
+  if (!grant || grant.status !== "granted" || typeof grant.downloadUrl !== "string" || typeof grant.packageSha256 !== "string") throw error("download grant response was invalid", "REMOTE_RESPONSE_INVALID");
+  assertTrustedDownload(grant.downloadUrl);
+  return grant;
+}
+
 async function downloadPublishedSkin(endpoint, slug) {
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) throw error("slug must use lowercase letters, numbers, and hyphens", "INVALID_ARGUMENT");
   const detail = await fetchJson(endpointUrl(endpoint, `/api/skins/${encodeURIComponent(slug)}`));
   if (detail.status !== "published") throw error("only published skins can be installed", "SKIN_NOT_PUBLISHED");
   if (!detail.installable || typeof detail.packageSha256 !== "string" || !/^[0-9a-f]{64}$/i.test(detail.packageSha256)) throw error("this published skin has no verified package and cannot be installed", "SKIN_NOT_INSTALLABLE");
-  const download = assertTrustedDownload(detail.downloadUrl);
+  const grant = await requestDownloadGrant(endpoint, slug);
+  if (grant.packageSha256.toLowerCase() !== detail.packageSha256.toLowerCase()) throw error("download grant checksum does not match the published checksum", "PACKAGE_HASH_MISMATCH");
+  const download = assertTrustedDownload(grant.downloadUrl);
   const response = await fetchResponse(download, { headers: { accept: "application/zip" } });
   const contentLength = Number(response.headers.get("content-length"));
   if (Number.isFinite(contentLength) && contentLength > MAX_PACKAGE_BYTES) throw error("skin package exceeds the 50 MB limit", "ZIP_LIMIT");
@@ -359,7 +376,7 @@ async function downloadPublishedSkin(endpoint, slug) {
   if (actualHash.toLowerCase() !== detail.packageSha256.toLowerCase()) throw error("skin package checksum does not match the published checksum", "PACKAGE_HASH_MISMATCH");
   const parsed = parseZip(bytes);
   const packageInfo = validatePackage(parsed, slug, detail);
-  return { detail, bytes, parsed, packageInfo, manifest: packageInfo.manifest, packageSha256: actualHash };
+  return { detail, bytes, parsed, packageInfo, manifest: packageInfo.manifest, packageSha256: actualHash, grantExpiresAt: grant.expiresAt };
 }
 
 async function saveExtracted(parsed) {
@@ -456,7 +473,6 @@ async function listSkins(options) {
 function normalizeCatalogItem(item, endpoint) {
   if (!item || typeof item !== "object" || typeof item.slug !== "string" || !item.slug) throw error("remote skin catalog contained an invalid item", "REMOTE_RESPONSE_INVALID");
   const detailUrl = endpointUrl(endpoint, `/skins/${encodeURIComponent(item.slug)}`).toString();
-  const downloadUrl = typeof item.downloadUrl === "string" ? assertTrustedDownload(item.downloadUrl).toString() : endpointUrl(endpoint, `/download/${encodeURIComponent(item.slug)}`).toString();
   let imageUrl = null;
   for (const candidate of [item.heroUrl, item.thumbnailUrl, item.previewUrl]) {
     if (typeof candidate !== "string" || !candidate) continue;
@@ -478,9 +494,9 @@ function normalizeCatalogItem(item, endpoint) {
     hasPet: item.hasPet === true,
     pet: item.pet || null,
     installable: item.installable === true || typeof item.packageSha256 === "string",
+    downloadRequiresGrant: true,
     imageUrl,
     detailUrl,
-    downloadUrl,
   };
 }
 
@@ -540,7 +556,7 @@ function printResult(value, jsonOutput) {
     item.imageUrl ? `![${item.title}](${item.imageUrl})` : `[Preview and full description](${item.detailUrl})`,
     item.description,
     `Author: ${item.authorDisplayName || "Community contributor"} | Downloads: ${item.downloads}`,
-    `[Open details](${item.detailUrl}) | [Download](${item.downloadUrl})`,
+    `[Open details](${item.detailUrl}) | Install after explicit confirmation`,
   ].join("\n")).join("\n\n") || "No matching published skins found.");
   else if (value.items) console.log(value.items.map((item) => `${item.slug}\t${item.title}\t${item.version}\t${item.installable ? "installable" : "metadata-only"}`).join("\n") || "No published skins found.");
   else if (value.status === "downloaded") console.log(`Downloaded ${value.title} to ${value.path}`);
@@ -578,7 +594,7 @@ async function main() {
   }
 }
 
-export { classifyPairedInstallResult, downloadPublishedSkin, endpointUrl, installExtractedPackage, listSkins, normalizeCatalogItem, parseArgs, parseZip, rankRecommendation, saveExtracted, validatePackage };
+export { classifyPairedInstallResult, downloadPublishedSkin, endpointUrl, installExtractedPackage, listSkins, normalizeCatalogItem, parseArgs, parseZip, rankRecommendation, requestDownloadGrant, saveExtracted, validatePackage };
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main().catch((caught) => {
