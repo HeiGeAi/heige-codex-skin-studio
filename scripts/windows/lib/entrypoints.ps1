@@ -482,7 +482,7 @@ function Resolve-HeiGeBootstrapAbortClass {
             Class = "abort-incompatible"
             Retryable = $false
             Title = "Codex 调试端口不可用"
-            Guidance = "当前 Codex 已带调试参数但本机调试端口未开放（常见于部分 Microsoft Store/MSIX 会话）。建议改装官方独立版（非商店版）后重试；若必须使用商店版，请附 doctor 输出与 Codex 版本号开 GitHub Issue。"
+            Guidance = "当前 Codex 已带调试参数但本机调试端口未开放（常见于部分 Microsoft Store/MSIX 会话）。可先完整退出 Codex：运行 scripts\windows\close-codex.bat（保持关闭），再决定是否允许重启或改装官方独立版（非商店版）后重试；若必须使用商店版，请附 doctor 输出与 Codex 版本号开 GitHub Issue。"
         }
     }
     if ($text -match '内置 Administrator|禁止该账户启动商店版') {
@@ -986,6 +986,84 @@ function Invoke-HeiGeEnableSkinFlow {
         }
     }
     return Invoke-HeiGeApplyFlow @arguments
+}
+
+function Get-HeiGePersistenceEnabledHint {
+    param([AllowNull()][string]$StateDirectory)
+    if (-not $StateDirectory) { return $null }
+    try {
+        $path = Join-Path $StateDirectory "state.json"
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
+        $doc = Get-Content -LiteralPath $path -Raw -ErrorAction Stop | ConvertFrom-Json
+        if ($doc.PSObject.Properties.Name -contains "persistenceEnabled" -and
+            $doc.persistenceEnabled -is [bool]) {
+            return [bool]$doc.persistenceEnabled
+        }
+    } catch {
+        return $null
+    }
+    return $null
+}
+
+function Invoke-HeiGeCloseCodexFlow {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [scriptblock]$ContextProvider,
+        [scriptblock]$ProcessProvider,
+        [scriptblock]$StopProcessProvider,
+        [scriptblock]$CloseProvider,
+        [scriptblock]$StopProvider,
+        [scriptblock]$SleepProvider,
+        [scriptblock]$StopCodexProvider,
+        [scriptblock]$PersistenceHintProvider,
+        [ValidateRange(1, 120)][int]$TimeoutSeconds = 15
+    )
+    $context = Get-HeiGeFlowContext -Root $Root -ContextProvider $ContextProvider
+    $mode = Get-HeiGeEntrypointProcessMode -Context $context -ProcessProvider $ProcessProvider
+    $persistenceEnabled = if ($PersistenceHintProvider) {
+        & $PersistenceHintProvider $context
+    } else {
+        Get-HeiGePersistenceEnabledHint -StateDirectory ([string]$context.StateDirectory)
+    }
+
+    if ($mode -ceq "closed") {
+        return [pscustomobject][ordered]@{
+            AlreadyStopped = $true
+            Closed = $false
+            Escalated = $false
+            VerifiedStopped = $true
+            PersistenceEnabled = $persistenceEnabled
+            Completion = "complete"
+        }
+    }
+
+    $stopResult = if ($StopCodexProvider) {
+        & $StopCodexProvider $context
+    } else {
+        $stopArgs = @{
+            AppInfo = $context.App
+            TimeoutSeconds = $TimeoutSeconds
+        }
+        if ($StopProcessProvider) { $stopArgs.ProcessProvider = $StopProcessProvider }
+        if ($CloseProvider) { $stopArgs.CloseProvider = $CloseProvider }
+        if ($StopProvider) { $stopArgs.StopProvider = $StopProvider }
+        if ($SleepProvider) { $stopArgs.SleepProvider = $SleepProvider }
+        Stop-CodexNormally @stopArgs
+    }
+
+    $remaining = @(Get-RunningCodex -AppInfo $context.App -ProcessProvider $StopProcessProvider)
+    if ($remaining.Count -ne 0) {
+        throw "Codex 关闭后仍检测到已归属主进程，请手动彻底退出后再试。"
+    }
+
+    return [pscustomobject][ordered]@{
+        AlreadyStopped = [bool]$stopResult.AlreadyStopped
+        Closed = [bool]$stopResult.Closed
+        Escalated = [bool]$stopResult.Escalated
+        VerifiedStopped = [bool]$stopResult.VerifiedStopped
+        PersistenceEnabled = $persistenceEnabled
+        Completion = "complete"
+    }
 }
 
 function Invoke-HeiGePauseFlow {
