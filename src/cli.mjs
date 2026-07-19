@@ -2418,8 +2418,9 @@ export async function runCli(argv, overrides = {}) {
       lifecycleContract: deps.platform === "win32"
         ? "Windows 生命周期请使用 scripts/windows/apply.ps1 或 scripts/windows/apply.bat、" +
           "scripts/windows/enable-skin.ps1 或 scripts/windows/enable-skin.bat、" +
-          "scripts/windows/pause.ps1、scripts/windows/resume.ps1，以及 " +
-          "scripts/windows/restore.ps1 或 scripts/windows/restore.bat；完整卸载请使用 " +
+          "scripts/windows/pause.ps1、scripts/windows/resume.ps1、" +
+          "scripts/windows/restore.ps1 或 scripts/windows/restore.bat，以及 " +
+          "scripts/windows/close-codex.ps1 或 scripts/windows/close-codex.bat；完整卸载请使用 " +
           "scripts/windows/uninstall.ps1 或 scripts/windows/uninstall.bat"
         : "macOS 生命周期请优先使用 scripts 下对应的 .command 稳定入口",
       commands: [
