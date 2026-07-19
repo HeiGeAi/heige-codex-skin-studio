@@ -184,6 +184,19 @@ test("status extracts only the exact renderer update request shape", async () =>
   assert.match(expression, /"action", "capability", "generation", "requestId", "schemaVersion"/);
 });
 
+test("status extracts publish-user-theme and delete-user-theme for CDP fallback", async () => {
+  FakeSession.expressions = [];
+  const { deps } = await fixture();
+
+  await skinStatus({ port: 9341, includeControlRequest: true, deps });
+
+  const expression = FakeSession.expressions[0];
+  assert.match(expression, /request\.action === "publish-user-theme"/);
+  assert.match(expression, /request\.action === "delete-user-theme"/);
+  assert.match(expression, /data:image\\\/\(\?:png\|jpeg\|webp\)/);
+  assert.match(expression, /12_000_000/);
+});
+
 test("delivers an update result only through the current renderer callback", async () => {
   FakeSession.expressions = [];
   const { deps } = await fixture();
