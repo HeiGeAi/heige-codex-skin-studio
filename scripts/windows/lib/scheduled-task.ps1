@@ -476,6 +476,84 @@ function Remove-HeiGeStaleControllerHandshake {
     return $true
 }
 
+function Test-HeiGeBackgroundControllerCommandLine {
+    param(
+        [AllowNull()][string]$CommandLine,
+        [Parameter(Mandatory = $true)][string]$TaskName,
+        [Parameter(Mandatory = $true)][string]$StateDirectory
+    )
+    if ([string]::IsNullOrWhiteSpace($CommandLine)) { return $false }
+    if ($CommandLine -notmatch '(?i)(^|[\\/"])cli\.mjs"|cli\.mjs\b') { return $false }
+    if ($CommandLine -notmatch '(?i)(^|\s)controller(\s|$)') { return $false }
+    if ($CommandLine -notmatch '(?i)--background(\s|$)') { return $false }
+    if ($CommandLine -notmatch '(?i)--platform(\s|=)+windows(\s|$)') { return $false }
+    $escapedTask = [regex]::Escape($TaskName)
+    if ($CommandLine -notmatch ("(?i)--task-name(\s|=)+(`"|')" + $escapedTask + "(`"|')(\s|$)") -and
+        $CommandLine -notmatch ("(?i)--task-name(\s|=)+" + $escapedTask + "(\s|$)")) {
+        return $false
+    }
+    $comparable = Get-HeiGeComparablePath -Path $StateDirectory
+    $normalizedCommand = $CommandLine.Replace('/', '\')
+    $escapedState = [regex]::Escape($comparable)
+    if ($normalizedCommand -notmatch ("(?i)--state-directory(\s|=)+(`"|')" + $escapedState + "(`"|')(\s|$)") -and
+        $normalizedCommand -notmatch ("(?i)--state-directory(\s|=)+" + $escapedState + "(\s|$)")) {
+        return $false
+    }
+    return $true
+}
+
+function Stop-HeiGeBackgroundControllerProcesses {
+    param(
+        [Parameter(Mandatory = $true)][string]$TaskName,
+        [Parameter(Mandatory = $true)][string]$StateDirectory,
+        [ValidateRange(0, [int]::MaxValue)][int]$ExcludePid = 0,
+        [scriptblock]$ProcessEnumerator,
+        [scriptblock]$StopProcessProvider
+    )
+    Assert-HeiGeKnownTaskName -TaskName $TaskName
+    $StateDirectory = Get-HeiGeComparablePath -Path $StateDirectory
+    if (-not $ProcessEnumerator) {
+        $ProcessEnumerator = {
+            Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue
+        }
+    }
+    if (-not $StopProcessProvider) {
+        $StopProcessProvider = {
+            param([int]$ProcessId)
+            Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+        }
+    }
+    $candidates = @(& $ProcessEnumerator)
+    $stopped = New-Object System.Collections.Generic.List[int]
+    foreach ($process in $candidates) {
+        if ($null -eq $process) { continue }
+        $processId = 0
+        if ($process.PSObject.Properties.Name -contains "ProcessId") {
+            $processId = [int]$process.ProcessId
+        } elseif ($process.PSObject.Properties.Name -contains "Id") {
+            $processId = [int]$process.Id
+        }
+        if ($processId -le 0 -or ($ExcludePid -gt 0 -and $processId -eq $ExcludePid)) {
+            continue
+        }
+        $commandLine = if ($process.PSObject.Properties.Name -contains "CommandLine") {
+            [string]$process.CommandLine
+        } else { "" }
+        if (-not (Test-HeiGeBackgroundControllerCommandLine `
+            -CommandLine $commandLine -TaskName $TaskName -StateDirectory $StateDirectory)) {
+            continue
+        }
+        & $StopProcessProvider $processId | Out-Null
+        $stopped.Add($processId) | Out-Null
+    }
+    return [pscustomobject][ordered]@{
+        TaskName = $TaskName
+        StateDirectory = $StateDirectory
+        StoppedPids = @($stopped)
+        StoppedCount = $stopped.Count
+    }
+}
+
 function Get-HeiGeTaskFileKey {
     param([Parameter(Mandatory = $true)][string]$TaskName)
     Assert-HeiGeKnownTaskName -TaskName $TaskName
@@ -499,7 +577,8 @@ function Invoke-HeiGeNodeControllerProcess {
         [Parameter(Mandatory = $true)][string]$AppIdentityToken,
         [scriptblock]$ProcessProvider,
         [scriptblock]$WaitProvider,
-        [scriptblock]$StopProvider
+        [scriptblock]$StopProvider,
+        [scriptblock]$OrphanStopProvider
     )
     Assert-HeiGeKnownTaskName -TaskName $TaskName
     Assert-HeiGeAppIdentityToken -AppIdentityToken $AppIdentityToken
@@ -508,6 +587,14 @@ function Invoke-HeiGeNodeControllerProcess {
             throw "Node controller dependency does not exist: $leaf"
         }
     }
+    $StateDirectory = Get-HeiGeComparablePath -Path $StateDirectory
+    if (-not $OrphanStopProvider) {
+        $OrphanStopProvider = {
+            param($Name, $Directory)
+            Stop-HeiGeBackgroundControllerProcesses -TaskName $Name -StateDirectory $Directory
+        }
+    }
+    & $OrphanStopProvider $TaskName $StateDirectory | Out-Null
     $key = Get-HeiGeTaskFileKey -TaskName $TaskName
     $stdoutPath = Join-Path $StateDirectory ("controller-" + $key + ".stdout.json")
     $stderrPath = Join-Path $StateDirectory ("controller-" + $key + ".stderr.log")
@@ -664,6 +751,7 @@ function Start-HeiGeScheduledTask {
         [switch]$TestMode,
         [scriptblock]$StartProvider,
         [scriptblock]$StopProvider,
+        [scriptblock]$OrphanStopProvider,
         [scriptblock]$RequestInspectorProvider,
         [scriptblock]$SleepProvider,
         [scriptblock]$InspectProvider
@@ -694,6 +782,12 @@ function Start-HeiGeScheduledTask {
     if (-not $StopProvider) {
         $StopProvider = { param($Name) Stop-ScheduledTask -TaskPath "\" -TaskName $Name }
     }
+    if (-not $OrphanStopProvider) {
+        $OrphanStopProvider = {
+            param($Name, $Directory)
+            Stop-HeiGeBackgroundControllerProcesses -TaskName $Name -StateDirectory $Directory
+        }
+    }
     if (-not $SleepProvider) {
         $SleepProvider = { param($Milliseconds) Start-Sleep -Milliseconds $Milliseconds }
     }
@@ -719,6 +813,8 @@ function Start-HeiGeScheduledTask {
             throw "Scheduled Task did not stop within $TimeoutSeconds seconds: $TaskName"
         }
     }
+    # Stop-ScheduledTask 只停任务根进程；Start-Process 拉起的 Node 常变孤儿并继续写旧 handshake。
+    & $OrphanStopProvider $TaskName $StateDirectory | Out-Null
     & $StartProvider $TaskName | Out-Null
     return [pscustomobject][ordered]@{
         TaskName = $TaskName
@@ -737,11 +833,19 @@ function Unregister-HeiGeScheduledTask {
         [switch]$TestMode,
         [switch]$PreserveHandshake,
         [scriptblock]$UnregisterProvider,
-        [scriptblock]$InspectProvider
+        [scriptblock]$InspectProvider,
+        [scriptblock]$OrphanStopProvider
     )
     Assert-HeiGeTaskScope -TaskName $TaskName -TestMode:$TestMode
     $StateDirectory = Resolve-HeiGeScopedStateDirectory -StateDirectory $StateDirectory -TestMode:$TestMode
     $before = Get-HeiGeInspectedTask -TaskName $TaskName -InspectProvider $InspectProvider
+    if (-not $OrphanStopProvider) {
+        $OrphanStopProvider = {
+            param($Name, $Directory)
+            Stop-HeiGeBackgroundControllerProcesses -TaskName $Name -StateDirectory $Directory
+        }
+    }
+    & $OrphanStopProvider $TaskName $StateDirectory | Out-Null
     if (-not $UnregisterProvider) {
         $UnregisterProvider = {
             param($Name)
