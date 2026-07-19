@@ -51,6 +51,11 @@ foreach ($record in $rawProcesses) {
   if ($pidValue -le 0 -or $parentPid -lt 0 -or [string]::IsNullOrWhiteSpace($path)) {
     continue
   }
+  # Editor extensions and the desktop app's own headless backend are not UI
+  # installations. Exclude them before enforcing the immutable desktop identity.
+  if (Test-HeiGeCodexInternalBackendPath -Path $path) {
+    continue
+  }
   $owner = [pscustomobject]@{ Id = $pidValue; Path = $path; ProcessName = [string]$record.Name }
   if (-not (Test-CdpOwnerMatchesApp -Owner $owner -App $app)) {
     if ($AppIdentityToken) { throw 'foreign Windows Codex process conflicts with the immutable app identity' }

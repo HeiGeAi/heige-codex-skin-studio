@@ -8,6 +8,10 @@
 - 自动补针与再次启动时优先恢复有效的本地主题，避免后台状态暂时滞后时被旧主题覆盖。
 - 深色主题根据显式外观或表面亮度切换原生配色与文字阴影，修复浅色原生控件上的文字对比度。
 - Windows 应用解析器排除 Cursor、VS Code 与 Antigravity 扩展自带的 Codex CLI，避免误判为第二个桌面端安装。
+- 同时安装现代 `OpenAI.Codex` 与 `ChatGPT Classic` 时，关闭状态下优先归属现代 Codex；多个同类 Codex 包仍保持失败关闭。
+- Windows 运行时快照在不可变桌面身份校验前排除编辑器扩展和应用内置的无头 Codex CLI，避免 Cursor/VS Code/Antigravity 正在使用时阻断皮肤启动。
+- Windows ACL 校验器固定以 UTF-8 输出 JSON，修复中文用户名路径被 PowerShell 5.1 控制台编码改写后误报 `LOCK_PERMISSIONS`。
+- Windows ACL 回退改用安装器已验证的 `icacls /inheritance:r /grant:r` 形式，并由后续精确校验确认 owner 与唯一授权规则，修复无提升权限会话中的无效 `/setowner` 组合。
 - 发布哈希更新器兼容 Windows 不支持目录 `fsync` 的行为，文件自身仍在原子替换前完成同步。
 
 ### 同步说明

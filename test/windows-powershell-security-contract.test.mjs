@@ -33,7 +33,13 @@ test("Windows bound resolver is token-directed and the runtime rejects foreign a
   assert.match(common, /InstallLocation/);
   assert.match(common, /Aumid/);
   assert.match(common, /OverridePath\s+\(\[string\]\$expected\.ExecutablePath\)/i);
+  assert.match(runtime, /Test-HeiGeCodexInternalBackendPath\s+-Path\s+\$path/i);
   assert.match(runtime, /foreign Windows Codex process/i);
+  assert.ok(
+    runtime.indexOf("Test-HeiGeCodexInternalBackendPath -Path $path")
+      < runtime.indexOf("foreign Windows Codex process"),
+    "known internal/editor CLIs must be excluded before immutable desktop identity enforcement",
+  );
 });
 
 test("Windows PowerShell process mode traverses every owned node and rejects cycles", async () => {

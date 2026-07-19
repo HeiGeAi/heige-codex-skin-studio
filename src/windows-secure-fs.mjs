@@ -23,6 +23,7 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $InformationPreference = 'SilentlyContinue'
 $WarningPreference = 'SilentlyContinue'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Import-Module -Name (Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1') -ErrorAction Stop
 if ([string]::IsNullOrWhiteSpace($PayloadBase64)) { throw 'ACL batch payload is missing' }
 try {
@@ -111,7 +112,8 @@ foreach ($entry in $operations) {
       Microsoft.PowerShell.Security\Set-Acl -LiteralPath $TargetPath -AclObject $acl -ErrorAction Stop
     } catch {
       # 部分账户/会话没有 SeSecurityPrivilege；与 Windows 安装脚本一致，回退 icacls。
-      # fallback 必须与 Set-Acl 路径保持同一精确契约：setowner + 重置 grant + 随后 exact verify。
+      # fallback 与安装脚本保持一致：移除继承并重置为当前 SID，
+      # 随后的 exact verify 仍会验证 owner，不能靠 icacls 输出宣称成功。
       $detail = [string]$_.Exception.Message
       $icacls = Join-Path $env:SystemRoot 'System32\icacls.exe'
       if (-not (Test-Path -LiteralPath $icacls -PathType Leaf)) {
@@ -119,7 +121,7 @@ foreach ($entry in $operations) {
       }
       $sidText = [string]$currentSid.Value
       $grant = if ($isDirectory) { '*{0}:(OI)(CI)F' -f $sidText } else { '*{0}:F' -f $sidText }
-      $output = & $icacls $TargetPath /inheritance:r /setowner $sidText /grant:r $grant 2>&1
+      $output = & $icacls $TargetPath /inheritance:r /grant:r $grant 2>&1
       if ($LASTEXITCODE -ne 0) {
         throw ("Set-Acl failed and icacls fallback failed: {0}; icacls: {1}" -f $detail, (($output | ForEach-Object { [string]$_ }) -join ' '))
       }

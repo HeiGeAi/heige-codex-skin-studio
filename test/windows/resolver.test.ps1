@@ -85,6 +85,28 @@ try {
         Assert-Throws { Select-CodexStorePackage -Packages $script:Packages -InstallPath $null } "Windows Store 包选择不唯一"
     }
 
+    Test-Case "Modern Codex is preferred over a separately installed ChatGPT Classic package" {
+        $classic = [pscustomobject]@{
+            Name = "OpenAI.ChatGPT-Desktop"
+            Publisher = "CN=OpenAI"
+            IsFramework = $false
+            SignatureKind = "Store"
+            Version = [version]"1.2026.190.0"
+            PackageFullName = "OpenAI.ChatGPT-Desktop_1.2026.190.0_x64__8wekyb3d8bbwe"
+            PackageFamilyName = "OpenAI.ChatGPT-Desktop_8wekyb3d8bbwe"
+            InstallLocation = (Join-Path $script:Root "WindowsApps\OpenAI.ChatGPT-Desktop")
+            Applications = @([pscustomobject]@{
+                Id = "ChatGPT"
+                Executable = "app\ChatGPT.exe"
+                ExecutionAliases = @()
+            })
+        }
+        $forward = Select-CodexStorePackage -Packages @($classic, $script:Packages[1]) -InstallPath $null
+        $reverse = Select-CodexStorePackage -Packages @($script:Packages[1], $classic) -InstallPath $null
+        Assert-Equal $script:Packages[1].PackageFullName $forward.PackageFullName
+        Assert-Equal $forward.PackageFullName $reverse.PackageFullName
+    }
+
     Test-Case "Store package containment uses a path boundary" {
         $outside = "$($script:Package2Root)-foreign\app\Codex.exe"
         Assert-Throws { Select-CodexStorePackage -Packages $script:Packages -InstallPath $outside } "Windows Store 包"

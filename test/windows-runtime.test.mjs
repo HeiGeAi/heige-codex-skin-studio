@@ -324,6 +324,9 @@ test("Windows ACL adapter preserves the canonical request path instead of rewrit
     { action: "verify-directory", path },
     { action: "protect-file", path: ownerPath },
   ]), [directoryResult, fileResult]);
+  assert.match(windowsAclPowerShellScript, /\[Console\]::OutputEncoding\s*=\s*\[System\.Text\.Encoding\]::UTF8/);
+  assert.match(windowsAclPowerShellScript, /\/inheritance:r\s+\/grant:r\s+\$grant/);
+  assert.doesNotMatch(windowsAclPowerShellScript, /\/setowner/);
   assert.match(windowsAclPowerShellScript, /path = \$TargetPath/);
   assert.doesNotMatch(windowsAclPowerShellScript, /path = \[System\.IO\.Path\]::GetFullPath/);
 });

@@ -63,6 +63,13 @@ function Select-CodexStorePackage {
         throw "Windows Store 包与进程路径不匹配：$InstallPath"
     }
     if ($plausible.Count -eq 1) { return $plausible[0] }
+    if (-not $ProductName -and $plausible.Count -gt 1) {
+        # OpenAI.Codex is the current Codex desktop package. A separately
+        # installed ChatGPT Classic package must not make a closed Codex
+        # session ambiguous, but multiple Codex packages still fail closed.
+        $modernCodex = @($plausible | Where-Object { [string]$_.Name -ceq "OpenAI.Codex" })
+        if ($modernCodex.Count -eq 1) { return $modernCodex[0] }
+    }
     if ($plausible.Count -gt 1) { throw "Windows Store 包选择不唯一：需要精确进程路径作为归属证据。" }
     throw "未找到可信的 Windows Store 包。"
 }
