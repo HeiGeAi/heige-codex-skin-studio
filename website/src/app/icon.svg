@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">Codex Theme Archive</title>
+  <desc id="desc">A cyan orbital core on a deep blue square.</desc>
+  <defs>
+    <linearGradient id="bg" x1="8" y1="4" x2="56" y2="60" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#173f68" />
+      <stop offset="1" stop-color="#0b1d36" />
+    </linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientTransform="translate(32 31) rotate(90) scale(25)">
+      <stop stop-color="#20bfd0" stop-opacity=".55" />
+      <stop offset="1" stop-color="#20bfd0" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="url(#bg)" />
+  <circle cx="32" cy="31" r="25" fill="url(#glow)" />
+  <circle cx="32" cy="31" r="20.5" fill="none" stroke="#20bfd0" stroke-width="1.5" opacity=".9" />
+  <ellipse cx="32" cy="31" rx="24" ry="11" fill="none" stroke="#2e70d1" stroke-width="2" transform="rotate(-28 32 31)" />
+  <ellipse cx="32" cy="31" rx="24" ry="11" fill="none" stroke="#f6f7f4" stroke-width="1" opacity=".72" transform="rotate(32 32 31)" />
+  <path d="m32 21 2.9 7.1L42 31l-7.1 2.9L32 41l-2.9-7.1L22 31l7.1-2.9L32 21Z" fill="#f6f7f4" />
+  <circle cx="32" cy="31" r="3" fill="#20bfd0" />
+  <circle cx="52" cy="19" r="1.5" fill="#f6f7f4" />
+  <circle cx="14" cy="46" r="1.5" fill="#20bfd0" />
+</svg>
