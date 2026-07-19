@@ -312,15 +312,22 @@ try {
     Test-Case "Start launches a ready task without an unnecessary stop" {
         $script:StartName = $null
         $script:StopInvoked = $false
+        $script:OrphanInvoked = $false
         $ready = New-TestStoredDefinition -State "Ready"
         $result = Start-HeiGeScheduledTask -TaskName $script:TestTask -ExpectedRevision 7 `
             -ExpectedTransitionNonce $script:RequestNonce -StateDirectory $script:State -TestMode `
             -RequestInspectorProvider { param($Path) $true } `
             -InspectProvider { param($Name) $ready } `
             -StopProvider { param($Name) $script:StopInvoked = $true } `
+            -OrphanStopProvider {
+                param($Name, $Directory)
+                $script:OrphanInvoked = $true
+                Assert-Equal $script:TestTask $Name
+            } `
             -StartProvider { param($Name) $script:StartName = $Name }
         Assert-Equal $script:TestTask $script:StartName
         Assert-False $script:StopInvoked
+        Assert-True $script:OrphanInvoked
         Assert-False $result.Restarted
         Assert-True $result.RequestObserved
         Assert-False $result.ControllerReady
@@ -360,9 +367,10 @@ try {
                 return $ready
             } `
             -StopProvider { param($Name) $script:OperationOrder += "stop" } `
+            -OrphanStopProvider { param($Name, $Directory) $script:OperationOrder += "orphan" } `
             -StartProvider { param($Name) $script:OperationOrder += "start" } `
             -SleepProvider { param($Milliseconds) }
-        Assert-Equal @("stop", "start") $script:OperationOrder
+        Assert-equal @("stop", "orphan", "start") $script:OperationOrder
         Assert-True $result.Restarted
         Assert-Equal "Running" $result.PreviousState
         Assert-Equal 3 $script:InspectReads
@@ -383,6 +391,7 @@ try {
     Test-Case "Start fails closed when a stopped task never settles" {
         $script:StartInvoked = $false
         $script:StopInvoked = $false
+        $script:OrphanInvoked = $false
         $running = New-TestStoredDefinition -State "Running"
         Assert-Throws {
             Start-HeiGeScheduledTask -TaskName $script:TestTask -ExpectedRevision 7 `
@@ -391,10 +400,12 @@ try {
                 -RequestInspectorProvider { param($Path) $true } `
                 -InspectProvider { param($Name) $running } `
                 -StopProvider { param($Name) $script:StopInvoked = $true } `
+                -OrphanStopProvider { param($Name, $Directory) $script:OrphanInvoked = $true } `
                 -StartProvider { param($Name) $script:StartInvoked = $true } `
                 -SleepProvider { param($Milliseconds) }
         } "did not stop"
         Assert-True $script:StopInvoked
+        Assert-False $script:OrphanInvoked
         Assert-False $script:StartInvoked
     }
 
@@ -423,15 +434,92 @@ try {
         Assert-False $script:StartInvoked
     }
 
+    Test-Case "Background controller command-line matcher is exact" {
+        $quoted = (
+            '"C:\Program Files\nodejs\node.exe" "C:\repo\src\cli.mjs" controller --background ' +
+            '--platform windows --task-name "' + $script:TestTask + '" --state-directory "' +
+            $script:State + '" --port 9341'
+        )
+        Assert-True (Test-HeiGeBackgroundControllerCommandLine `
+            -CommandLine $quoted -TaskName $script:TestTask -StateDirectory $script:State)
+        Assert-False (Test-HeiGeBackgroundControllerCommandLine `
+            -CommandLine $quoted -TaskName $script:ProductionTask -StateDirectory $script:State)
+        Assert-False (Test-HeiGeBackgroundControllerCommandLine `
+            -CommandLine ($quoted -replace '--background ', '') `
+            -TaskName $script:TestTask -StateDirectory $script:State)
+        Assert-False (Test-HeiGeBackgroundControllerCommandLine `
+            -CommandLine $null -TaskName $script:TestTask -StateDirectory $script:State)
+    }
+
+    Test-Case "Orphan stopper kills only matching background Node processes" {
+        $script:Stopped = @()
+        $foreignState = Join-Path $script:Root "Foreign State"
+        New-Item -ItemType Directory -Path $foreignState -Force | Out-Null
+        $result = Stop-HeiGeBackgroundControllerProcesses -TaskName $script:TestTask `
+            -StateDirectory $script:State -ExcludePid 42 `
+            -ProcessEnumerator {
+                @(
+                    [pscustomobject]@{
+                        ProcessId = 42
+                        CommandLine = (
+                            'node.exe "C:\repo\src\cli.mjs" controller --background --platform windows ' +
+                            '--task-name "' + $script:TestTask + '" --state-directory "' +
+                            $script:State + '" --port 9341'
+                        )
+                    },
+                    [pscustomobject]@{
+                        ProcessId = 1001
+                        CommandLine = (
+                            'node.exe "C:\repo\src\cli.mjs" controller --background --platform windows ' +
+                            '--task-name "' + $script:TestTask + '" --state-directory "' +
+                            $script:State + '" --port 9341'
+                        )
+                    },
+                    [pscustomobject]@{
+                        ProcessId = 1002
+                        CommandLine = (
+                            'node.exe "C:\repo\src\cli.mjs" controller --background --platform windows ' +
+                            '--task-name "' + $script:ProductionTask + '" --state-directory "' +
+                            $script:State + '" --port 9341'
+                        )
+                    },
+                    [pscustomobject]@{
+                        ProcessId = 1003
+                        CommandLine = (
+                            'node.exe "C:\repo\src\cli.mjs" controller --background --platform windows ' +
+                            '--task-name "' + $script:TestTask + '" --state-directory "' +
+                            $foreignState + '" --port 9341'
+                        )
+                    },
+                    [pscustomobject]@{
+                        ProcessId = 1004
+                        CommandLine = 'node.exe C:\other\app.js'
+                    }
+                )
+            } `
+            -StopProcessProvider {
+                param([int]$ProcessId)
+                $script:Stopped += $ProcessId
+            }
+        Assert-equal @(1001) $result.StoppedPids
+        Assert-equal 1 $result.StoppedCount
+        Assert-equal @(1001) $script:Stopped
+    }
+
     Test-Case "Node process wait failure invokes exact process cleanup" {
         $script:FakeProcess = [pscustomobject]@{ HasExited = $false; ExitCode = 0 }
         $script:ProcessStopped = $false
+        $script:OrphanInvoked = $false
         $handshakePath = Get-HeiGeHandshakePath -StateDirectory $script:State -TaskName $script:TestTask
         [System.IO.File]::WriteAllText($handshakePath, '{}')
         Assert-Throws {
             Invoke-HeiGeNodeControllerProcess -NodePath $script:Node -CliPath $script:Controller `
                 -TaskName $script:TestTask -Port 9341 -StateDirectory $script:State `
                 -AppIdentityToken $script:AppIdentityToken `
+                -OrphanStopProvider {
+                    param($Name, $Directory)
+                    $script:OrphanInvoked = $true
+                } `
                 -ProcessProvider { param($Spec) $script:FakeProcess } `
                 -WaitProvider { param($Process) throw "wait failed after launch" } `
                 -StopProvider {
@@ -440,6 +528,7 @@ try {
                     $Process.HasExited = $true
                 }
         } "wait failed after launch"
+        Assert-True $script:OrphanInvoked
         Assert-True $script:ProcessStopped
         Assert-True $script:FakeProcess.HasExited
         Assert-True (Test-Path -LiteralPath $handshakePath -PathType Leaf)
@@ -451,6 +540,7 @@ try {
             Invoke-HeiGeNodeControllerProcess -NodePath $script:Node -CliPath $script:Controller `
                 -TaskName $script:TestTask -Port 9341 -StateDirectory $script:State `
                 -AppIdentityToken $script:AppIdentityToken `
+                -OrphanStopProvider { param($Name, $Directory) } `
                 -ProcessProvider { param($Spec) throw "node launch failed" }
         } "node launch failed"
     }
@@ -462,6 +552,7 @@ try {
         $result = Invoke-HeiGeNodeControllerProcess -NodePath $script:Node -CliPath $script:Controller `
             -TaskName $script:TestTask -Port 9341 -StateDirectory $script:State `
             -AppIdentityToken $script:AppIdentityToken `
+            -OrphanStopProvider { param($Name, $Directory) } `
             -ProcessProvider {
                 param($Spec)
                 $script:CapturedProcessSpec = $Spec
@@ -536,7 +627,9 @@ try {
         Assert-Match '无法自动注销' $controllerSource
         Assert-False ($source -match 'WaitForExit\(500\)|exitedDuringStartup')
         Assert-False ($source -match 'Write-HeiGeControllerHandshake|Read-HeiGeControllerHandshake|Assert-HeiGeControllerHandshake')
-        Assert-False ($source -match 'Start-CodexWithCdp|Stop-Process|taskkill')
+        Assert-False ($source -match 'Start-CodexWithCdp|taskkill')
+        Assert-Match 'Stop-HeiGeBackgroundControllerProcesses' $librarySource
+        Assert-Match 'Stop-Process -Id \$ProcessId -Force' $librarySource
     }
 
     if ($Integration) {
