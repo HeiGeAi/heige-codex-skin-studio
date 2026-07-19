@@ -127,22 +127,48 @@ async function startFixture(t, overrides = {}) {
     };
     return structuredClone(state);
   });
+  const userThemeCalls = [];
+  const publishUserTheme = overrides.publishUserTheme ?? (async (input) => {
+    userThemeCalls.push({ kind: "publish", ...input });
+    const themeId = "uploaded-skin-0123456789abcdef";
+    state = {
+      ...state,
+      selectedThemeId: themeId,
+      lastNonNativeThemeId: themeId,
+      revision: input.expectedRevision + 1,
+    };
+    return structuredClone(state);
+  });
+  const deleteUserTheme = overrides.deleteUserTheme ?? (async (input) => {
+    userThemeCalls.push({ kind: "delete", ...input });
+    state = {
+      ...state,
+      selectedThemeId: "miku-488137",
+      lastNonNativeThemeId: "miku-488137",
+      revision: input.expectedRevision + 1,
+    };
+    return structuredClone(state);
+  });
   const server = await startControlServer({
     token: CONTROL_TOKEN,
     allowedOrigins: new Set([APP_ORIGIN]),
     readState,
     setPersistence,
     setThemeSelection,
+    publishUserTheme,
+    deleteUserTheme,
     onPersistenceResponseFinished: overrides.onPersistenceResponseFinished,
     host: "127.0.0.1",
     port: 0,
     maxBodyBytes: overrides.maxBodyBytes ?? 1024,
+    userThemeMaxBodyBytes: overrides.userThemeMaxBodyBytes,
     requestTimeoutMs: overrides.requestTimeoutMs ?? 1500,
+    userThemeRequestTimeoutMs: overrides.userThemeRequestTimeoutMs,
     maxConnections: overrides.maxConnections ?? 8,
     maxPendingRequests: overrides.maxPendingRequests ?? 8,
   });
   t.after(() => server.close());
-  return { server, calls, themeCalls, getState: () => structuredClone(state) };
+  return { server, calls, themeCalls, userThemeCalls, getState: () => structuredClone(state) };
 }
 
 test("accepts an exact theme selection request and returns an authoritative revision", async (t) => {
@@ -247,6 +273,71 @@ test("rejects custom quick images and malformed theme protocol bodies", async (t
     assert.equal(responseJson(response).code, "INVALID_REQUEST");
   }
   assert.equal(fx.themeCalls.length, 0);
+});
+
+test("publishes a user theme from a data URL into the launcher selection", async (t) => {
+  const fx = await startFixture(t, {
+    state: {
+      persistenceEnabled: true,
+      selectedThemeId: "miku-488137",
+      lastNonNativeThemeId: "miku-488137",
+      revision: 3,
+    },
+  });
+  const pngHeader = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
+  const image = `data:image/png;base64,${pngHeader.toString("base64")}`;
+  const response = await request(fx.server, {
+    path: "/v1/user-theme",
+    body: {
+      revision: 3,
+      requestId: "a".repeat(32),
+      name: "My Upload",
+      image,
+      colors: {
+        accent: "#112233",
+        secondary: "#223344",
+        surface: "#334455",
+        text: "#445566",
+      },
+    },
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(responseJson(response), {
+    ok: true,
+    persistenceEnabled: true,
+    revision: 4,
+    themeId: "uploaded-skin-0123456789abcdef",
+  });
+  assert.equal(fx.userThemeCalls.length, 1);
+  assert.equal(fx.userThemeCalls[0].kind, "publish");
+  assert.equal(fx.userThemeCalls[0].name, "My Upload");
+  assert.ok(Buffer.isBuffer(fx.userThemeCalls[0].imageBytes));
+  assert.equal(fx.userThemeCalls[0].extension, ".png");
+});
+
+test("rejects oversized user-theme bodies while keeping small persistence limits", async (t) => {
+  const fx = await startFixture(t, {
+    state: {
+      persistenceEnabled: true,
+      selectedThemeId: "miku-488137",
+      lastNonNativeThemeId: "miku-488137",
+      revision: 3,
+    },
+    userThemeMaxBodyBytes: 64,
+  });
+  const image = `data:image/png;base64,${Buffer.alloc(128, 1).toString("base64")}`;
+  const response = await request(fx.server, {
+    path: "/v1/user-theme",
+    body: {
+      revision: 3,
+      requestId: "b".repeat(32),
+      name: "Too Big",
+      image,
+    },
+  });
+  assert.equal(response.status, 413);
+  assert.equal(responseJson(response).code, "PAYLOAD_TOO_LARGE");
+  assert.equal(fx.userThemeCalls.length, 0);
 });
 
 test("returns a safe conflict for a stale different theme selection", async (t) => {
@@ -518,6 +609,7 @@ test("answers only the exact CORS persistence preflight", async (t) => {
     accepted.headers["access-control-allow-headers"],
     "Content-Type, X-HeiGe-Control-Token",
   );
+  assert.equal(accepted.headers["access-control-allow-private-network"], "true");
 
   assert.equal((await preflight(server, { requestMethod: "PUT" })).status, 400);
   assert.equal(
