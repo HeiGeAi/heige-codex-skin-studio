@@ -1,5 +1,22 @@
 # 更新日志
 
+## 5.4.5 - 2026-07-19
+
+### 修复
+
+- 修复顶部「皮肤常驻」开启慢/假等待：菜单 HTTP 超时由 3s 提到 15s（与主题保存一致），业务错误（含 `BACKGROUND_START_FAILED` 补偿关闭）立刻告警，不再误排队 CDP 兜底；CDP 兜底超时收至 20s。
+- 修复 Windows 开启常驻时前后台抢锁出现 `LOCK_MALFORMED`（staging 缺 `owner.json`）导致开启被补偿回关：锁获取对 `LOCK_MALFORMED` / 瞬时 `LOCK_PERMISSIONS` 做有界重试，清理并发 staging 时跳过未写完的目录，并显式传递 `AppIdentityToken`。
+- 修复提升权限会话下计划任务 `RunLevel=Limited` 与 High IL 锁目录冲突导致的 `LOCK_PERMISSIONS` / `BACKGROUND_START_FAILED`：注册进程若已提升，控制器任务改为 `Highest`；Windows 握手等待放宽到 35s。
+- 合入 Windows 常驻重启接管：用户正常启动不带 CDP 的 Codex 时，后台控制器会安全退出并以 CDP 重新拉起再注入（独立版/可开 CDP 环境；Store 屏蔽 9341 仍属环境限制）。
+
+### 性能
+
+- 保留 5.4.4 的空闲健康巡检 10s；有 relaunch/注入/renderer 控制请求等交互时改用 1s 节拍，避免 CDP 兜底最坏多等一整拍。
+
+### 测试
+
+- 新增常驻超时阈值、业务失败不排队 CDP、双节拍、锁重试与 Windows 握手 35s 等回归断言。
+
 ## 5.4.4 - 2026-07-19
 
 ### 性能
@@ -13,6 +30,10 @@
 - 新增回归断言：皮肤背景禁用 fixed 附着、气泡模糊半径上限 8px、后台巡检节拍为 10 秒。
 
 ## 5.4.3 - 2026-07-19
+
+### 修复
+
+- 修复 Windows 常驻开启后用户正常重启 Codex 皮肤不恢复的问题：后台控制器此前只在 macOS 接线 `probeNativeProcess` / `restartIntoCdp`，Windows 一直停在 `wait-for-app`。现已通过 PowerShell 安全退出并以 CDP 重新拉起，随后由控制器注入皮肤。
 
 ### 新功能
 
