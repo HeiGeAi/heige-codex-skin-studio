@@ -146,7 +146,7 @@ test("paired upload requires exactly one source and creates the canonical archiv
   assert.equal(validatePackage(parsed, SLUG, { packageKind: "paired", hasPet: true }).kind, "paired");
 });
 
-test("prompt recommendations expose trusted preview, detail, and download links", async () => {
+test("prompt recommendations expose trusted preview and detail links without permanent package URLs", async () => {
   assert.deepEqual(parseRemoteArgs(["recommend", "--prompt", "anime cyan", "--limit", "6", "--json"]), {
     command: "recommend",
     endpoint: "https://codexskinstudio.com",
@@ -166,10 +166,10 @@ test("prompt recommendations expose trusted preview, detail, and download links"
   }, "https://codexskinstudio.com");
   assert.equal(item.imageUrl, "https://codexskinstudio.com/media/miku.webp");
   assert.equal(item.detailUrl, "https://codexskinstudio.com/skins/miku-signal");
-  assert.equal(item.downloadUrl, "https://codexskinstudio.com/download/miku-signal");
+  assert.equal(item.downloadUrl, undefined);
+  assert.equal(item.downloadRequiresGrant, true);
   assert.equal(rankRecommendation(item, "anime cyan").recommendationReason.includes("category:anime-2d"), true);
   await assert.rejects(recommendSkins({ endpoint: "https://codexskinstudio.com", limit: 3 }), /non-empty --prompt/);
-  assert.throws(() => normalizeCatalogItem({ slug: "bad", downloadUrl: "https://example.com/download/bad" }, "https://codexskinstudio.com"), /official HTTPS|trusted/);
 });
 
 test("legacy theme packaging remains compatible with the legacy archive validator", async () => {
