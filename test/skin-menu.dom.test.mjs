@@ -614,14 +614,14 @@ test("switch track and border colors meet three-to-one non-text contrast", async
   }
 });
 
-test("off is painted only after the controller ACK", async (t) => {
+test("persistence is painted locally before the controller ACK", async (t) => {
   const pending = deferredResponse();
   const page = await menuWindow({ fetch: () => pending.promise });
   t.after(() => page.close());
   await page.clickPersistenceSwitch();
   assert.equal(page.confirmation.hidden, false);
   await page.clickConfirmOff();
-  assert.equal(page.switch.getAttribute("aria-checked"), "true");
+  assert.equal(page.switch.getAttribute("aria-checked"), "false");
   assert.equal(page.switch.getAttribute("aria-busy"), "true");
   pending.resolve(okResponse({ persistenceEnabled: false, revision: 8 }));
   await page.flush();
@@ -640,11 +640,11 @@ test("cancel keeps persistence on without contacting the controller", async (t) 
   assert.equal(calls, 0);
 });
 
-test("a renderer-blocked request is queued for the controller poll without painting an ACK", async (t) => {
+test("a renderer-blocked request keeps the optimistic state while syncing silently", async (t) => {
   const page = await menuWindow({ fetch: async () => { throw new Error("Failed to fetch"); } });
   t.after(() => page.close());
   await page.disablePersistence();
-  assert.equal(page.switch.getAttribute("aria-checked"), "true");
+  assert.equal(page.switch.getAttribute("aria-checked"), "false");
   assert.equal(page.switch.getAttribute("aria-busy"), "true");
   const request = page.window.__heigeCodexSkinRuntime.status().controlRequest;
   assert.deepEqual(Object.keys(request).sort(), [
@@ -660,7 +660,8 @@ test("a renderer-blocked request is queued for the controller poll without paint
   assert.equal(request.persistenceEnabled, false);
   assert.match(request.requestId, /^[0-9a-f]{32}$/);
   assert.match(request.capability, /^[A-Za-z0-9_-]{43}$/);
-  assert.match(page.alert.textContent, /后台确认/);
+  assert.equal(page.alert.hidden, true);
+  assert.equal(page.alert.textContent, "");
   assert.equal(page.alert.getAttribute("role"), "alert");
 });
 
@@ -695,7 +696,7 @@ test("a compensated enable failure syncs revision without painting on", async (t
   assert.equal(page.switch.getAttribute("aria-checked"), "true");
 });
 
-test("persistence HTTP abort uses 15s and CDP fallback expires at 20s", async (t) => {
+test("persistence background sync uses Windows-safe non-blocking timeouts", async (t) => {
   const timeouts = [];
   const page = await menuWindow({
     persistenceEnabled: false,
@@ -709,9 +710,40 @@ test("persistence HTTP abort uses 15s and CDP fallback expires at 20s", async (t
     return originalSetTimeout(callback, milliseconds, ...args);
   };
   await page.enablePersistence();
-  assert.equal(timeouts.includes(15_000), true, "persistence fetch abort must be 15s");
-  assert.equal(timeouts.includes(20_000), true, "persistence CDP fallback must expire at 20s");
+  assert.equal(timeouts.includes(90_000), true, "persistence fetch must allow a cold Windows task start");
+  assert.equal(timeouts.includes(120_000), true, "persistence CDP fallback must stay silent through handoff");
   assert.notEqual(page.window.__heigeCodexSkinRuntime.status().controlRequest, null);
+  assert.equal(page.switch.getAttribute("aria-checked"), "true");
+  assert.equal(page.alert.hidden, true);
+});
+
+test("theme choices remain local-first while persistence sync is pending", async (t) => {
+  const page = await menuWindow({
+    persistenceEnabled: false,
+    revision: 3,
+    entries: [
+      { id: "miku-488137", name: "Miku", accent: "#19c9e5", css: "html { color: #123456; }" },
+      { id: "night-city", name: "Night City", accent: "#4455aa", css: "html { color: #eeeeee; }" },
+    ],
+    fetch: async () => { throw new Error("Failed to fetch"); },
+  });
+  t.after(() => page.close());
+
+  await page.enablePersistence();
+  assert.equal(page.switch.getAttribute("aria-checked"), "true");
+  assert.equal(page.switch.getAttribute("aria-busy"), "true");
+  assert.equal(
+    page.window.__heigeCodexSkinRuntime.status().controlRequest?.action,
+    "set-persistence",
+  );
+
+  await page.openThemeCenter();
+  await page.pickTheme("night-city");
+
+  assert.equal(page.themeId, "night-city");
+  assert.equal(page.window.localStorage.getItem("heigeCodexSkinSelected"), "night-city");
+  assert.equal(page.saveState.textContent, "已本地切换");
+  assert.equal(page.alert.hidden, true);
 });
 
 test("malformed and mismatched ACKs never change the painted state", async (t) => {
@@ -739,7 +771,7 @@ test("scripted Enter and Space keydown operate the switch while pending input is
   await page.keyPersistenceSwitch("Enter");
   await page.keyPersistenceSwitch(" ");
   assert.equal(calls, 1);
-  assert.equal(page.switch.getAttribute("aria-checked"), "false");
+  assert.equal(page.switch.getAttribute("aria-checked"), "true");
   pending.resolve(okResponse({ persistenceEnabled: true, revision: 8 }));
   await page.flush();
   assert.equal(page.switch.getAttribute("aria-checked"), "true");

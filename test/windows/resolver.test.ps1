@@ -451,6 +451,21 @@ process.stdout.write(JSON.stringify(app));
         Assert-Equal @("S-1-5-21-1000") $accessSids
     }
 
+    Test-Case "Private ACL fast check accepts only the exact owner and rule shape" {
+        $sid = "S-1-5-21-1000"
+        $directoryAcl = New-HeiGePrivateDirectoryAcl -UserSid $sid
+        $fileAcl = New-HeiGePrivateFileAcl -UserSid $sid
+        Assert-True (Test-HeiGePrivatePathAcl -Path "C:\unused-directory" `
+            -UserSid $sid -IsDirectory $true -AclProvider { param($Path) $directoryAcl })
+        Assert-True (Test-HeiGePrivatePathAcl -Path "C:\unused-file" `
+            -UserSid $sid -IsDirectory $false -AclProvider { param($Path) $fileAcl })
+        Assert-False (Test-HeiGePrivatePathAcl -Path "C:\unused-directory" `
+            -UserSid "S-1-5-21-2000" -IsDirectory $true `
+            -AclProvider { param($Path) $directoryAcl })
+        Assert-False (Test-HeiGePrivatePathAcl -Path "C:\unused-file" `
+            -UserSid $sid -IsDirectory $true -AclProvider { param($Path) $fileAcl })
+    }
+
     Test-Case "Private state directory applies the protected ACL" {
         $state = Join-Path $script:Root "State 中文"
         New-Item -ItemType Directory -Path $state -Force | Out-Null

@@ -9,7 +9,7 @@
 - 顶部菜单「皮肤常驻」开关是唯一受支持的开启常驻入口。想再次常驻时，先打开「HeiGe 皮肤启动器」恢复当前会话，再在顶部菜单显式打开常驻开关。
 - `apply` 与兼容名 `enable-skin` 都只恢复当前会话；`pause`、`resume`、`restore` 与只读 `status`、`doctor` 语义分离。
 - `enable-persist.command` 是弃用的非零退出入口，不是常驻开关的替代入口。
-- 顶部「自定义图片」只是单个本地快捷槽，它不是可分发的正式主题，也不改写最近正式主题；renderer 本地存储可在自动补针或常驻启动时继续显示它。
+- 顶部「自定义图片」验证后会写入本机用户主题库并记入启动器，可幂等覆盖、删除并在常驻启动时恢复；它不是仓库内可跨机器分发的正式主题。
 - Windows 生命周期操作使用 `scripts/windows` 下对应的 `.ps1` 或 `.bat`；直接 Node CLI 不负责 Windows Store/MSIX 激活或进程重启。
 - macOS 有自动化与日期化真机证据；Windows 有 Windows PowerShell 5.1、PowerShell 7、32 位解析和隔离任务自动化，Microsoft Store/MSIX 真机待验证。
 - 使用系统 Node 时要求 Node.js 22 或更新版本。生产安装不含 npm 运行时依赖；开发依赖仅用于测试与确定性打包。

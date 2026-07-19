@@ -31,6 +31,6 @@ Invoke-HeiGeBatEntrypoint {
     }
     if ($result.BootstrapIdempotent) {
         Write-Host "提示：Codex 已在运行。若看不到窗口，请到任务栏/系统托盘打开 Codex。"
-        Show-HeiGeCodexWindow -AppInfo (Get-HeiGeFlowContext -Root $root).App | Out-Null
+        Show-HeiGeCodexWindow -AppInfo $result.AppInfo | Out-Null
     }
 }

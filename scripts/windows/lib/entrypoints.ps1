@@ -702,6 +702,46 @@ function Invoke-HeiGeBootstrapAndApply {
     }
 
     $steps = New-Object System.Collections.Generic.List[string]
+    # Production fast path: an already active, exactly owned renderer needs only
+    # one CDP ownership proof and one in-page status read. Doctor, stale-lock
+    # cleanup and the second process/port scan are reserved for recovery.
+    $productionFastPath = $true
+    foreach ($providerName in @(
+        "DoctorProvider", "StartCdpProvider", "CdpStatusProvider",
+        "ProcessProvider", "StatusProvider", "HygieneProvider"
+    )) {
+        if ($PSBoundParameters.ContainsKey($providerName)) {
+            $productionFastPath = $false
+            break
+        }
+    }
+    if ($productionFastPath -and (Test-Cdp -Port $Port -App $Context.App)) {
+        try {
+            $status = Invoke-HeiGeContextCli -Context $Context `
+                -Arguments @("status", "--port", [string]$Port) -CliProvider $CliProvider
+            if (Test-HeiGeBootstrapSkinActive -Status $status -Theme $Theme) {
+                Write-Host "快速启动：皮肤已处于 active，跳过重复自检与注入。"
+                $steps.Add("fast-active") | Out-Null
+                return [pscustomobject][ordered]@{
+                    mode = "active"
+                    persistenceEnabled = if (
+                        $null -ne $status.statuses -and
+                        @($status.statuses).Count -gt 0 -and
+                        $status.statuses[0].PSObject.Properties.Name -contains "persistenceEnabled"
+                    ) {
+                        [bool]$status.statuses[0].persistenceEnabled
+                    } else {
+                        $false
+                    }
+                    BootstrapSteps = @($steps)
+                    BootstrapIdempotent = $true
+                }
+            }
+        } catch {
+            # Any fast-path uncertainty falls through to the existing recovery flow.
+        }
+    }
+
     $doctor = $null
     $runDoctor = -not $SkipDoctor.IsPresent -and (
         $PSBoundParameters.ContainsKey("DoctorProvider") -or
@@ -953,6 +993,7 @@ function Invoke-HeiGeApplyFlow {
         } else {
             @()
         }
+        AppInfo = $context.App
     }
 }
 

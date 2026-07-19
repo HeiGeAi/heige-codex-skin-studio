@@ -581,9 +581,17 @@ function Get-HeiGeOwnedStartMenuShortcutObservation {
         [scriptblock]$ReadShortcutProvider
     )
     $workingDirectory = Join-Path $InstallRoot "scripts\windows"
-    $currentTarget = Join-Path $workingDirectory "apply.bat"
+    $currentTarget = Join-Path $workingDirectory "apply-hidden.vbs"
     try {
         return Get-HeiGeShortcutObservation -Path $Path -ExpectedTarget $currentTarget `
+            -ExpectedWorkingDirectory $workingDirectory `
+            -ReadShortcutProvider $ReadShortcutProvider
+    } catch {
+        if ($_.Exception.Message -cnotmatch "shortcut target path mismatch") { throw }
+    }
+    $legacyApplyTarget = Join-Path $workingDirectory "apply.bat"
+    try {
+        return Get-HeiGeShortcutObservation -Path $Path -ExpectedTarget $legacyApplyTarget `
             -ExpectedWorkingDirectory $workingDirectory `
             -ReadShortcutProvider $ReadShortcutProvider
     } catch {
@@ -655,10 +663,12 @@ function Assert-HeiGeStartMenuParticipant {
     }
     $shortcutPath = Join-Path $startMenuRoot "HeiGe Codex Skin Studio\HeiGe 皮肤启动器.lnk"
     $folderPath = Split-Path $shortcutPath -Parent
-    $currentTargetPath = Join-Path $installRoot "scripts\windows\apply.bat"
+    $currentTargetPath = Join-Path $installRoot "scripts\windows\apply-hidden.vbs"
+    $legacyApplyTargetPath = Join-Path $installRoot "scripts\windows\apply.bat"
     $legacyTargetPath = Join-Path $installRoot "scripts\windows\enable-skin.bat"
     $targetPath = [string]$Participant.TargetPath
     if (-not (Test-HeiGeSamePath -Left $targetPath -Right $currentTargetPath) -and
+        -not (Test-HeiGeSamePath -Left $targetPath -Right $legacyApplyTargetPath) -and
         -not (Test-HeiGeSamePath -Left $targetPath -Right $legacyTargetPath)) {
         throw "Start Menu participant 目标不是当前或受信旧版启动器。"
     }
@@ -784,7 +794,7 @@ function Prepare-HeiGeStartMenuShortcut {
     if (-not (Test-Path -LiteralPath $resolvedValidationRoot -PathType Container)) {
         throw "验证目录不存在：$resolvedValidationRoot"
     }
-    $validationTarget = Join-Path $resolvedValidationRoot "scripts\windows\apply.bat"
+    $validationTarget = Join-Path $resolvedValidationRoot "scripts\windows\apply-hidden.vbs"
     Assert-HeiGeNoReparsePathComponents -Path $validationTarget -Description "快捷方式验证目标" | Out-Null
     if (-not (Test-Path -LiteralPath $validationTarget -PathType Leaf)) {
         throw "快捷方式验证目标不存在：$validationTarget"
@@ -793,7 +803,7 @@ function Prepare-HeiGeStartMenuShortcut {
     if (($validationTargetItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
         throw "快捷方式验证目标不能是 reparse point：$validationTarget"
     }
-    $target = Join-Path $resolvedInstallRoot "scripts\windows\apply.bat"
+    $target = Join-Path $resolvedInstallRoot "scripts\windows\apply-hidden.vbs"
     Assert-HeiGeNoReparsePathComponents -Path $target -Description "快捷方式最终目标" | Out-Null
 
     if (-not $TransactionId) { $TransactionId = [guid]::NewGuid().ToString("D") }
@@ -1103,12 +1113,14 @@ function Test-HeiGeUninstallOwnedStartMenuShortcut {
         return $true
     }
     $workingDirectory = Join-Path $InstallRoot "scripts\windows"
+    $hiddenTarget = Join-Path $workingDirectory "apply-hidden.vbs"
     $applyTarget = Join-Path $workingDirectory "apply.bat"
     $legacyTarget = Join-Path $workingDirectory "enable-skin.bat"
+    if (Test-HeiGeSamePath -Left ([string]$Observation.TargetPath) -Right $hiddenTarget) { return $true }
     if (Test-HeiGeSamePath -Left ([string]$Observation.TargetPath) -Right $applyTarget) { return $true }
     if (Test-HeiGeSamePath -Left ([string]$Observation.TargetPath) -Right $legacyTarget) { return $true }
     $normalizedTarget = ([string]$Observation.TargetPath) -replace '/', '\'
-    if ($normalizedTarget -imatch '\\heige-codex-skin-studio\\scripts\\windows\\(apply|enable-skin)\.bat$') {
+    if ($normalizedTarget -imatch '\\heige-codex-skin-studio\\scripts\\windows\\(apply-hidden\.vbs|(apply|enable-skin)\.bat)$') {
         return $true
     }
     return $false

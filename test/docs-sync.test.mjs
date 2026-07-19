@@ -59,16 +59,16 @@ test("public docs keep every compatibility entry session-only", async () => {
   assert.match(skill, /enable-persist\.command[^\n。]*(?:弃用|废弃)[^\n。]*非零/);
 });
 
-test("custom quick image stays a local temporary slot rather than a durable theme", async () => {
+test("custom image is durable locally but remains distinct from a distributable theme", async () => {
   const [readme, skill, skillReadme] = await Promise.all([
     publicDoc("README.md"),
     publicDoc("skill/heige-codex-skin-studio/SKILL.md"),
     publicDoc("skill/heige-codex-skin-studio/README.md"),
   ]);
   for (const doc of [readme, skill, skillReadme]) {
-    assert.match(doc, /自定义图片[^\n。]*(?:本地临时槽|本地快捷槽)/);
-    assert.match(doc, /不[^\n。]*(?:正式主题|持久主题|权威主题)/);
-    assert.match(doc, /renderer 本地存储[^\n。]*(?:自动补针|常驻启动)[^\n。]*继续显示/i);
+    assert.match(doc, /自定义图片[^\n。]*(?:用户主题库|记入启动器)/);
+    assert.match(doc, /(?:常驻启动|常驻)[^\n。]*(?:恢复|复现)/);
+    assert.match(doc, /不是[^\n。]*(?:可分发|跨机器分发)[^\n。]*正式主题/);
   }
 });
 

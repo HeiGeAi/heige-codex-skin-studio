@@ -1469,7 +1469,13 @@ export function buildSkinMenuScript({
       persistenceSwitch.style.background = persistenceEnabled ? "#087d8a" : "#66788a";
       persistenceSwitch.style.opacity = pending ? ".64" : "1";
       switchKnob.style.left = persistenceEnabled ? "21px" : "4px";
-      headingState.textContent = pending ? "正在等待后台确认…" : persistenceEnabled ? "已开启，下次启动继续使用" : "已关闭，仅保留本次会话";
+      headingState.textContent = pending
+        ? persistenceEnabled
+          ? "已开启，正在后台静默保存…"
+          : "已关闭，正在后台静默保存…"
+        : persistenceEnabled
+          ? "已开启，下次启动继续使用"
+          : "已关闭，仅保留本次会话";
     };
     const safeClientError = (error) => {
       if (error?.name === "AbortError") return "控制器请求超时，请重试";
@@ -1721,11 +1727,12 @@ export function buildSkinMenuScript({
       if (themeId === data.nativeSel) clearTheme(persist, broadcast);
       else setTheme(themeId, persist, broadcast);
     };
-    const queueControlRequest = (request) => {
+    const queueControlRequest = (request, { silent = false } = {}) => {
       if (controlRequest !== null) return false;
       controlRequest = request;
-      // 常驻 CDP 兜底不宜拖太久；主题 / 用户主题发布仍保留较长窗口。
-      const fallbackTimeoutMs = request.action === "set-persistence" ? 20_000 : 60_000;
+      // Windows 首次注册并启动计划任务可能明显超过 20 秒。常驻切换已经在前端
+      // 乐观生效，这里只给后台静默保存留出完整窗口，不再让超时回退 UI。
+      const fallbackTimeoutMs = request.action === "set-persistence" ? 120_000 : 60_000;
       controlRequestTimeout = later(() => {
         if (controlRequest?.requestId !== request.requestId) return;
         const timedOut = controlRequest;
@@ -1743,9 +1750,9 @@ export function buildSkinMenuScript({
           themePending = false;
           for (const item of rows.values()) item.disabled = false;
         }
-        showAlert("后台控制器未确认，请重试");
+        if (!silent) showAlert("后台控制器未确认，请重试");
       }, fallbackTimeoutMs);
-      showAlert("正在等待后台确认…", "success");
+      if (!silent) showAlert("正在等待后台确认…", "success");
       return true;
     };
     const isRevision = (value) => Number.isSafeInteger(value) && value >= 0;
@@ -2043,6 +2050,9 @@ export function buildSkinMenuScript({
         persistenceEnabled: target,
       };
       pending = true;
+      // 常驻与主题选择采用相同的本地优先交互：开关先按用户意图改变，
+      // 计划任务注册和控制器交接只在后台同步，不能阻塞主题面板。
+      persistenceEnabled = target;
       let queued = false;
       if (!target && !confirmation.hidden) {
         confirmation.setAttribute("aria-busy", "true");
@@ -2052,8 +2062,8 @@ export function buildSkinMenuScript({
       hideAlert();
       paintPersistence();
       const abortController = childController();
-      // 开启常驻含计划任务注册与握手（默认 10s）；3s 会误超时并排队 CDP，掩盖 BACKGROUND_START_FAILED。
-      const timeoutId = later(() => abortController.abort(), 15000);
+      // Windows 首次 ACL 校验、计划任务注册和控制器握手可能超过一分钟。
+      const timeoutId = later(() => abortController.abort(), 90_000);
       try {
         const response = await fetch(data.control.endpoint, {
           method: "POST",
@@ -2090,6 +2100,7 @@ export function buildSkinMenuScript({
             : "常驻已关闭。本次继续使用，下次启动恢复原生界面。\\n「HeiGe 皮肤启动器」或「启用 HeiGe 皮肤」只恢复本次皮肤。\\n下次仍常驻：重新打开此开关。",
           "success");
         } else {
+          persistenceEnabled = previousEnabled;
           if (
             body?.ok === false &&
             body.persistenceEnabled === previousEnabled &&
@@ -2107,15 +2118,20 @@ export function buildSkinMenuScript({
       } catch (error) {
         if (!isCurrent()) return;
         if (error?.message?.includes("后台响应无效")) {
+          persistenceEnabled = previousEnabled;
           showAlert(error.message);
         } else if (
           error?.name === "AbortError" ||
           /Failed to fetch|NetworkError|Load failed|CSP|blocked/i.test(String(error?.message ?? error))
         ) {
           // 仅超时/网络/CSP 才排队 CDP 兜底。
-          queued = queueControlRequest(fallbackRequest);
-          if (!queued) showAlert(safeClientError(error));
+          queued = queueControlRequest(fallbackRequest, { silent: true });
+          if (!queued) {
+            persistenceEnabled = previousEnabled;
+            showAlert(safeClientError(error));
+          }
         } else {
+          persistenceEnabled = previousEnabled;
           showAlert(safeClientError(error));
         }
       } finally {

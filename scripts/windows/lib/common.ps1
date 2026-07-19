@@ -789,6 +789,57 @@ function New-HeiGePrivateFileAcl {
     return $acl
 }
 
+function Test-HeiGePrivatePathAcl {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$UserSid,
+        [Parameter(Mandatory = $true)][bool]$IsDirectory,
+        [scriptblock]$AclProvider
+    )
+    try {
+        $acl = if ($AclProvider) {
+            & $AclProvider $Path
+        } else {
+            Get-Acl -LiteralPath $Path -ErrorAction Stop
+        }
+        if ($null -eq $acl -or -not [bool]$acl.AreAccessRulesProtected) { return $false }
+        $owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+        if ([string]$owner -cne $UserSid) { return $false }
+        $rules = @($acl.GetAccessRules(
+            $true,
+            $true,
+            [System.Security.Principal.SecurityIdentifier]
+        ))
+        if ($rules.Count -ne 1) { return $false }
+        $rule = $rules[0]
+        if (
+            [string]$rule.IdentityReference.Value -cne $UserSid -or
+            $rule.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow -or
+            (
+                $rule.FileSystemRights -band
+                [System.Security.AccessControl.FileSystemRights]::FullControl
+            ) -ne [System.Security.AccessControl.FileSystemRights]::FullControl
+        ) {
+            return $false
+        }
+        if ($IsDirectory) {
+            $expectedInheritance =
+                [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+                [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
+            return (
+                $rule.InheritanceFlags -eq $expectedInheritance -and
+                $rule.PropagationFlags -eq [System.Security.AccessControl.PropagationFlags]::None
+            )
+        }
+        return (
+            $rule.InheritanceFlags -eq [System.Security.AccessControl.InheritanceFlags]::None -and
+            $rule.PropagationFlags -eq [System.Security.AccessControl.PropagationFlags]::None
+        )
+    } catch {
+        return $false
+    }
+}
+
 function Set-HeiGePrivatePathAcl {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -855,9 +906,14 @@ function Protect-HeiGeStateDirectory {
     if (($root.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
         throw "状态目录不能是 reparse point：$Path"
     }
-    $directoryAcl = New-HeiGePrivateDirectoryAcl -UserSid $CurrentUserSid
-    Set-HeiGePrivatePathAcl -Path $Path -AclObject $directoryAcl `
-        -UserSid $CurrentUserSid -IsDirectory $true -SetAclProvider $SetAclProvider | Out-Null
+    if (
+        $SetAclProvider -or
+        -not (Test-HeiGePrivatePathAcl -Path $Path -UserSid $CurrentUserSid -IsDirectory $true)
+    ) {
+        $directoryAcl = New-HeiGePrivateDirectoryAcl -UserSid $CurrentUserSid
+        Set-HeiGePrivatePathAcl -Path $Path -AclObject $directoryAcl `
+            -UserSid $CurrentUserSid -IsDirectory $true -SetAclProvider $SetAclProvider | Out-Null
+    }
 
     if (-not $ChildItemProvider) {
         $ChildItemProvider = {
@@ -879,13 +935,21 @@ function Protect-HeiGeStateDirectory {
         }
     }
     foreach ($item in $items) {
-        $itemAcl = if ($item.PSIsContainer) {
+        $isDirectory = [bool]$item.PSIsContainer
+        if (
+            -not $SetAclProvider -and
+            (Test-HeiGePrivatePathAcl -Path $item.FullName -UserSid $CurrentUserSid `
+                -IsDirectory $isDirectory)
+        ) {
+            continue
+        }
+        $itemAcl = if ($isDirectory) {
             New-HeiGePrivateDirectoryAcl -UserSid $CurrentUserSid
         } else {
             New-HeiGePrivateFileAcl -UserSid $CurrentUserSid
         }
         Set-HeiGePrivatePathAcl -Path $item.FullName -AclObject $itemAcl `
-            -UserSid $CurrentUserSid -IsDirectory ([bool]$item.PSIsContainer) `
+            -UserSid $CurrentUserSid -IsDirectory $isDirectory `
             -SetAclProvider $SetAclProvider | Out-Null
     }
     return (Get-Acl -LiteralPath $Path)
@@ -894,13 +958,16 @@ function Protect-HeiGeStateDirectory {
 function Get-DefaultCdpOwners {
     param([int]$Port)
     $connections = @()
+    $netstatSucceeded = $false
     try {
-        Import-Module NetTCPIP -ErrorAction SilentlyContinue | Out-Null
-        $connections = @(Get-NetTCPConnection -LocalAddress "127.0.0.1" -LocalPort $Port -State Listen -ErrorAction Stop)
-    } catch {
-        # 部分会话无法自动加载 NetTCPIP；回退解析 netstat，避免端口已开却误判失败。
-        $connections = @()
-        foreach ($line in @(netstat -ano -p tcp 2>$null)) {
+        $netstat = Join-Path $env:SystemRoot "System32\netstat.exe"
+        if (-not (Test-Path -LiteralPath $netstat -PathType Leaf)) {
+            throw "netstat.exe is unavailable"
+        }
+        $lines = @(& $netstat -ano -p tcp 2>$null)
+        if ($LASTEXITCODE -ne 0) { throw "netstat.exe failed" }
+        $netstatSucceeded = $true
+        foreach ($line in $lines) {
             if ($line -notmatch '^\s*TCP\s+127\.0\.0\.1:(\d+)\s+\S+\s+LISTENING\s+(\d+)\s*$') { continue }
             if ([int]$Matches[1] -ne [int]$Port) { continue }
             $connections += [pscustomobject]@{
@@ -908,6 +975,16 @@ function Get-DefaultCdpOwners {
                 LocalPort = [int]$Port
             }
         }
+    } catch {
+        $netstatSucceeded = $false
+    }
+    if (-not $netstatSucceeded) {
+        # 仅在系统 netstat 不可用时加载较慢的 NetTCPIP 模块。
+        Import-Module NetTCPIP -ErrorAction SilentlyContinue | Out-Null
+        $connections = @(
+            Get-NetTCPConnection -LocalAddress "127.0.0.1" -LocalPort $Port `
+                -State Listen -ErrorAction Stop
+        )
     }
     $owners = @()
     foreach ($connection in $connections) {

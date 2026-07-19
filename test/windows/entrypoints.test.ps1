@@ -12,6 +12,7 @@ $script:StartMenuRoot = Join-Path $script:Root "Start Menu Programs"
 $script:FakeNode = Join-Path $script:InstallRoot "runtime\node.exe"
 $script:FakeCli = Join-Path $script:InstallRoot "src\cli.mjs"
 $script:FakeController = Join-Path $script:InstallRoot "scripts\windows\controller.ps1"
+$script:ApplyHidden = Join-Path $script:InstallRoot "scripts\windows\apply-hidden.vbs"
 $script:ApplyBat = Join-Path $script:InstallRoot "scripts\windows\apply.bat"
 $script:EnableBat = Join-Path $script:InstallRoot "scripts\windows\enable-skin.bat"
 $script:SkillRoot = Join-Path $script:RepositoryRoot "skill\heige-codex-skin-studio"
@@ -21,7 +22,7 @@ $script:SkillInstructions = Join-Path $script:SkillRoot "SKILL.md"
 $script:SkillReadme = Join-Path $script:SkillRoot "README.md"
 foreach ($path in @(
     $script:FakeNode, $script:FakeCli, $script:FakeController,
-    $script:ApplyBat, $script:EnableBat
+    $script:ApplyHidden, $script:ApplyBat, $script:EnableBat
 )) {
     New-Item -ItemType Directory -Path (Split-Path $path -Parent) -Force | Out-Null
     New-Item -ItemType File -Path $path -Force | Out-Null
@@ -843,7 +844,7 @@ try {
         Assert-Equal @("preflight") $script:Events
     }
 
-    Test-Case "Start Menu launcher targets session-only apply BAT" {
+    Test-Case "Start Menu launcher targets the hidden session-only apply entrypoint" {
         $script:ShortcutTarget = $null
         $result = Install-HeiGeStartMenuShortcut -InstallRoot $script:InstallRoot `
             -StartMenuRoot $script:StartMenuRoot `
@@ -857,7 +858,7 @@ try {
                 New-TestShortcutObservation -TargetPath $script:ShortcutTarget `
                     -WorkingDirectory (Split-Path $script:ShortcutTarget -Parent)
             }
-        Assert-Equal $script:ApplyBat $script:ShortcutTarget
+        Assert-Equal $script:ApplyHidden $script:ShortcutTarget
         Assert-Equal (Join-Path $script:StartMenuRoot "HeiGe Codex Skin Studio\HeiGe 皮肤启动器.lnk") $result.ShortcutPath
         Assert-True $result.Verified
     }
@@ -873,7 +874,7 @@ try {
             $target = if ($content -ceq "legacy launcher") {
                 $script:EnableBat
             } else {
-                $script:ApplyBat
+                $script:ApplyHidden
             }
             New-TestShortcutObservation -TargetPath $target `
                 -WorkingDirectory (Split-Path $target -Parent)
@@ -882,7 +883,7 @@ try {
             -StartMenuRoot $migrationRoot `
             -CreateShortcutProvider {
                 param($Path, $Target, $WorkingDirectory, $Description)
-                Assert-Equal $script:ApplyBat $Target
+                Assert-Equal $script:ApplyHidden $Target
                 [System.IO.File]::WriteAllText($Path, "session launcher")
             } `
             -ReadShortcutProvider $readProvider
@@ -970,8 +971,8 @@ try {
         $shortcutPath = Get-HeiGeStartMenuShortcutPath -StartMenuRoot $transactionMenuRoot
         New-Item -ItemType Directory -Path (Split-Path $shortcutPath -Parent) -Force | Out-Null
         [System.IO.File]::WriteAllText($shortcutPath, "old shortcut bytes")
-        $script:TransactionalTarget = $script:ApplyBat
-        $script:TransactionalWorking = Split-Path $script:ApplyBat -Parent
+        $script:TransactionalTarget = $script:ApplyHidden
+        $script:TransactionalWorking = Split-Path $script:ApplyHidden -Parent
         $readProvider = {
             param($Path)
             New-TestShortcutObservation -TargetPath $script:TransactionalTarget `
@@ -1001,8 +1002,8 @@ try {
         $shortcutPath = Get-HeiGeStartMenuShortcutPath -StartMenuRoot $finalizeMenuRoot
         New-Item -ItemType Directory -Path (Split-Path $shortcutPath -Parent) -Force | Out-Null
         [System.IO.File]::WriteAllText($shortcutPath, "prior version")
-        $script:TransactionalTarget = $script:ApplyBat
-        $script:TransactionalWorking = Split-Path $script:ApplyBat -Parent
+        $script:TransactionalTarget = $script:ApplyHidden
+        $script:TransactionalWorking = Split-Path $script:ApplyHidden -Parent
         $readProvider = {
             param($Path)
             New-TestShortcutObservation -TargetPath $script:TransactionalTarget `
@@ -1026,8 +1027,8 @@ try {
 
     Test-Case "Fresh Start Menu participant rollback restores folder absence" {
         $freshMenuRoot = Join-Path $script:Root "Fresh Rollback Start Menu"
-        $script:TransactionalTarget = $script:ApplyBat
-        $script:TransactionalWorking = Split-Path $script:ApplyBat -Parent
+        $script:TransactionalTarget = $script:ApplyHidden
+        $script:TransactionalWorking = Split-Path $script:ApplyHidden -Parent
         $readProvider = {
             param($Path)
             New-TestShortcutObservation -TargetPath $script:TransactionalTarget `
@@ -1081,8 +1082,8 @@ try {
                 -StartMenuRoot $foreignMenuRoot `
                 -ReadShortcutProvider {
                     param($Path)
-                    New-TestShortcutObservation -TargetPath $script:ApplyBat `
-                        -WorkingDirectory (Split-Path $script:ApplyBat -Parent) `
+                    New-TestShortcutObservation -TargetPath $script:ApplyHidden `
+                        -WorkingDirectory (Split-Path $script:ApplyHidden -Parent) `
                         -Description "Foreign launcher"
                 } | Out-Null
         } "shortcut description marker mismatch"
@@ -1099,8 +1100,8 @@ try {
                 -StartMenuRoot $foreignMenuRoot `
                 -ReadShortcutProvider {
                     param($Path)
-                    New-TestShortcutObservation -TargetPath $script:ApplyBat `
-                        -WorkingDirectory (Split-Path $script:ApplyBat -Parent) `
+                    New-TestShortcutObservation -TargetPath $script:ApplyHidden `
+                        -WorkingDirectory (Split-Path $script:ApplyHidden -Parent) `
                         -Arguments "--theme foreign"
                 } | Out-Null
         } "shortcut arguments mismatch"
@@ -1141,7 +1142,7 @@ try {
                 New-TestShortcutObservation -TargetPath $script:ShortcutTarget `
                     -WorkingDirectory $script:ShortcutWorking
             }
-        Assert-Equal (Join-Path $futureInstallRoot "scripts\windows\apply.bat") $participant.TargetPath
+        Assert-Equal (Join-Path $futureInstallRoot "scripts\windows\apply-hidden.vbs") $participant.TargetPath
         Assert-Equal $futureInstallRoot $participant.InstallRoot
         Assert-False (Test-Path -LiteralPath $futureInstallRoot)
         Rollback-HeiGeStartMenuShortcut -Participant $participant `

@@ -102,7 +102,7 @@ open "$HOME/Applications/HeiGe 皮肤启动器.app"
 
 ## Windows（待实机验收）
 
-Windows 入口位于 `scripts\windows`。安装只写当前用户目录，并创建「HeiGe Codex Skin Studio\HeiGe 皮肤启动器」开始菜单快捷方式；`apply.bat` 和兼容名 `enable-skin.bat` 都只作用于当前会话，`pause.bat`、`resume.bat` 与 `restore.bat` 分别暂停、恢复和彻底还原；`close-codex.bat` 只安全完整退出已归属的 Codex/GPT 桌面进程并保持关闭，不改常驻、不自动 apply、不自动重启。若要下次启动仍恢复皮肤，必须在已恢复的 Codex 中手动打开顶部常驻开关；常驻开启后，用户正常重启 Codex（不带调试端口）时，当前用户计划任务中的后台控制器会把它安全退出并以 CDP 重新拉起再注入皮肤。系统 Node 必须为 Node.js 22 或更新版本。
+Windows 入口位于 `scripts\windows`。安装只写当前用户目录，并创建「HeiGe Codex Skin Studio\HeiGe 皮肤启动器」开始菜单快捷方式；快捷方式默认通过纯 ASCII 的 `apply-hidden.vbs` 隐藏启动并直接调用 `apply.ps1`，不会显示命令行窗口。需要查看诊断输出时可手动运行 `apply.bat`。`apply.bat` 和兼容名 `enable-skin.bat` 都只作用于当前会话，`pause.bat`、`resume.bat` 与 `restore.bat` 分别暂停、恢复和彻底还原；`close-codex.bat` 只安全完整退出已归属的 Codex/GPT 桌面进程并保持关闭，不改常驻、不自动 apply、不自动重启。若要下次启动仍恢复皮肤，必须在已恢复的 Codex 中手动打开顶部常驻开关；常驻开关会立即更新界面，后台静默保存期间不阻塞主题切换。常驻开启后，用户正常重启 Codex（不带调试端口）时，当前用户计划任务中的后台控制器会把它安全退出并以 CDP 重新拉起再注入皮肤。系统 Node 必须为 Node.js 22 或更新版本。
 
 常驻开启成功的标准：开关数秒内变为「已开启」、`%APPDATA%\HeiGeCodexSkinStudio\state.json` 中 `persistenceEnabled` 为 `true`，且任务计划程序里存在 HeiGe 控制器任务。若开关立刻报错或仍为关闭，查看同目录 `injector.log` 中的 `BACKGROUND_START_FAILED` / `LOCK_MALFORMED`；不要长时间停在「正在等待后台确认」。Microsoft Store 版若无法打开调试端口 9341（`abort-incompatible`），常驻重启接管无法完成，需用独立安装版或先走 `close-codex` 后再用启动器恢复。
 

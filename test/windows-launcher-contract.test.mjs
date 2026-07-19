@@ -41,7 +41,7 @@ test("Windows Start Menu and legacy enable names are session-only apply", async 
     "Invoke-HeiGePauseFlow",
   );
 
-  assert.match(prepare, /scripts\\windows\\apply\.bat/);
+  assert.match(prepare, /scripts\\windows\\apply-hidden\.vbs/);
   assert.doesNotMatch(prepare, /\$target\s*=.*enable-skin\.bat/);
   assert.match(startMenu, /IShellLinkW/);
   assert.match(startMenu, /IPersistFile/);
@@ -53,7 +53,7 @@ test("Windows Start Menu and legacy enable names are session-only apply", async 
   assert.match(startMenu, /persistence\.Save\(path, false\)/);
   assert.doesNotMatch(startMenu, /persistence\.SaveCompleted\(/);
   assert.doesNotMatch(startMenu, /WScript\.Shell/);
-  assert.match(installer, /\$targetPath\s*=\s*Join-Path\s+\$InstallRoot\s+"scripts\\windows\\apply\.bat"/);
+  assert.match(installer, /\$targetPath\s*=\s*Join-Path\s+\$InstallRoot\s+"scripts\\windows\\apply-hidden\.vbs"/);
   assert.doesNotMatch(applyWrapper, /\$Theme\s*=\s*"miku-488137"/);
   assert.match(applyWrapper, /PSBoundParameters\.ContainsKey\("Theme"\)/);
   assert.match(entrypoints, /"--prefer-stored"/);
@@ -74,8 +74,19 @@ test("Windows Start Menu migration trusts only the exact owned legacy launcher",
     "Get-HeiGeOwnedStartMenuShortcutObservation",
     "Get-HeiGeStartMenuTransactionPaths",
   );
+  assert.match(owned, /apply-hidden\.vbs/);
   assert.match(owned, /apply\.bat/);
   assert.match(owned, /enable-skin\.bat/);
   assert.match(owned, /Get-HeiGeShortcutObservation/g);
   assert.doesNotMatch(owned, /wildcard|like|regex/i);
+});
+
+test("Windows hidden launcher suppresses the console and reports only failures", async () => {
+  const launcher = await source("scripts/windows/apply-hidden.vbs");
+  assert.match(launcher, /apply\.ps1/);
+  assert.match(launcher, /-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass/);
+  assert.match(launcher, /HEIGE_NO_PAUSE/);
+  assert.match(launcher, /shell\.Run\(command,\s*0,\s*True\)/);
+  assert.match(launcher, /If exitCode <> 0 Then/);
+  assert.match(launcher, /MsgBox/);
 });

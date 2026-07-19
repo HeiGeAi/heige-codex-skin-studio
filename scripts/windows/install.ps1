@@ -247,7 +247,7 @@ function New-HeiGeStartMenuIntent {
     $shortcutPath = Get-HeiGeStartMenuShortcutPath -StartMenuRoot $StartMenuRoot
     $folderPath = Split-Path $shortcutPath -Parent
     $paths = Get-HeiGeStartMenuTransactionPaths -ShortcutPath $shortcutPath -TransactionId $TransactionId
-    $targetPath = Join-Path $InstallRoot "scripts\windows\apply.bat"
+    $targetPath = Join-Path $InstallRoot "scripts\windows\apply-hidden.vbs"
     return [pscustomobject][ordered]@{
         StartMenuRoot = $StartMenuRoot
         StartMenuRootPriorExisted = [bool](Test-Path -LiteralPath $StartMenuRoot)
@@ -304,7 +304,8 @@ function Assert-HeiGeInstallJournalBindings {
     $shortcutPath = Get-HeiGeStartMenuShortcutPath -StartMenuRoot $menuRoot
     $menuPaths = Get-HeiGeStartMenuTransactionPaths -ShortcutPath $shortcutPath `
         -TransactionId $transactionId
-    $currentTargetPath = Join-Path $target "scripts\windows\apply.bat"
+    $currentTargetPath = Join-Path $target "scripts\windows\apply-hidden.vbs"
+    $legacyApplyTargetPath = Join-Path $target "scripts\windows\apply.bat"
     $legacyTargetPath = Join-Path $target "scripts\windows\enable-skin.bat"
     $targetPath = [string]$menu.TargetPath
     $folderPath = Split-Path $shortcutPath -Parent
@@ -315,6 +316,7 @@ function Assert-HeiGeInstallJournalBindings {
         -not ([string]$menu.StagePath).Equals($menuPaths.StagePath, [System.StringComparison]::OrdinalIgnoreCase) -or
         -not ([string]$menu.BackupPath).Equals($menuPaths.BackupPath, [System.StringComparison]::OrdinalIgnoreCase) -or
         (-not $targetPath.Equals($currentTargetPath, [System.StringComparison]::OrdinalIgnoreCase) -and
+            -not $targetPath.Equals($legacyApplyTargetPath, [System.StringComparison]::OrdinalIgnoreCase) -and
             -not $targetPath.Equals($legacyTargetPath, [System.StringComparison]::OrdinalIgnoreCase)) -or
         -not ([string]$menu.WorkingDirectory).Equals((Split-Path $targetPath -Parent), [System.StringComparison]::OrdinalIgnoreCase)) {
         throw "Windows Start Menu intent paths are invalid"
