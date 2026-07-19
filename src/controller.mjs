@@ -1104,11 +1104,17 @@ export function createSkinController(input) {
         },
         process: before.process,
       });
+      let sawControlRequest = false;
       if (typeof processRendererRequest === "function") {
         const request = pendingRendererControlRequest(observedHealth);
         if (request !== null) {
+          sawControlRequest = true;
           const handled = await processRendererRequest(request);
-          if (handled !== null) return handled;
+          if (handled !== null) {
+            return isRecord(handled)
+              ? { ...handled, interactive: true }
+              : handled;
+          }
         }
       }
       if (
@@ -1130,6 +1136,7 @@ export function createSkinController(input) {
       consecutiveFailures = 0;
       return result("idle", expectedMode, before.state, {
         consecutiveFailures,
+        ...(sawControlRequest ? { interactive: true } : {}),
         ...(health.selective ? { healthyTargets: health.healthyTargets } : {}),
       });
     } catch {
