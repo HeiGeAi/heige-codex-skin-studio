@@ -172,6 +172,7 @@ function themeEntry(resources) {
   return {
     id: loadedTheme.manifest.id,
     name: loadedTheme.manifest.name,
+    origin: loadedTheme.origin === "user" ? "user" : "bundled",
     accent: loadedTheme.manifest.colors?.accent,
     appearance: loadedTheme.manifest.appearance,
     previewFocus: { ...loadedTheme.manifest.previewFocus },
@@ -368,9 +369,20 @@ export async function skinStatus({ port, includeControlRequest = false, deps = {
         const updateKeys = [
           "action", "capability", "generation", "requestId", "schemaVersion"
         ];
+        const publishKeys = [
+          "action", "capability", "expectedRevision", "image", "name", "requestId", "schemaVersion"
+        ];
+        const publishKeysWithColors = [
+          "action", "capability", "colors", "expectedRevision", "image", "name", "requestId", "schemaVersion"
+        ];
+        const deleteUserThemeKeys = [
+          "action", "capability", "expectedRevision", "requestId", "schemaVersion", "themeId"
+        ];
         const exact = (expected) =>
           keys.length === expected.length &&
           keys.every((key, index) => key === [...expected].sort()[index]);
+        const boundedString = (value, max) =>
+          typeof value === "string" ? value.slice(0, max) : null;
         if (request.action === "set-persistence" && exact(persistenceKeys)) {
           controlRequest = {
             schemaVersion: request.schemaVersion,
@@ -381,6 +393,48 @@ export async function skinStatus({ port, includeControlRequest = false, deps = {
             persistenceEnabled: request.persistenceEnabled
           };
         } else if (request.action === "set-theme" && exact(themeKeys)) {
+          controlRequest = {
+            schemaVersion: request.schemaVersion,
+            requestId: typeof request.requestId === "string" ? request.requestId.slice(0, 128) : null,
+            action: request.action,
+            capability: typeof request.capability === "string" ? request.capability.slice(0, 128) : null,
+            expectedRevision: request.expectedRevision,
+            themeId: typeof request.themeId === "string" ? request.themeId.slice(0, 128) : null
+          };
+        } else if (
+          request.action === "publish-user-theme" &&
+          (exact(publishKeys) || exact(publishKeysWithColors)) &&
+          typeof request.image === "string" &&
+          request.image.length >= 32 &&
+          request.image.length <= 12_000_000 &&
+          /^data:image\\/(?:png|jpeg|webp);base64,/i.test(request.image) &&
+          typeof request.name === "string"
+        ) {
+          controlRequest = {
+            schemaVersion: request.schemaVersion,
+            requestId: boundedString(request.requestId, 128),
+            action: request.action,
+            capability: boundedString(request.capability, 128),
+            expectedRevision: request.expectedRevision,
+            name: boundedString(request.name.trim(), 80),
+            image: request.image
+          };
+          if (exact(publishKeysWithColors) && request.colors && typeof request.colors === "object") {
+            const accent = boundedString(request.colors.accent, 16);
+            const secondary = boundedString(request.colors.secondary, 16);
+            const surface = boundedString(request.colors.surface, 16);
+            const text = boundedString(request.colors.text, 16);
+            if (
+              accent && secondary && surface && text &&
+              /^#[0-9a-fA-F]{6}$/.test(accent) &&
+              /^#[0-9a-fA-F]{6}$/.test(secondary) &&
+              /^#[0-9a-fA-F]{6}$/.test(surface) &&
+              /^#[0-9a-fA-F]{6}$/.test(text)
+            ) {
+              controlRequest.colors = { accent, secondary, surface, text };
+            }
+          }
+        } else if (request.action === "delete-user-theme" && exact(deleteUserThemeKeys)) {
           controlRequest = {
             schemaVersion: request.schemaVersion,
             requestId: typeof request.requestId === "string" ? request.requestId.slice(0, 128) : null,
