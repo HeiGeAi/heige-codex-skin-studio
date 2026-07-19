@@ -36,6 +36,8 @@ function Write-HeiGeInteractivePauseHint {
         Write-Host "失败。请阅读上方报错；按任意键关闭本窗口。"
     } elseif ($env:HEIGE_PAUSE_HINT_STYLE -eq "uninstall") {
         Write-Host "卸载完成。按任意键关闭本窗口。"
+    } elseif ($env:HEIGE_PAUSE_HINT_STYLE -eq "close") {
+        Write-Host "Codex 已保持关闭。按任意键关闭本窗口。"
     } else {
         Write-Host "完成。若看不到 Codex，请到任务栏/系统托盘打开，或使用开始菜单「HeiGe 皮肤启动器」。"
         Write-Host "按任意键关闭本窗口。"
