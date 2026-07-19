@@ -99,6 +99,7 @@ export function buildSkinMenuScript({
     return {
       id: String(entry.id),
       name: typeof entry.name === "string" && entry.name.trim() ? entry.name : String(entry.id),
+      origin: entry.origin === "user" ? "user" : "bundled",
       accent,
       appearance: ["system", "light", "dark"].includes(entry.appearance)
         ? entry.appearance
@@ -150,6 +151,8 @@ export function buildSkinMenuScript({
   return `(() => {
   try { window.__heigeCodexSkinRuntime?.dispose?.(); } catch {}
   const data = ${payload};
+  // 可变副本：上传成功后立刻 upsert 正式用户主题，不依赖 reinject 才出现在「我的主题」。
+  const themes = data.themes.slice();
   const previewFromGeneratedCss = ${previewParserSource};
 
   const runtimeAbortController = new AbortController();
@@ -640,7 +643,7 @@ export function buildSkinMenuScript({
 
   const setTheme = (id, persist = true, broadcast = true) => {
     if (!alive()) return;
-    const theme = data.themes.find((candidate) => candidate.id === id);
+    const theme = themes.find((candidate) => candidate.id === id);
     if (!theme) return;
     style.textContent = theme.css;
     document.documentElement.dataset.heigeCodexSkin = theme.id;
@@ -665,13 +668,75 @@ export function buildSkinMenuScript({
     else setTheme(id);
     return true;
   };
+  let publishUserThemeToLauncher = async (theme) => {
+    const persisted = saveCustom(theme);
+    applyCustomTheme(theme);
+    showUploadAlert(
+      persisted
+        ? "控制通道不可用：自定义图仅保存在本机快捷槽，未写入启动器。"
+        : "控制通道不可用，且本地存储不足；本次外观已应用但重启后可能丢失。",
+      persisted ? "warning" : "error",
+    );
+    return false;
+  };
 
-  for (const theme of data.themes) {
+  let requestDeleteUserTheme = async () => false;
+  const mountUserThemeRow = (theme) => {
+    const existing = document.querySelector(
+      '[data-heige-role="user-theme-row"][data-heige-theme-id="' + theme.id + '"]',
+    );
+    if (existing) {
+      const card = rows.get(theme.id);
+      if (card) {
+        card.querySelector('[data-heige-role="theme-card-copy"] strong').textContent = theme.name;
+        const preview = card.querySelector('[data-heige-role="theme-preview"]');
+        const previewUrl = theme.dataUrl ?? previewFromGeneratedCss(theme.css);
+        if (preview && previewUrl) {
+          preview.style.backgroundImage = "url(" + JSON.stringify(previewUrl) + ")";
+        }
+      }
+      existing.querySelector('[data-heige-role="user-theme-delete"]')
+        ?.setAttribute("aria-label", "删除自定义主题：" + theme.name);
+      customSection.hidden = false;
+      return;
+    }
     const themeRow = createThemeCard(theme, () => {
       void requestThemeSelection(theme.id);
     });
     rows.set(theme.id, themeRow);
-    themeGrid.appendChild(themeRow);
+    const wrap = document.createElement("div");
+    wrap.dataset.heigeRole = "user-theme-row";
+    wrap.dataset.heigeThemeId = theme.id;
+    wrap.style.cssText = "display:grid;grid-template-columns:minmax(0,1fr) 30px;align-items:center;gap:4px;margin-bottom:10px;";
+    const del = document.createElement("button");
+    del.type = "button";
+    del.dataset.heigeRole = "user-theme-delete";
+    del.setAttribute("aria-label", "删除自定义主题：" + theme.name);
+    del.textContent = "\\u00d7";
+    // 加大热区，避免点到旁边主题卡；禁止拖入 Electron 窗口拖拽区。
+    del.style.cssText = "flex:none;width:32px;height:32px;margin:0;padding:0;border:0;border-radius:50%;background:transparent;color:#713a31;cursor:pointer;font:700 18px/32px system-ui;position:relative;z-index:2;-webkit-app-region:no-drag;";
+    listen(del, "mouseenter", () => { del.style.background = "rgba(220,60,60,.15)"; del.style.color = "#8f211d"; });
+    listen(del, "mouseleave", () => { del.style.background = "transparent"; del.style.color = "#713a31"; });
+    listen(del, "click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void requestDeleteUserTheme(theme.id);
+    });
+    wrap.append(themeRow, del);
+    customGrid.appendChild(wrap);
+    customSection.hidden = false;
+  };
+
+  for (const theme of themes) {
+    if (theme.origin === "user") {
+      mountUserThemeRow(theme);
+    } else {
+      const themeRow = createThemeCard(theme, () => {
+        void requestThemeSelection(theme.id);
+      });
+      rows.set(theme.id, themeRow);
+      themeGrid.appendChild(themeRow);
+    }
   }
 
   // ---- 自定义图片：本地选图 -> 压缩 -> 取色 -> 生成 CSS -> 持久化 ----
@@ -837,13 +902,13 @@ export function buildSkinMenuScript({
       (error) => finish(reject, error),
     );
   });
-  const buildCustomCss = (dataUrl, colors) => data.cssTemplate
+  const buildCustomCss = (dataUrl, colors, themeId = data.customId) => data.cssTemplate
     .split(data.sentinels.hero).join(dataUrl)
     .split(data.sentinels.accent).join(colors.accent)
     .split(data.sentinels.secondary).join(colors.secondary)
     .split(data.sentinels.surface).join(colors.surface)
     .split(data.sentinels.text).join(colors.text)
-    .split(data.sentinels.id).join(data.customId);
+    .split(data.sentinels.id).join(themeId);
 
   const hex = (r, g, b) => "#" + [r, g, b].map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0")).join("");
   const mix = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
@@ -905,14 +970,18 @@ export function buildSkinMenuScript({
     saveState.textContent = message;
   };
   paintCurrentTheme = (themeId) => {
-    const theme = data.themes.find((candidate) => candidate.id === themeId);
-    const custom = themeId === data.customId ? currentCustom ?? loadCustom() : null;
-    const preview = theme ? previewFromGeneratedCss(theme.css) : custom?.dataUrl ?? null;
+    const theme = themes.find((candidate) => candidate.id === themeId);
+    const custom = themeId === data.customId
+      ? currentCustom ?? loadCustom()
+      : (theme ? null : currentCustom);
+    const preview = theme
+      ? (theme.dataUrl ?? previewFromGeneratedCss(theme.css))
+      : custom?.dataUrl ?? null;
     currentHero.dataset.themeId = themeId;
     const previewFocus = theme?.previewFocus ?? { x: 50, y: 50 };
     const thumbnailFocus = theme?.thumbnailFocus ?? { x: 50, y: 50 };
     const thumbnailZoom = theme?.thumbnailZoom ?? 100;
-    if (custom !== null) {
+    if (custom !== null || theme?.origin === "user") {
       currentHero.style.backgroundPosition = "center, center";
       currentHero.style.backgroundSize = "100% 100%, contain";
       currentHero.style.backgroundRepeat = "no-repeat";
@@ -926,7 +995,7 @@ export function buildSkinMenuScript({
       : "linear-gradient(90deg,rgba(7,28,52,.84),rgba(7,28,52,.18)),url("
         + JSON.stringify(preview) + ")";
     heroName.textContent = theme?.name
-      ?? (themeId === data.customId ? custom?.name ?? "我的主题" : "原生 Codex");
+      ?? (custom ? custom?.name ?? "我的主题" : "原生 Codex");
     for (const [id, card] of rows) {
       const selected = id === themeId || (themeId === data.nativeSel && id === null);
       card.setAttribute("aria-pressed", String(selected));
@@ -953,6 +1022,8 @@ export function buildSkinMenuScript({
     ensureCustomRow(theme);
     paint(data.customId);
     paintCurrentTheme(data.customId);
+    // 自定义是 renderer 本地快捷槽，永不写入启动器 selectedThemeId / lastNonNativeThemeId。
+    paintSaveState("local", "仅本机快捷 · 未写入启动器");
     if (persist) writeSelected(data.customId);
     if (broadcast) publish("theme", data.customId);
   };
@@ -960,17 +1031,47 @@ export function buildSkinMenuScript({
   let customRow = null;
   let customRowContainer = null;
   let customDelete = null;
-  const deleteCustom = () => {
-    assertCurrent();
+  const removeLegacyCustomRow = () => {
     try { localStorage.removeItem(data.storageKey); } catch {}
     currentCustom = null;
-    if (document.documentElement.dataset.heigeCodexSkin === data.customId) clearTheme();
     customRowContainer?.remove();
     rows.delete(data.customId);
-    customSection.hidden = true;
     customRow = null;
     customRowContainer = null;
     customDelete = null;
+    if (customGrid.childElementCount === 0) customSection.hidden = true;
+  };
+  // publish 成功后立刻把正式用户主题插进「我的主题」，不依赖 reinject。
+  const upsertPublishedUserTheme = (source, themeId) => {
+    if (typeof themeId !== "string" || themeId.length === 0) return null;
+    if (typeof source?.dataUrl !== "string" || source.dataUrl.length === 0) return null;
+    if (!source?.colors || typeof source.colors !== "object") return null;
+    const appearance = source.appearance ?? appearanceFromColors(source.colors);
+    const name = typeof source.name === "string" && source.name.trim()
+      ? source.name.trim()
+      : "我的主题";
+    const entry = {
+      id: themeId,
+      name,
+      origin: "user",
+      accent: source.colors.accent,
+      appearance,
+      colors: source.colors,
+      css: buildCustomCss(source.dataUrl, source.colors, themeId),
+      dataUrl: source.dataUrl,
+    };
+    const index = themes.findIndex((candidate) => candidate.id === themeId);
+    if (index >= 0) themes[index] = entry;
+    else themes.push(entry);
+    removeLegacyCustomRow();
+    mountUserThemeRow(entry);
+    return entry;
+  };
+  const deleteCustom = () => {
+    assertCurrent();
+    const wasActive = document.documentElement.dataset.heigeCodexSkin === data.customId;
+    removeLegacyCustomRow();
+    if (wasActive) clearTheme();
   };
   const ensureCustomRow = (theme) => {
     if (customRow) {
@@ -987,7 +1088,14 @@ export function buildSkinMenuScript({
       colors: theme.colors,
       css: "",
     }, () => {
-      applyCustomTheme(currentCustom ?? loadCustom() ?? theme);
+      const next = currentCustom ?? loadCustom() ?? theme;
+      if (!next) return;
+      // 控制通道可用时：旧本机快捷槽点击改为写入启动器，不再停留在「仅本机快捷」。
+      if (data.control?.available === true) {
+        void publishUserThemeToLauncher(next);
+        return;
+      }
+      applyCustomTheme(next);
     });
     customDelete = document.createElement("button");
     customDelete.type = "button";
@@ -1129,15 +1237,10 @@ export function buildSkinMenuScript({
           appearance: palette.appearance,
         };
         assertCurrent();
-        const persisted = saveCustom(theme);
-        applyCustomTheme(theme);
-        showUploadAlert(
-          persisted
-            ? "自定义图片已应用并保存到当前 Codex 的本地快捷槽。它不会改写最近正式主题；自动补针或常驻启动时可能继续显示，清除本地数据后会丢失。"
-            : "自定义图片本次已应用，但存储空间不足，重启后不会保留。",
-          persisted ? "success" : "warning",
+        void publishUserThemeToLauncher(theme).then(
+          () => finish(resolve, theme.colors),
+          (error) => fail(error),
         );
-        finish(resolve, theme.colors);
       } catch (error) {
         fail(error);
       }
@@ -1330,6 +1433,7 @@ export function buildSkinMenuScript({
     let optimisticPreviousThemeId = null;
     let controlRequestTimeout = null;
     const themeEndpoint = data.control.endpoint.slice(0, -"/v1/persistence".length) + "/v1/theme";
+    const userThemeEndpoint = data.control.endpoint.slice(0, -"/v1/persistence".length) + "/v1/user-theme";
     const newRequestId = () => {
       const bytes = new Uint8Array(16);
       globalThis.crypto.getRandomValues(bytes);
@@ -1462,22 +1566,38 @@ export function buildSkinMenuScript({
       return true;
     };
     runtime.receiveUpdateCheckResult = receiveUpdateCheckResult;
+    const removeUserThemeRow = (themeId) => {
+      document.querySelector('[data-heige-role="user-theme-row"][data-heige-theme-id="' + themeId + '"]')?.remove();
+      rows.get(themeId)?.remove();
+      rows.delete(themeId);
+      const index = themes.findIndex((candidate) => candidate.id === themeId);
+      if (index >= 0) themes.splice(index, 1);
+      if (customGrid.childElementCount === 0 && !customRow) customSection.hidden = true;
+    };
     const receiveThemeSelectionResult = (result) => {
       assertCurrent();
       const pendingRequest = controlRequest;
-      if (pendingRequest?.action !== "set-theme") return false;
+      if (
+        pendingRequest?.action !== "set-theme" &&
+        pendingRequest?.action !== "publish-user-theme" &&
+        pendingRequest?.action !== "delete-user-theme"
+      ) return false;
       if (
         result === null
         || typeof result !== "object"
         || Array.isArray(result)
         || result.schemaVersion !== 1
         || result.requestId !== pendingRequest.requestId
-        || result.themeId !== pendingRequest.themeId
         || typeof result.persistenceEnabled !== "boolean"
         || !isRevision(result.revision)
         || result.revision < pendingRequest.expectedRevision
         || result.revision < controlRevision
       ) return false;
+      if (pendingRequest.action === "set-theme") {
+        if (result.themeId !== pendingRequest.themeId) return false;
+      } else if (typeof result.themeId !== "string" || result.themeId.length === 0) {
+        return false;
+      }
       const keys = Object.keys(result).sort();
       const expectedKeys = ["persistenceEnabled", "requestId", "revision", "schemaVersion", "themeId"];
       if (
@@ -1490,11 +1610,42 @@ export function buildSkinMenuScript({
       optimisticPreviousThemeId = null;
       themePending = false;
       for (const item of rows.values()) item.disabled = false;
-      // 不广播：CDP 会投递给所有主窗口；随后 forceRepair 再对齐遗漏窗口。
-      // 若这里 publish persistence，仍挂起的 sibling 会被误判为「未保存」。
-      renderThemeSelection(result.themeId, true, false);
-      paintSaveState("saved", "已保存");
-      showAlert("主题选择已保存。", "success");
+      if (pendingRequest.action === "delete-user-theme") {
+        removeUserThemeRow(pendingRequest.themeId);
+        if (result.themeId === data.nativeSel) clearTheme(true, false);
+        else setTheme(result.themeId, true, false);
+        paintSaveState("saved", "已删除");
+        showAlert("自定义主题已从启动器删除。", "success");
+      } else if (pendingRequest.action === "publish-user-theme") {
+        const source = {
+          name: pendingRequest.name,
+          dataUrl: pendingRequest.image,
+          colors: pendingRequest.colors,
+          appearance: currentCustom?.appearance,
+        };
+        if (!source.dataUrl || !source.colors) {
+          source.name = source.name || currentCustom?.name;
+          source.dataUrl = source.dataUrl || currentCustom?.dataUrl;
+          source.colors = source.colors || currentCustom?.colors;
+          source.appearance = source.appearance || currentCustom?.appearance;
+        }
+        if (source.dataUrl && source.colors) {
+          upsertPublishedUserTheme(source, result.themeId);
+          setTheme(result.themeId, true, false);
+        } else {
+          removeLegacyCustomRow();
+          writeSelected(result.themeId);
+          document.documentElement.dataset.heigeCodexSkin = result.themeId;
+          paint(result.themeId);
+          paintCurrentTheme(result.themeId);
+        }
+        paintSaveState("saved", "已保存");
+        showAlert("自定义主题已保存到启动器。", "success");
+      } else {
+        renderThemeSelection(result.themeId, true, false);
+        paintSaveState("saved", "已保存");
+        showAlert("主题选择已保存。", "success");
+      }
       paintPersistence();
       return true;
     };
@@ -1595,15 +1746,20 @@ export function buildSkinMenuScript({
         clearControlRequest();
       }
       controlRequest = request;
-      // 常驻 CDP 兜底不宜拖太久；主题仍保留较长窗口以便合并选择。
+      // 常驻 CDP 兜底不宜拖太久；主题 / 用户主题发布仍保留较长窗口。
       const fallbackTimeoutMs = request.action === "set-persistence" ? 20_000 : 60_000;
       controlRequestTimeout = later(() => {
         if (controlRequest?.requestId !== request.requestId) return;
+        const timedOut = controlRequest;
         clearControlRequest();
-        if (request.action === "set-persistence") {
+        if (timedOut.action === "set-persistence") {
           pending = false;
           closeConfirmation({ restoreFocus: true });
           paintPersistence();
+        } else if (timedOut.action === "delete-user-theme") {
+          paintSaveState("error", "未删除，请重试");
+          themePending = false;
+          for (const item of rows.values()) item.disabled = false;
         } else {
           rollbackOptimisticTheme();
           paintSaveState("error", "未保存，请重试");
@@ -1624,7 +1780,7 @@ export function buildSkinMenuScript({
       if (themePending && controlRequest?.action !== "set-theme") return false;
       if (
         themeId !== data.nativeSel &&
-        !data.themes.some((theme) => theme.id === themeId)
+        !themes.some((theme) => theme.id === themeId)
       ) return false;
       const requestRevision = controlRevision;
       const fallbackRequest = {
@@ -1638,7 +1794,8 @@ export function buildSkinMenuScript({
       if (optimisticPreviousThemeId === null) {
         optimisticPreviousThemeId = currentThemeId;
       }
-      paintSaveState("saving", "正在保存");
+      const savingStartedAt = Date.now();
+      paintSaveState("saving", "正在保存启动器主题…");
       renderThemeSelection(themeId, false, false);
       themePending = true;
       let queued = false;
@@ -1702,9 +1859,24 @@ export function buildSkinMenuScript({
         if (controlRequest?.action === "set-theme") clearControlRequest();
         publish("persistence", { enabled: persistenceEnabled, revision: controlRevision });
         optimisticPreviousThemeId = null;
+        // 先落盘；「正在保存」再亮满最短时长，避免幂等路径一闪而过。
         renderThemeSelection(themeId, true, true);
-        paintSaveState("saved", "已保存");
-        showAlert("主题选择已保存。", "success");
+        const confirmedExisting = body.revision === requestRevision;
+        const savedLabel = confirmedExisting ? "已确认启动器主题" : "已保存";
+        const savedAlert = confirmedExisting
+          ? "已恢复启动器主题（状态未变）。自定义图片仍只在本机快捷槽。"
+          : "主题选择已保存。";
+        const remainingMs = Math.max(0, 450 - (Date.now() - savingStartedAt));
+        if (remainingMs === 0) {
+          paintSaveState("saved", savedLabel);
+          showAlert(savedAlert, "success");
+        } else {
+          later(() => {
+            if (!isCurrent()) return;
+            paintSaveState("saved", savedLabel);
+            showAlert(savedAlert, "success");
+          }, remainingMs);
+        }
         return true;
       } catch (error) {
         if (isCurrent()) {
@@ -1730,6 +1902,206 @@ export function buildSkinMenuScript({
         for (const item of rows.values()) item.disabled = false;
       }
     };
+
+    publishUserThemeToLauncher = async (theme) => {
+      assertCurrent();
+      if (!theme?.dataUrl || !theme?.colors || !theme?.name) {
+        showUploadAlert("自定义主题数据无效");
+        return false;
+      }
+      const requestRevision = controlRevision;
+      const requestId = newRequestId();
+      const fallbackRequest = {
+        schemaVersion: 1,
+        requestId,
+        action: "publish-user-theme",
+        capability: data.control.token,
+        expectedRevision: requestRevision,
+        name: theme.name,
+        image: theme.dataUrl,
+        colors: theme.colors,
+      };
+      paintSaveState("saving", "正在保存启动器主题…");
+      themePending = true;
+      hideAlert();
+      hideUploadAlert();
+      showUploadAlert("正在写入启动器主题库…", "success");
+      for (const item of rows.values()) item.disabled = true;
+      const abortController = childController();
+      const timeoutId = later(() => abortController.abort(), 30000);
+      let queued = false;
+      try {
+        const response = await fetch(userThemeEndpoint, {
+          method: "POST",
+          mode: "cors",
+          cache: "no-store",
+          credentials: "omit",
+          redirect: "error",
+          referrerPolicy: "no-referrer",
+          headers: {
+            "Content-Type": "application/json",
+            "X-HeiGe-Control-Token": data.control.token,
+          },
+          body: JSON.stringify({
+            revision: requestRevision,
+            requestId,
+            name: theme.name,
+            image: theme.dataUrl,
+            colors: theme.colors,
+          }),
+          signal: abortController.signal,
+        });
+        assertCurrent();
+        const body = await response.json();
+        assertCurrent();
+        if (!response.ok) {
+          const message = typeof body?.message === "string" && body.message.length <= 160
+            ? body.message
+            : "后台拒绝写入自定义主题";
+          paintSaveState("error", "未保存，请重试");
+          showUploadAlert(message);
+          showAlert(message);
+          return false;
+        }
+        if (
+          body?.ok !== true ||
+          typeof body.themeId !== "string" ||
+          body.persistenceEnabled !== persistenceEnabled ||
+          !isRevision(body.revision) ||
+          body.revision < requestRevision
+        ) {
+          throw new Error("后台未确认自定义主题写入");
+        }
+        controlRevision = body.revision;
+        publish("persistence", { enabled: persistenceEnabled, revision: controlRevision });
+        // 立刻 upsert 正式用户主题卡，不再等 reinject 才出现在「我的主题」。
+        upsertPublishedUserTheme(theme, body.themeId);
+        setTheme(body.themeId, true, true);
+        paintSaveState("saved", "已保存");
+        showUploadAlert("自定义主题已写入启动器，常驻/重启后可继续使用。", "success");
+        showAlert("自定义主题已保存到启动器。", "success");
+        return true;
+      } catch (error) {
+        if (isCurrent()) {
+          queued = queueControlRequest(fallbackRequest);
+          if (!queued) {
+            paintSaveState("error", "未保存，请重试");
+            showUploadAlert(safeClientError(error));
+            showAlert(safeClientError(error));
+          } else {
+            // 等待 ACK 期间保留本机快捷预览，避免「我的主题」先空一截。
+            currentCustom = theme;
+            ensureCustomRow(theme);
+            style.textContent = buildCustomCss(theme.dataUrl, theme.colors);
+            applyCodexAppearance(theme.appearance ?? appearanceFromColors(theme.colors));
+            paintCurrentTheme(data.customId);
+            showUploadAlert("正在等待后台确认写入启动器…", "success");
+          }
+        }
+        return false;
+      } finally {
+        clearLater(timeoutId);
+        trackedControllers.delete(abortController);
+        if (!isCurrent()) return;
+        if (queued) {
+          for (const item of rows.values()) item.disabled = false;
+          return;
+        }
+        themePending = false;
+        for (const item of rows.values()) item.disabled = false;
+      }
+    };
+
+    requestDeleteUserTheme = async (themeId) => {
+      assertCurrent();
+      if (typeof themeId !== "string" || themeId.length === 0) return false;
+      if (themePending || controlRequest !== null) {
+        showAlert("请等待当前操作完成后再删除。");
+        return false;
+      }
+      const requestRevision = controlRevision;
+      const requestId = newRequestId();
+      const fallbackRequest = {
+        schemaVersion: 1,
+        requestId,
+        action: "delete-user-theme",
+        capability: data.control.token,
+        expectedRevision: requestRevision,
+        themeId,
+      };
+      paintSaveState("saving", "正在删除启动器主题…");
+      themePending = true;
+      hideAlert();
+      for (const item of rows.values()) item.disabled = true;
+      const abortController = childController();
+      const timeoutId = later(() => abortController.abort(), 15000);
+      let queued = false;
+      try {
+        const response = await fetch(userThemeEndpoint, {
+          method: "POST",
+          mode: "cors",
+          cache: "no-store",
+          credentials: "omit",
+          redirect: "error",
+          referrerPolicy: "no-referrer",
+          headers: {
+            "Content-Type": "application/json",
+            "X-HeiGe-Control-Token": data.control.token,
+          },
+          body: JSON.stringify({
+            action: "delete",
+            revision: requestRevision,
+            requestId,
+            themeId,
+          }),
+          signal: abortController.signal,
+        });
+        assertCurrent();
+        const body = await response.json();
+        assertCurrent();
+        if (!response.ok || body?.ok !== true || !isRevision(body.revision)) {
+          const message = typeof body?.message === "string" && body.message.length <= 160
+            ? body.message
+            : "删除自定义主题失败";
+          paintSaveState("error", "未删除，请重试");
+          showAlert(message);
+          return false;
+        }
+        controlRevision = body.revision;
+        publish("persistence", { enabled: persistenceEnabled, revision: controlRevision });
+        removeUserThemeRow(themeId);
+        if (typeof body.themeId === "string") {
+          if (body.themeId === data.nativeSel) clearTheme(true, true);
+          else setTheme(body.themeId, true, true);
+        }
+        paintSaveState("saved", "已删除");
+        showAlert("自定义主题已从启动器删除。", "success");
+        return true;
+      } catch (error) {
+        if (isCurrent()) {
+          // Codex CSP 会拦本机 HTTP；与发布一样排队 CDP 兜底。
+          queued = queueControlRequest(fallbackRequest);
+          if (!queued) {
+            paintSaveState("error", "未删除，请重试");
+            showAlert(safeClientError(error));
+          } else {
+            showAlert("正在等待后台确认删除…", "success");
+          }
+        }
+        return false;
+      } finally {
+        clearLater(timeoutId);
+        trackedControllers.delete(abortController);
+        if (!isCurrent()) return;
+        if (queued) {
+          for (const item of rows.values()) item.disabled = false;
+          return;
+        }
+        themePending = false;
+        for (const item of rows.values()) item.disabled = false;
+      }
+    };
+
     const requestPersistence = async (target, restoreFocus = false) => {
       assertCurrent();
       if (pending || target === persistenceEnabled) return;
@@ -1833,9 +2205,16 @@ export function buildSkinMenuScript({
       if (value.revision <= controlRevision) return false;
       const cleared = clearControlRequest();
       if (cleared?.action === "set-persistence") pending = false;
-      if (cleared?.action === "set-theme") {
-        rollbackOptimisticTheme();
-        paintSaveState("error", "未保存，请重试");
+      if (
+        cleared?.action === "set-theme" ||
+        cleared?.action === "publish-user-theme" ||
+        cleared?.action === "delete-user-theme"
+      ) {
+        if (cleared.action === "set-theme") rollbackOptimisticTheme();
+        paintSaveState(
+          "error",
+          cleared.action === "delete-user-theme" ? "未删除，请重试" : "未保存，请重试",
+        );
         themePending = false;
         for (const item of rows.values()) item.disabled = false;
       }
@@ -1944,7 +2323,7 @@ export function buildSkinMenuScript({
         || (
           message.value !== data.nativeSel
           && message.value !== data.customId
-          && !data.themes.some((theme) => theme.id === message.value)
+          && !themes.some((theme) => theme.id === message.value)
         )
       ) return null;
     } else if (message.kind === "menu-hidden") {
@@ -1991,7 +2370,7 @@ export function buildSkinMenuScript({
         else if (event.newValue === data.customId) {
           const custom = currentCustom ?? loadCustom();
           if (custom) applyCustomTheme(custom, false, false);
-        } else if (data.themes.some((theme) => theme.id === event.newValue)) {
+        } else if (themes.some((theme) => theme.id === event.newValue)) {
           setTheme(event.newValue, false, false);
         }
       } else if (event.key === data.hiddenKey && (event.newValue === "1" || event.newValue === null)) {
@@ -2013,9 +2392,12 @@ export function buildSkinMenuScript({
 
   root.append(button, backdrop, picker);
   document.body.appendChild(root);
-  // 自动补针只允许恢复不进入正式 state 的本机快捷图片。
-  // 正式主题与原生界面始终服从 controller 传入的 activeId。
+  // 正式主题始终服从 controller 的 activeId；旧版 custom-upload 快捷槽仅在原生态下作兼容恢复。
   const restore = () => {
+    if (data.activeId !== null) {
+      setTheme(data.activeId, true, false);
+      return;
+    }
     if (data.preferStored) {
       const sel = readSelected();
       if (sel === data.customId) {
@@ -2023,8 +2405,7 @@ export function buildSkinMenuScript({
         if (custom) { applyCustomTheme(custom, false, false); return; }
       }
     }
-    if (data.activeId === null) clearTheme(true, false);
-    else setTheme(data.activeId, true, false);
+    clearTheme(true, false);
   };
   restore();
   if (readHidden()) setHidden(true, false, false);
@@ -2043,7 +2424,10 @@ export function buildSkinMenuScript({
       mode: themeId === null ? "native" : "active",
       persistenceEnabled: persistence?.persistenceEnabled ?? false,
       revision: persistence?.revision ?? 0,
-      themeTransitionPending: themePending === true || controlRequest?.action === "set-theme",
+      themeTransitionPending: themePending === true ||
+        controlRequest?.action === "set-theme" ||
+        controlRequest?.action === "publish-user-theme" ||
+        controlRequest?.action === "delete-user-theme",
       controlRequest: controlRequest === null ? null : { ...controlRequest },
     };
   };
