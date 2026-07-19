@@ -1,5 +1,15 @@
 # 更新日志
 
+## 5.4.6 - 2026-07-19
+
+### 修复
+
+- 修复自定义上传成功后「我的主题」不立刻出现卡片：HTTP/CDP 确认后立刻 upsert 正式用户主题行，不再等 reinject；CDP 排队期间保留本机快捷预览，避免确认前列表空白。
+
+### 测试
+
+- 新增主题中心 HTTP/CDP 上传成功后立刻出现正式「我的主题」卡片（无 `custom-upload` 残留）的 DOM 断言。
+
 ## 5.4.5 - 2026-07-19
 
 ### 修复
@@ -9,6 +19,14 @@
 - 修复提升权限会话下计划任务 `RunLevel=Limited` 与 High IL 锁目录冲突导致的 `LOCK_PERMISSIONS` / `BACKGROUND_START_FAILED`：注册进程若已提升，控制器任务改为 `Highest`；Windows 握手等待放宽到 35s。
 - 合入 Windows 常驻重启接管：用户正常启动不带 CDP 的 Codex 时，后台控制器会安全退出并以 CDP 重新拉起再注入（独立版/可开 CDP 环境；Store 屏蔽 9341 仍属环境限制）。`restart-into-cdp` 改为附着等待完成并回传错误，避免 detached 子进程脱离交互会话后静默失败。
 - 修复 Windows 常驻任务 `Stop-ScheduledTask` 后 `Start-Process` 拉起的 Node 变孤儿、叠成双后台并写旧 handshake 的问题：启停/注销前按 task-name + state-directory 精确杀掉残留 `--background` 控制器；握手等待在「字段不匹配且 PID 已死」时清掉陈旧文档再继续等。
+- 修复多后台抢锁导致 apply/`LOCK_DISAPPEARED`：清理 disposable staging 时把并发 rename 造成的消失视为可跳过竞态；锁获取对 `LOCK_DISAPPEARED` 有界重试；后台 Node 启动时再清同 task 兄弟进程（ExcludePid 保留自身）。
+- 修复主题中心从自定义快捷图切回正式主题时「无切换中状态 / 像没保存」：自定义顶栏改为「仅本机快捷 · 未写入启动器」；正式主题保存至少亮 450ms「正在保存」并灰态禁用卡片；幂等确认给出「已确认启动器主题」反馈。
+- 修复 Windows 稳定树安装 rename 报 `EPERM`：publish 前先停计划任务并杀掉仍占用安装目录的常驻后台 Node；失败文案提示关闭占用进程后重试。
+- **行为变更**：主题中心上传自定义图片改为写入用户主题库并 CAS 记入启动器（与 CLI `customize` 同源），常驻/重启可稳定复现；不再把新上传仅存为 `custom-upload` localStorage 快捷槽。
+- 修复主题中心上传后仍显示「仅本机快捷 · 未写入启动器」：Codex CSP `connect-src` 禁止 renderer `fetch` 本机控制口，上传只能走 CDP 兜底，但状态提取此前丢掉了 `publish-user-theme` / `delete-user-theme`（现已补齐）；控制口 CORS 同时补上 `Access-Control-Allow-Private-Network`；有控制通道时点击旧本机快捷槽改为写入启动器。
+- 修复「我的主题」删除按钮无效：删除同样受 CSP 影响却未排队 CDP；ACK 也不接受 `delete-user-theme`。现与发布同源走 CDP 兜底并在确认后移除卡片；删除热区加大到 32px。
+- 修复删除/发布排队后被远程 revision 广播清掉请求却不复位 `themePending`，导致后续删除静默无效；忙碌中再次点击会提示等待。
+- 修复常驻 tick 在 session 未完全对齐（`keepUntilProcessExit` / apply 过渡）时跳过 CDP 抽干，导致主题中心删除/发布一直「等待后台确认」：有进程与控制口时优先处理 `controlRequest`。
 
 ### 性能
 
@@ -18,6 +36,7 @@
 
 - 新增常驻超时阈值、业务失败不排队 CDP、双节拍、锁重试与 Windows 握手 35s 等回归断言。
 - 新增 Windows 孤儿后台控制器精确清理、启停顺序（stop→orphan→start）与握手清陈旧死 PID 文档等回归断言。
+
 
 ## 5.4.4 - 2026-07-19
 
