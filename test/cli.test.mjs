@@ -11,6 +11,7 @@ import {
   createWindowsRuntimeProbe,
   enforceLegacyMigrationFence,
   enforceMacosInstallFence,
+  ensureSoleWindowsBackgroundController,
   migrateLegacyLifecycle,
   normalizeWindowsBackgroundStatus,
   offlineDisablePersistence,
@@ -601,6 +602,50 @@ test("withLockHeldRetry retries bounded LOCK_PERMISSIONS then succeeds", async (
   assert.equal(value, "healed");
   assert.equal(attempts, 2);
   assert.deepEqual(waits, [2]);
+});
+
+test("withLockHeldRetry retries bounded LOCK_DISAPPEARED then succeeds", async () => {
+  let attempts = 0;
+  const waits = [];
+  const value = await withLockHeldRetry(async () => {
+    attempts += 1;
+    if (attempts < 2) {
+      const error = new Error("LOCK_DISAPPEARED: Windows owner directory disappeared");
+      error.code = "LOCK_DISAPPEARED";
+      throw error;
+    }
+    return "recovered";
+  }, {
+    delaysMs: [2, 4],
+    wait: async (milliseconds) => { waits.push(milliseconds); },
+  });
+  assert.equal(value, "recovered");
+  assert.equal(attempts, 2);
+  assert.deepEqual(waits, [2]);
+});
+
+test("ensureSoleWindowsBackgroundController invokes orphan stopper with ExcludePid", async () => {
+  const calls = [];
+  const result = await ensureSoleWindowsBackgroundController({
+    taskName: "HeiGe Codex Skin Studio Test 5f8a771e-4997-4c34-89d8-9e37c9f80211",
+    stateDirectory: "C:\\Users\\Administrator\\AppData\\Roaming\\HeiGeCodexSkinStudio-test",
+    excludePid: 4242,
+    powershellPath: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    scheduledTaskScriptPath: "C:\\repo\\scripts\\windows\\lib\\scheduled-task.ps1",
+    env: { SystemRoot: "C:\\Windows" },
+    execFileImpl: async (file, args) => {
+      calls.push({ file, args });
+      return {
+        stdout: JSON.stringify({ StoppedCount: 2, StoppedPids: [1001, 1002] }),
+        stderr: "",
+      };
+    },
+  });
+  assert.deepEqual(result, { stoppedCount: 2, stoppedPids: [1001, 1002] });
+  assert.equal(calls[0].file, "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe");
+  assert.match(calls[0].args.at(-1), /Stop-HeiGeBackgroundControllerProcesses/);
+  assert.match(calls[0].args.at(-1), /ExcludePid 4242/);
+  assert.match(calls[0].args.at(-1), /5f8a771e-4997-4c34-89d8-9e37c9f80211/);
 });
 
 test("apply confirmation rejects a partial multi-window status result", async () => {
