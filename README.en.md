@@ -31,7 +31,7 @@ A local skin switcher for OpenAI Codex Desktop. It injects themes at runtime thr
 - **One-click switching**: a 🎨 menu appears at the top of Codex; every installed theme and the native UI switch instantly, with light/dark appearance synced automatically.
 - **One image, one theme**: any PNG, JPG, JPEG, or WebP becomes a full skin (palette + backdrop).
 - **AI-generated themes**: hand `output/heige-codex-skin-studio.skill` to Codex and say "generate a cyberpunk hero image, then turn it into a skin". No extra API key needed.
-- **12 built-in presets**: the high-detail `Miku 488137`, two lightweight themes each for Genshin Impact, Wuthering Waves, Naruto, and Love and Deepspace, two new Dragon Ball themes, plus one easter-egg preset.
+- **13 built-in presets**: the high-detail `Miku 488137`, two lightweight themes each for Genshin Impact, Wuthering Waves, Naruto, and Love and Deepspace, two Dragon Ball themes, a public-safe `Caishen Readable` light theme, plus one easter-egg preset.
 - **Optional pet**: the package ships an independent `Miku Future` animated desktop pet. Installing it is your call.
 - **User-controlled persistence**: the top-menu switch is the only supported way to enable next-launch persistence. Turning it off keeps the current session skinned and restores the native UI on the next launch.
 - **Readability by default**: final and in-progress assistant responses use one consistent 90% theme-aware surface with balanced inset spacing. The Theme Center switch can turn it off, and the implementation avoids live blur, shadows, observers, scroll listeners, and background requests.
