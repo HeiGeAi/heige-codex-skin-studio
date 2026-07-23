@@ -43,7 +43,7 @@
 Windows 11 版本现已发布：[查看 v5.4.8 Release](https://github.com/HeiGeAi/heige-codex-skin-studio/releases/tag/v5.4.8)。
 
 - Windows 安装与恢复：使用 scripts\windows\install.bat / apply.bat，不修改 app.asar、应用二进制或签名资源。
-- 随 Codex 恢复：开启「皮肤常驻」后，普通启动 Codex 会由当前用户计划任务控制器接管并恢复主题与顶部入口。
+- 随 Windows 登录启动：开启「皮肤常驻」后会为当前用户注册登录计划任务，无需再次运行安装脚本。首次启用后请重启 Windows 或注销后重新登录一次；后台皮肤控制器将随登录启动，并在随后普通启动 Codex 时恢复主题与顶部入口。
 - 隐藏按钮：顶部主题入口可选择「隐藏此按钮」，收起为小圆点；点击即可恢复，状态会保存。
 - 随机主题：提供持久化的随机主题开关，随机选择主题并尽量避免连续重复。
 
