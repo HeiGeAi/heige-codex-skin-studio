@@ -57,7 +57,7 @@ Windows 11 版本现已发布：[查看 v5.4.8 Release](https://github.com/HeiGe
 open "<仓库路径>/scripts/install.command"
 ```
 
-装完默认应用 Miku 预设。之后所有切换都在 Codex 顶部中间的 🎨 菜单里完成：12 套内置主题、原生界面、深浅外观联动，即点即换。应用皮肤时 Codex 会正常退出并以本机调试模式重新打开，当前任务先保存。
+装完默认应用 Miku 预设。之后所有切换都在 Codex 顶部中间的 🎨 菜单里完成：13 套内置主题、原生界面、深浅外观联动，即点即换。应用皮肤时 Codex 会正常退出并以本机调试模式重新打开，当前任务先保存。
 
 Windows 用 `scripts\windows\install.bat` 安装；日常入口是 `scripts/windows/apply.ps1`、兼容名 `scripts/windows/enable-skin.bat`（只恢复当前会话）、`scripts/windows/pause.ps1`、`scripts/windows/resume.ps1`、`scripts/windows/restore.ps1` 和 `scripts/windows/close-codex.bat`（只安全完整退出 Codex/GPT 桌面端并保持关闭，不改常驻、不自动重启）。彻底移除时运行 `scripts\windows\uninstall.bat`：它会注销当前用户计划任务、移除开始菜单入口、清理 AppData 状态和稳定安装目录。即使稳定安装目录已被手动删除，也可从源码目录运行该卸载入口清理残留。Microsoft Store/MSIX 真机待验证，细节见[完整手册](docs/manual.md)。
 
@@ -71,13 +71,17 @@ Windows 用 `scripts\windows\install.bat` 安装；日常入口是 `scripts/wind
 
 现成的生图提示词在[主题提示词库](docs/theme-prompts.md)：8 套风格，复制就能用。做出好看的主题，来[晒图区](https://github.com/HeiGeAi/heige-codex-skin-studio/discussions)贴一张，或者用[主题晒图模板](https://github.com/HeiGeAi/heige-codex-skin-studio/issues/new/choose)投稿，被选中会进 README 精选。
 
-一个实话：菜单上传会写入本机用户主题库并记入启动器，和内置主题一样可在「皮肤常驻」下跨重启复现（同名同图幂等覆盖）。也可用第 2 / 第 3 条路从文件或 AI 生成主题。
+一个实话：菜单上传会写入本机用户主题库并记入启动器，和内置主题一样可在「皮肤常驻」下跨重启复现（同名同图幂等覆盖）。旧版「自定义图片」本地快捷槽不是可分发的正式主题，也不是权威主题；renderer 本地存储可在自动补针或常驻启动时继续显示该快捷图，清除本地数据后会丢失。也可用第 2 / 第 3 条路从文件或 AI 生成主题。
 
-## 内置 12 套主题
+## 内置 13 套主题
 
-高精度定制的 `Miku 488137` 打底，原神、鸣潮、火影忍者、恋与深空各两款轻量主题，再加入「龙珠 · 筋斗云」「龙珠 · 超级赛亚人」和彩蛋预设「大佬 · 点烟」。预设主题会同步切换 Codex 自身的浅色或深色外观。安装包里还带可选的 `Miku Future` 动画桌面宠物，装不装由你，不覆盖 Codex 内置宠物。
+高精度定制的 `Miku 488137` 打底，原神、鸣潮、火影忍者、恋与深空各两款轻量主题，再加入「龙珠 · 筋斗云」「龙珠 · 超级赛亚人」、「财神 · 清爽可读」和彩蛋预设「大佬 · 点烟」。预设主题会同步切换 Codex 自身的浅色或深色外观。安装包里还带可选的 `Miku Future` 动画桌面宠物，装不装由你，不覆盖 Codex 内置宠物。
 
-这些概念图展示「一张图就是一个皮肤方向」的设计效果，内置的 10 款轻量预设使用无文字干净壁纸版本：
+这些概念图展示「一张图就是一个皮肤方向」的设计效果，内置的轻量预设使用无文字干净壁纸版本：
+
+| 财神 · 清爽可读 |
+| --- |
+| ![财神清爽可读主题主视觉](themes/caishen-readable/hero.webp) |
 
 | 龙珠 · 筋斗云 | 龙珠 · 超级赛亚人 |
 | --- | --- |

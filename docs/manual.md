@@ -20,7 +20,7 @@
 | 适用应用 | OpenAI Codex Desktop（ChatGPT 桌面端） |
 | 支持平台 | macOS 自动化与真机验证；Windows 跨 PowerShell 自动化，Microsoft Store/MSIX 真机待验证 |
 | 注入方式 | Chrome DevTools Protocol，调试端口仅绑定本机回环 `127.0.0.1:9341` |
-| 内置主题 | 10 个（1 个高精度 Miku 488137 + 8 个游戏轻量主题 + 1 个彩蛋「大佬 · 点烟」） |
+| 内置主题 | 13 个（1 个高精度 Miku 488137 + 8 个游戏轻量主题 + 2 个龙珠主题 + 1 个财神清爽可读主题 + 1 个彩蛋「大佬 · 点烟」） |
 | 运行时依赖 | 不安装 npm 运行时依赖；优先使用可信的 Codex 内置 Node，使用系统 Node 时要求 Node.js 22 或更新版本 |
 | 开发依赖 | `happy-dom` 与 `yazl` 均锁定精确版本，只用于测试与确定性打包 |
 | 自动化验证 | Node、macOS、Windows、安装包与文档门禁，不在文档中写死易过期的测试数量 |
