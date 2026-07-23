@@ -38,6 +38,17 @@
 | --- | --- |
 | ![真机截图：原神破晓主题](docs/images/genshin-dawn-live.jpg) | ![真机截图：大佬点烟彩蛋主题](docs/images/dalao-live.jpg) |
 
+## Windows 版 · v5.4.8 for Windows
+
+Windows 11 版本现已发布：[查看 v5.4.8 Release](https://github.com/HeiGeAi/heige-codex-skin-studio/releases/tag/v5.4.8)。
+
+- Windows 安装与恢复：使用 scripts\windows\install.bat / apply.bat，不修改 app.asar、应用二进制或签名资源。
+- 随 Codex 恢复：开启「皮肤常驻」后，普通启动 Codex 会由当前用户计划任务控制器接管并恢复主题与顶部入口。
+- 隐藏按钮：顶部主题入口可选择「隐藏此按钮」，收起为小圆点；点击即可恢复，状态会保存。
+- 随机主题：提供持久化的随机主题开关，随机选择主题并尽量避免连续重复。
+
+> Microsoft Store/MSIX 客户端仍需真机验证；若其阻止本机调试端口，自动接管无法完成。
+
 ## 快速开始（macOS）
 
 需要已装好的 Codex Desktop。下载本仓库后双击安装：
