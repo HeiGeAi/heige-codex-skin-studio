@@ -40,6 +40,7 @@
 | `themes/dragonball-super-saiyan/hero.webp` | 龙珠超级赛亚人主题主视觉 | 项目所有者于 2026-07-18 提供生成 PNG，并明确要求制作预设后公开发布；仓库保存压缩 WebP | 画面含第三方角色形象，项目未取得可独立核验的第三方授权文件 | 项目所有者确认公开发布 | 后续可替换为权利记录更完整的原创角色素材 |
 | `themes/genshin-dawn/hero.webp` | Genshin Dawn 主题主视觉 | 来源证据缺失，授权未验证 | 未知 | 项目所有者确认公开发布 | 后续可替换为权利记录更完整的素材 |
 | `themes/genshin-night/hero.webp` | Genshin Night 主题主视觉 | 来源证据缺失，授权未验证 | 未知 | 项目所有者确认公开发布 | 后续可替换为权利记录更完整的素材 |
+| `themes/caishen-lite-readable/hero.webp` | 财神浅色可读版主题主视觉 | ChannelerH 提供的原创公开 Codex 主题素材，源自 Codex Skin Gallery 的 `Caishen Lite Readable` 横幅；SHA-256 `f4ea1a8385df0bf78e0979aa4a3c30792135630b80a69707f2387531146c5f0c`；不含私有 Codex 截图、工作区名称、第三方品牌或受保护角色 | 提交者确认可随本项目公开再分发 | 项目所有者确认公开发布 | 保留来源哈希；如需商业授权证明可替换为权利记录更完整的素材 |
 | `themes/miku-488137/hero.webp` | Miku 主题主视觉 | 来源证据缺失，授权未验证 | 未知 | 项目所有者确认公开发布 | 后续可替换为权利记录更完整的素材 |
 | `themes/miku-488137/logo.webp` | Miku 主题 Logo | 来源证据缺失，授权未验证 | 未知 | 项目所有者确认公开发布 | 后续补充标识来源或替换 |
 | `themes/miku-488137/polaroid.webp` | Miku 主题拍立得装饰 | 来源证据缺失，授权未验证 | 未知 | 项目所有者确认公开发布 | 后续可替换为权利记录更完整的素材 |

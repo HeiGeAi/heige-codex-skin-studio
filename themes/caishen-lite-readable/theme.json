@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "caishen-lite-readable",
+  "name": "财神浅色可读版",
+  "hero": "hero.webp",
+  "appearance": "light",
+  "previewFocus": { "x": 72, "y": 24 },
+  "thumbnailFocus": { "x": 70, "y": 28 },
+  "thumbnailZoom": 220,
+  "colors": {
+    "accent": "#B84A2A",
+    "secondary": "#D8A642",
+    "surface": "#F8EDDB",
+    "text": "#2F241C"
+  },
+  "copy": {
+    "brand": "Codex",
+    "headline": "招财不刺眼，开工更清爽"
+  }
+}
