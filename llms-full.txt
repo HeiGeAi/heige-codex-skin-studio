@@ -9,7 +9,7 @@
 - 顶部菜单「皮肤常驻」开关是唯一受支持的开启常驻入口。想再次常驻时，先打开「HeiGe 皮肤启动器」恢复当前会话，再在顶部菜单显式打开常驻开关。
 - `apply` 与兼容名 `enable-skin` 都只恢复当前会话；`pause`、`resume`、`restore` 与只读 `status`、`doctor` 语义分离。
 - `enable-persist.command` 是弃用的非零退出入口，不是常驻开关的替代入口。
-- 顶部「自定义图片」只是单个本地快捷槽，它不是可分发的正式主题，也不改写最近正式主题；renderer 本地存储可在自动补针或常驻启动时继续显示它。
+- 顶部「自定义图片」菜单新上传会写入本机用户主题库，成为正式用户主题并记入启动器。只有旧版 `custom-upload` 是 renderer 本地兼容槽；新上传不再以该快捷槽作为权威存储。
 - Windows 生命周期操作使用 `scripts/windows` 下对应的 `.ps1` 或 `.bat`；直接 Node CLI 不负责 Windows Store/MSIX 激活或进程重启。
 - macOS 有自动化与日期化真机证据；Windows 有 Windows PowerShell 5.1、PowerShell 7、32 位解析和隔离任务自动化，Microsoft Store/MSIX 真机待验证。
 - 使用系统 Node 时要求 Node.js 22 或更新版本。生产安装不含 npm 运行时依赖；开发依赖仅用于测试与确定性打包。
@@ -69,6 +69,17 @@
 | --- | --- |
 | ![真机截图：原神破晓主题](docs/images/genshin-dawn-live.jpg) | ![真机截图：大佬点烟彩蛋主题](docs/images/dalao-live.jpg) |
 
+## Windows 版
+
+Windows 11 版本现已发布：[查看最新 Release](https://github.com/HeiGeAi/heige-codex-skin-studio/releases/latest)。
+
+- Windows 安装与恢复：使用 scripts\windows\install.bat / apply.bat，不修改 app.asar、应用二进制或签名资源。
+- 随 Windows 登录启动：开启「皮肤常驻」后会为当前用户注册登录计划任务，无需再次运行安装脚本。首次启用后请重启 Windows 或注销后重新登录一次；后台皮肤控制器将随登录启动，并在随后普通启动 Codex 时恢复主题与顶部入口。
+- 隐藏按钮：顶部主题入口可选择「隐藏此按钮」，收起为小圆点；点击即可恢复，状态会保存。
+- 随机主题：提供持久化的随机主题开关，随机选择主题并尽量避免连续重复。
+
+> Microsoft Store/MSIX 客户端仍需真机验证；若其阻止本机调试端口，自动接管无法完成。
+
 ## 快速开始（macOS）
 
 需要已装好的 Codex Desktop。下载本仓库后双击安装：
@@ -85,13 +96,13 @@ Windows 用 `scripts\windows\install.bat` 安装；日常入口是 `scripts/wind
 
 三条路，从省事到好玩：
 
-1. **菜单直接传**：🎨 菜单里选「＋ 自定义图片」，上传本地图片，自动取色、自动配深浅外观。
+1. **菜单直接传**：🎨 菜单里选「＋ 自定义图片」，上传成功后写入本机用户主题库，成为正式用户主题，并自动取色、自动配深浅外观。
 2. **做成正式主题**：双击 `customize.command`，任意 PNG、JPG、JPEG、WebP 都能生成一套完整皮肤（配色 + 背景底图）。
 3. **让 AI 全包**：把 `output/heige-codex-skin-studio.skill` 交给 Codex，直接说「先生成一张蓝紫色赛博城市主图，再做成皮肤」，从生成到应用全自动，不需要额外 API Key。
 
 现成的生图提示词在[主题提示词库](docs/theme-prompts.md)：8 套风格，复制就能用。做出好看的主题，来[晒图区](https://github.com/HeiGeAi/heige-codex-skin-studio/discussions)贴一张，或者用[主题晒图模板](https://github.com/HeiGeAi/heige-codex-skin-studio/issues/new/choose)投稿，被选中会进 README 精选。
 
-一个实话：「自定义图片」是单个本地快捷槽，再次上传会覆盖；它不是可分发的正式主题，也不会改写启动器记录的最近正式主题。renderer 本地存储可在自动补针或常驻启动时继续显示该快捷图，清除本地数据后会丢失。想要能保存、能切换的主题，走第 2 或第 3 条路。
+一个实话：菜单新上传会写入本机用户主题库并记入启动器，和内置主题一样可在「皮肤常驻」下跨重启复现（同名同图幂等覆盖）。只有旧版 `custom-upload` 是本地兼容槽，可由 renderer 本地存储继续显示；新上传不再以该快捷槽作为权威存储。也可用第 2 / 第 3 条路从文件或 AI 生成主题。
 
 ## 内置 12 套主题
 

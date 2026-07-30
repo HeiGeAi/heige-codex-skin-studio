@@ -45,10 +45,18 @@ test("exposes the approved product identity and studio paths", async () => {
 });
 
 test("uses the approved package identity without ASAR runtime modules", async () => {
-  const packageJson = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
+  const [packageJson, packageLock, readme] = await Promise.all([
+    readFile(join(root, "package.json"), "utf8").then(JSON.parse),
+    readFile(join(root, "package-lock.json"), "utf8").then(JSON.parse),
+    readFile(join(root, "README.md"), "utf8"),
+  ]);
 
   assert.equal(packageJson.name, "heige-codex-skin-studio");
-  assert.equal(packageJson.version, "5.4.6");
+  assert.match(packageJson.version, /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/);
+  assert.equal(packageLock.version, packageJson.version);
+  assert.equal(packageLock.packages?.[""]?.version, packageJson.version);
+  assert.doesNotMatch(readme, /v\d+\.\d+\.\d+\s+for Windows/i);
+  assert.match(readme, /releases\/latest/);
   assert.equal(packageJson.type, "module");
   assert.equal(existsSync(join(root, "src/asar.mjs")), false);
   assert.equal(existsSync(join(root, "src/theme-patch.mjs")), false);

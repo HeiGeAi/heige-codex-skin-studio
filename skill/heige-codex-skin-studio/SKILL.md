@@ -60,7 +60,7 @@ macOS 稳定入口是 `scripts/apply.command`、`scripts/enable-skin.command`、
 
 默认回退主题是 `miku-488137`。另有 `genshin-dawn`、`genshin-night`、`wuthering-tide`、`wuthering-echo`、`naruto-hokage`、`naruto-sasuke`、`deepspace-dawn`、`deepspace-star`、`dragonball-nimbus`、`dragonball-super-saiyan` 和 `dalao-dianyan`，合计 12 个内置预设。
 
-内置预设会同步 Codex 深浅外观。顶部菜单的「＋ 自定义图片」可选择本地图片、自动压缩取色、判断画面亮度并同步 Codex 外观。「自定义图片」只是单个本地快捷槽，再次上传会覆盖，行尾 × 可删除；它不是可分发的正式主题，也不改写最近正式主题。renderer 本地存储可在自动补针或常驻启动时继续显示它，清除本地数据后会丢失。快速试用优先用这个入口；需要分发或长期管理时，用 `create` 生成正式主题。
+内置预设会同步 Codex 深浅外观。顶部菜单的「＋ 自定义图片」可选择本地图片、自动压缩取色、判断画面亮度并同步 Codex 外观。菜单新上传会写入本机用户主题库，成为正式用户主题并记入启动器，「我的主题」行尾 × 可删除对应磁盘主题。只有旧版 `custom-upload` 是 renderer 本地兼容槽，新上传不再以该快捷槽作为权威存储。需要从文件或 AI 生成主题时，用 `create` 生成正式主题。
 
 主题中心的「阅读增强」默认开启，为最终回复和过程回复增加统一的 90％ 主题自适应半透明底色与对称留白；用户可随时关闭。该偏好保存在 renderer 本地并同步到其他窗口，不改变皮肤常驻状态，不调用后台接口，也不增加模糊、阴影、观察器或滚动监听。
 

@@ -1857,7 +1857,7 @@ try {
             Assert-Match ([regex]::Escape($theme)) $skill
         }
         Assert-Match '自定义图片' $skill
-        Assert-Match '覆盖' $skill
+        Assert-Match '本机用户主题库' $skill
         Assert-Match '删除' $skill
         Assert-Match '正式主题' $skill
     }

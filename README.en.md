@@ -50,7 +50,7 @@ Applying a skin quits Codex normally and relaunches it with a local debug port, 
 
 ## Make your own theme
 
-1. Upload any image through the 🎨 menu ("＋ 自定义图片"): colors and appearance are picked automatically. This slot is a single local quick slot, not a durable distributable theme.
+1. Upload any image through the 🎨 menu ("＋ 自定义图片"): new menu uploads are saved as durable user themes, with colors and appearance picked automatically. The legacy `custom-upload` path is a local compatibility slot; new uploads no longer use that slot as authoritative storage.
 2. Run `customize.command` to turn an image into a full saved theme.
 3. Give the `.skill` package to Codex and let it generate the artwork and build the theme end to end.
 

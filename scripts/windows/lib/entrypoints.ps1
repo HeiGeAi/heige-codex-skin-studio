@@ -1218,8 +1218,8 @@ function Test-HeiGeOwnedInstallMarker {
             if ([string]$names[$index] -cne [string]$expected[$index]) { return $false }
         }
         return (
-            $marker.schemaVersion -is [int] -and
-            [int]$marker.schemaVersion -eq 1 -and
+            ($marker.schemaVersion -is [int] -or $marker.schemaVersion -is [long]) -and
+            [int64]$marker.schemaVersion -eq 1 -and
             [string]$marker.product -ceq "heige-codex-skin-studio" -and
             [string]$marker.kind -ceq "stable-tree" -and
             [string]$marker.manifestSha256 -cmatch '^[a-f0-9]{64}$'

@@ -185,16 +185,28 @@ exit 0
         Assert-Match "安装已完成，但首次应用失败，可重试" $script:InstallerSource
     }
 
-    Test-Case "Postcommit apply failure reports installed artifacts without rollback language" {
-        $failureScript = Join-Path ([System.IO.Path]::GetTempPath()) `
-            ("heige-apply-failure-" + [guid]::NewGuid().ToString("N") + ".ps1")
+    Test-Case "Postcommit apply preserves a spaced install root and reports the failure exit code" {
+        $installRoot = Join-Path ([System.IO.Path]::GetTempPath()) `
+            ("HeiGe InstallRoot 中文 " + [guid]::NewGuid().ToString("N"))
+        $applyScript = Join-Path $installRoot "scripts\windows\apply.ps1"
+        $successMarker = Join-Path (Split-Path $applyScript -Parent) "postinstall-ok.txt"
+        $utf8Bom = New-Object System.Text.UTF8Encoding($true)
         try {
-            [System.IO.File]::WriteAllText($failureScript, 'throw "simulated apply failure"')
+            New-Item -ItemType Directory -Path (Split-Path $applyScript -Parent) -Force | Out-Null
+            [System.IO.File]::WriteAllText(
+                $applyScript,
+                '[System.IO.File]::WriteAllText((Join-Path $PSScriptRoot "postinstall-ok.txt"), "ok"); exit 0',
+                $utf8Bom
+            )
+            Invoke-HeiGePostCommitApply -ApplyScript $applyScript
+            Assert-Equal "ok" ([System.IO.File]::ReadAllText($successMarker))
+
+            [System.IO.File]::WriteAllText($applyScript, 'exit 37', $utf8Bom)
             Assert-Throws {
-                Invoke-HeiGePostCommitApply -ApplyScript $failureScript
-            } "安装已完成，但首次应用失败，可重试"
+                Invoke-HeiGePostCommitApply -ApplyScript $applyScript
+            } "退出码 37"
         } finally {
-            Remove-Item -LiteralPath $failureScript -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $installRoot -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
 

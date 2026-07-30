@@ -7,7 +7,7 @@
 一个效率优先的 Codex Desktop 换肤工具。它通过本机回环 CDP 把主题实时注入 Codex 界面，不修改 `app.asar`、应用二进制或签名资源。未来 Codex Desktop 若改变启动参数、renderer 结构或界面选择器，本项目仍可能需要适配。
 
 - **一键切换**：应用皮肤后 Codex 顶部中间出现 🎨 菜单，所有已装主题和原生界面即点即换。预设主题会同步切换 Codex 自身的浅色或深色外观，不再需要进入设置手动搭配。嫌按钮碍眼？菜单底部「隐藏此按钮」把它收成一颗半透明小圆点，点圆点即恢复。
-- **自定义上传**：菜单里选「＋ 自定义图片」直接上传本地图片，自动按图片风格取色（主色、辅色、面板底色、文字色），并根据图片亮度同步 Codex 深浅外观。上传成功后写入本机用户主题库（`%APPDATA%\\HeiGeCodexSkinStudio\\themes` / macOS Application Support），并记入启动器 `selectedThemeId` / `lastNonNativeThemeId`，与内置主题一样可在「皮肤常驻」开启时跨重启复现。再次上传会生成新正式主题（同名同图则幂等覆盖）；「我的主题」中的 × 可删除磁盘主题。旧版仅存在于 renderer localStorage 的 `custom-upload` 快捷槽仍可在原生态下兼容显示，但新上传不再以该槽为权威存储。
+- **自定义上传**：菜单里选「＋ 自定义图片」直接上传本地图片，自动按图片风格取色（主色、辅色、面板底色、文字色），并根据图片亮度同步 Codex 深浅外观。上传成功后写入本机用户主题库（`%APPDATA%\\HeiGeCodexSkinStudio\\themes` / macOS Application Support），成为正式用户主题，并记入启动器 `selectedThemeId` / `lastNonNativeThemeId`，与内置主题一样可在「皮肤常驻」开启时跨重启复现。再次上传会生成新正式主题（同名同图则幂等覆盖）；「我的主题」中的 × 可删除磁盘主题。只有旧版 `custom-upload` 是 renderer localStorage 本地兼容槽，仍可在原生态下显示；新上传不再以该快捷槽为权威存储。
 - **一张图片就是一个主题**：任意 PNG、JPG、JPEG、WebP 直接生成皮肤（配色 + 背景底图）。
 - **AI 生成主题**：把 Skill 交给 Codex，让它先用生图能力产出主图，再自动做成皮肤，无需额外 API Key。
 - **自带可选 Pet**：安装包内附独立的 `Miku Future` 动画桌面宠物，包含待机、奔跑、挥手、跳跃、等待、审查等动作，不覆盖 Codex 内置宠物，也不会在只安装皮肤时强制启用。
@@ -20,7 +20,7 @@
 | 适用应用 | OpenAI Codex Desktop（ChatGPT 桌面端） |
 | 支持平台 | macOS 自动化与真机验证；Windows 跨 PowerShell 自动化，Microsoft Store/MSIX 真机待验证 |
 | 注入方式 | Chrome DevTools Protocol，调试端口仅绑定本机回环 `127.0.0.1:9341` |
-| 内置主题 | 10 个（1 个高精度 Miku 488137 + 8 个游戏轻量主题 + 1 个彩蛋「大佬 · 点烟」） |
+| 内置主题 | 12 个（1 个高精度 Miku 488137 + 10 个游戏轻量主题 + 1 个彩蛋「大佬 · 点烟」） |
 | 运行时依赖 | 不安装 npm 运行时依赖；优先使用可信的 Codex 内置 Node，使用系统 Node 时要求 Node.js 22 或更新版本 |
 | 开发依赖 | `happy-dom` 与 `yazl` 均锁定精确版本，只用于测试与确定性打包 |
 | 自动化验证 | Node、macOS、Windows、安装包与文档门禁，不在文档中写死易过期的测试数量 |
