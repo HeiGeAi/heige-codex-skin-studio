@@ -38,9 +38,9 @@
 | --- | --- |
 | ![真机截图：原神破晓主题](docs/images/genshin-dawn-live.jpg) | ![真机截图：大佬点烟彩蛋主题](docs/images/dalao-live.jpg) |
 
-## Windows 版 · v5.4.8 for Windows
+## Windows 版
 
-Windows 11 版本现已发布：[查看 v5.4.8 Release](https://github.com/HeiGeAi/heige-codex-skin-studio/releases/tag/v5.4.8)。
+Windows 11 版本现已发布：[查看最新 Release](https://github.com/HeiGeAi/heige-codex-skin-studio/releases/latest)。
 
 - Windows 安装与恢复：使用 scripts\windows\install.bat / apply.bat，不修改 app.asar、应用二进制或签名资源。
 - 随 Windows 登录启动：开启「皮肤常驻」后会为当前用户注册登录计划任务，无需再次运行安装脚本。首次启用后请重启 Windows 或注销后重新登录一次；后台皮肤控制器将随登录启动，并在随后普通启动 Codex 时恢复主题与顶部入口。
@@ -65,13 +65,13 @@ Windows 用 `scripts\windows\install.bat` 安装；日常入口是 `scripts/wind
 
 三条路，从省事到好玩：
 
-1. **菜单直接传**：🎨 菜单里选「＋ 自定义图片」，上传本地图片，自动取色、自动配深浅外观。
+1. **菜单直接传**：🎨 菜单里选「＋ 自定义图片」，上传成功后写入本机用户主题库，成为正式用户主题，并自动取色、自动配深浅外观。
 2. **做成正式主题**：双击 `customize.command`，任意 PNG、JPG、JPEG、WebP 都能生成一套完整皮肤（配色 + 背景底图）。
 3. **让 AI 全包**：把 `output/heige-codex-skin-studio.skill` 交给 Codex，直接说「先生成一张蓝紫色赛博城市主图，再做成皮肤」，从生成到应用全自动，不需要额外 API Key。
 
 现成的生图提示词在[主题提示词库](docs/theme-prompts.md)：8 套风格，复制就能用。做出好看的主题，来[晒图区](https://github.com/HeiGeAi/heige-codex-skin-studio/discussions)贴一张，或者用[主题晒图模板](https://github.com/HeiGeAi/heige-codex-skin-studio/issues/new/choose)投稿，被选中会进 README 精选。
 
-一个实话：菜单上传会写入本机用户主题库并记入启动器，和内置主题一样可在「皮肤常驻」下跨重启复现（同名同图幂等覆盖）。也可用第 2 / 第 3 条路从文件或 AI 生成主题。
+一个实话：菜单新上传会写入本机用户主题库并记入启动器，和内置主题一样可在「皮肤常驻」下跨重启复现（同名同图幂等覆盖）。只有旧版 `custom-upload` 是本地兼容槽，可由 renderer 本地存储继续显示；新上传不再以该快捷槽作为权威存储。也可用第 2 / 第 3 条路从文件或 AI 生成主题。
 
 ## 内置 12 套主题
 
