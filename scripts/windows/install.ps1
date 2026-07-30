@@ -484,7 +484,7 @@ function Invoke-HeiGePostCommitApply {
         $process = Start-Process -FilePath $powershell -ArgumentList @(
             "-NoProfile",
             "-ExecutionPolicy", "Bypass",
-            "-File", $ApplyScript
+            "-File", (ConvertTo-HeiGeQuotedArgument -Value $ApplyScript)
         ) -Wait -PassThru -NoNewWindow
     } finally {
         if ($null -eq $previousNoPause -or $previousNoPause -eq "") {
