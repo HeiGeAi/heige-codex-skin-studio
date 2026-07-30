@@ -59,17 +59,22 @@ test("public docs keep every compatibility entry session-only", async () => {
   assert.match(skill, /enable-persist\.command[^\n。]*(?:弃用|废弃)[^\n。]*非零/);
 });
 
-test("custom quick image stays a local temporary slot rather than a durable theme", async () => {
-  const [readme, skill, skillReadme] = await Promise.all([
+test("new uploads become durable user themes while legacy custom-upload stays local", async () => {
+  const [readme, english, summary, manual, skill, skillReadme] = await Promise.all([
     publicDoc("README.md"),
+    publicDoc("README.en.md"),
+    publicDoc("llms.txt"),
+    publicDoc("docs/manual.md"),
     publicDoc("skill/heige-codex-skin-studio/SKILL.md"),
     publicDoc("skill/heige-codex-skin-studio/README.md"),
   ]);
-  for (const doc of [readme, skill, skillReadme]) {
-    assert.match(doc, /自定义图片[^\n。]*(?:本地临时槽|本地快捷槽)/);
-    assert.match(doc, /不[^\n。]*(?:正式主题|持久主题|权威主题)/);
-    assert.match(doc, /renderer 本地存储[^\n。]*(?:自动补针|常驻启动)[^\n。]*继续显示/i);
+  for (const doc of [readme, summary, manual, skill, skillReadme]) {
+    assert.match(doc, /(?:新上传|菜单上传|上传成功)[^\n。]*(?:正式用户主题|本机用户主题库)/);
+    assert.match(doc, /旧版[^\n。]*`?custom-upload`?[^\n。]*(?:本地兼容槽|本地快捷槽)/i);
+    assert.match(doc, /新上传[^\n。]*不再[^\n。]*(?:快捷槽|权威存储)/);
   }
+  assert.match(english, /new (?:menu )?uploads?[^\n.]*durable user themes?/i);
+  assert.match(english, /legacy `?custom-upload`?[^\n.]*local compatibility slot/i);
 });
 
 test("public support and security claims stay within verified boundaries", async () => {

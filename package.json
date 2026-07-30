@@ -1,6 +1,6 @@
 {
   "name": "heige-codex-skin-studio",
-  "version": "5.4.6",
+  "version": "5.4.11",
   "private": true,
   "type": "module",
   "engines": {
@@ -11,7 +11,7 @@
   },
   "scripts": {
     "test": "node --test",
-    "release:check": "node scripts/check-asset-provenance.mjs --release",
+    "release:check": "node --test && node scripts/check-asset-provenance.mjs --release",
     "doctor": "node src/cli.mjs doctor",
     "status": "node src/cli.mjs status",
     "list": "node src/cli.mjs list",

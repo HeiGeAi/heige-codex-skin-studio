@@ -39,6 +39,15 @@ test("security documentation states the real CDP and control-channel boundary", 
   assert.match(text, /不要.*公开.*Issue/s);
 });
 
+test("release:check runs provenance and the full suite without recursion", async () => {
+  const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+  const command = packageJson.scripts?.["release:check"];
+  assert.equal(typeof command, "string");
+  assert.match(command, /check-asset-provenance\.mjs --release/);
+  assert.match(command, /(?:^|&&\s*)node --test(?:\s|$)/);
+  assert.doesNotMatch(command, /npm run release:check/);
+});
+
 test("tracked source contains no backup assets or ignored reports", async () => {
   const tracked = await gitLines("ls-files");
   assert.equal(tracked.some((path) => path.includes(".before-")), false);
