@@ -475,7 +475,7 @@ function Invoke-HeiGePostCommitApply {
     }
     # 子进程执行 apply：apply.ps1 会 exit，不可 & 进当前安装进程，否则会跳过 mutex finally。
     # 嵌套时关掉暂停提示，避免与外层 install 页脚重复。
-    $powershell = Join-Path $PSHOME "powershell.exe"
+    $powershell = Get-HeiGeWindowsPowerShellPath
     $previousNoPause = $env:HEIGE_NO_PAUSE
     $previousHint = $env:HEIGE_SHOW_PAUSE_HINT
     $env:HEIGE_NO_PAUSE = "1"
