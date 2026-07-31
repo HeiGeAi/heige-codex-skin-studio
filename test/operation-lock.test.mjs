@@ -667,6 +667,38 @@ test("Windows operation lease safely migrates a current-user-owned legacy state 
   const lockPath = join(stateRoot, "operation.lock");
   await mkdir(stateRoot);
   const securityEvents = [];
+  const windowsSecurity = fakeWindowsSecurity(securityEvents);
+  const verifyDirectory = windowsSecurity.verifyDirectory;
+  let firstVerification = true;
+  windowsSecurity.verifyDirectory = async (path) => {
+    if (path === stateRoot && firstVerification) {
+      firstVerification = false;
+      securityEvents.push(["verify-directory", path]);
+      throw new Error("legacy ACL is not exact");
+    }
+    return verifyDirectory(path);
+  };
+  const lease = await acquireOperationLock(acquisitionOptions(lockPath, {
+    platform: "win32",
+    stateRoot,
+    windowsSecurity,
+  }));
+  t.after(() => lease.release());
+
+  assert.deepEqual(securityEvents.slice(0, 3), [
+    ["verify-directory", stateRoot],
+    ["migrate-directory", stateRoot],
+    ["verify-directory", stateRoot],
+  ]);
+  assert.equal(await lease.assertOwned(), true);
+});
+
+test("Windows operation lease does not rewrite an already private state root ACL", async (t) => {
+  const { root } = await fixture(t);
+  const stateRoot = join(root, "private-windows-state");
+  const lockPath = join(stateRoot, "operation.lock");
+  await mkdir(stateRoot);
+  const securityEvents = [];
   const lease = await acquireOperationLock(acquisitionOptions(lockPath, {
     platform: "win32",
     stateRoot,
@@ -674,10 +706,13 @@ test("Windows operation lease safely migrates a current-user-owned legacy state 
   }));
   t.after(() => lease.release());
 
-  assert.deepEqual(securityEvents.slice(0, 2), [
-    ["migrate-directory", stateRoot],
+  assert.deepEqual(securityEvents.slice(0, 1), [
     ["verify-directory", stateRoot],
   ]);
+  assert.equal(
+    securityEvents.some(([action, path]) => action === "migrate-directory" && path === stateRoot),
+    false,
+  );
   assert.equal(await lease.assertOwned(), true);
 });
 

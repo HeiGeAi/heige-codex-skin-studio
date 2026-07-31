@@ -1922,22 +1922,50 @@ export async function waitForAppliedSkin({
   throw new Error("ephemeral controller 未确认皮肤已应用");
 }
 
-async function productionRegisterEphemeral({ deps, paths, port, preflight, themeId }) {
-  await ensureProductionState({
+export async function productionRegisterEphemeral({
+  deps,
+  paths,
+  port,
+  preflight,
+  themeId,
+  loadedTheme,
+  themes,
+  preferStored,
+}, {
+  ensureState = ensureProductionState,
+  spawnController = spawn,
+  controllerEntry = fileURLToPath(import.meta.url),
+  confirmApplied = waitForAppliedSkin,
+} = {}) {
+  await ensureState({
     paths,
     themeId,
     process: preflight.process,
     keepUntilProcessExit: true,
   });
-  const child = spawn(process.execPath, [
-    fileURLToPath(import.meta.url),
+
+  // 首次注入必须由仍附着在交互会话中的前台进程同步完成。Store 版 Codex
+  // 在关闭/激活之间会重建进程树；若把首次注入完全交给 detached 子进程，
+  // 子进程可能尚未启动就随旧进程退出，前台只能无信息地轮询到超时。
+  await deps.applySkin({
+    loadedTheme,
+    themes,
+    activeId: themeId,
+    port,
+    currentVersion: await deps.readCurrentPackageVersion(),
+    preferStored,
+    control: null,
+  });
+
+  const child = spawnController(process.execPath, [
+    controllerEntry,
     "controller",
     "--ephemeral",
     "--port",
     String(port),
   ], { detached: true, stdio: "ignore" });
   child.unref();
-  await waitForAppliedSkin({ deps, port, themeId });
+  await confirmApplied({ deps, port, themeId });
   return { mode: "active" };
 }
 

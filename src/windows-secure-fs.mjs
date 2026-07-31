@@ -111,7 +111,9 @@ foreach ($entry in $operations) {
       Microsoft.PowerShell.Security\Set-Acl -LiteralPath $TargetPath -AclObject $acl -ErrorAction Stop
     } catch {
       # 部分账户/会话没有 SeSecurityPrivilege；与 Windows 安装脚本一致，回退 icacls。
-      # fallback 必须与 Set-Acl 路径保持同一精确契约：setowner + 重置 grant + 随后 exact verify。
+      # migrate 已在上方证明 owner 是当前用户；protect 的目标则由当前进程刚创建。
+      # 不要把裸 SID 交给 icacls /setowner：它会按账户名解析并以 1332 失败。
+      # 与安装脚本保持同一契约：移除继承、重置当前 SID grant，再做 exact verify。
       $detail = [string]$_.Exception.Message
       $icacls = Join-Path $env:SystemRoot 'System32\icacls.exe'
       if (-not (Test-Path -LiteralPath $icacls -PathType Leaf)) {
@@ -119,7 +121,7 @@ foreach ($entry in $operations) {
       }
       $sidText = [string]$currentSid.Value
       $grant = if ($isDirectory) { '*{0}:(OI)(CI)F' -f $sidText } else { '*{0}:F' -f $sidText }
-      $output = & $icacls $TargetPath /inheritance:r /setowner $sidText /grant:r $grant 2>&1
+      $output = & $icacls $TargetPath /inheritance:r /grant:r $grant 2>&1
       if ($LASTEXITCODE -ne 0) {
         throw ("Set-Acl failed and icacls fallback failed: {0}; icacls: {1}" -f $detail, (($output | ForEach-Object { [string]$_ }) -join ' '))
       }
