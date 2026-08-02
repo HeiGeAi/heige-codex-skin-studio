@@ -89,12 +89,13 @@ export function buildSkinCss({ theme, heroDataUrl, logoDataUrl = null, polaroidD
 .app-shell-left-panel {
   background: color-mix(in srgb, var(--heige-surface) 88%, transparent) !important;
   border-right: 1px solid color-mix(in srgb, var(--heige-accent) 45%, transparent) !important;
-  /* blur 从 20px 降到 8px：背板是高频变化的对话区，大半径模糊会逐帧重采样 */
-  backdrop-filter: blur(8px) saturate(1.12);
+  /* 常驻侧栏覆盖动态背景，禁用背景采样以避免滚动和流式输出逐帧重合成。 */
+  backdrop-filter: none !important;
 }
 
 .main-surface,
-.browser-main-surface {
+.browser-main-surface,
+[data-app-shell-main-surface="default"] {
   background: linear-gradient(180deg, transparent 0 40%, color-mix(in srgb, var(--heige-surface) 74%, transparent) 100%) !important;
 }
 
@@ -122,10 +123,10 @@ export function buildSkinCss({ theme, heroDataUrl, logoDataUrl = null, polaroidD
 [data-codex-approval-surface] {
   color: var(--heige-text) !important;
   border: 1px solid color-mix(in srgb, var(--heige-accent) 24%, transparent) !important;
-  /* 不透明度 60%→80%、blur 22px→8px：气泡盖在流式内容上，大模糊是卡顿主因 */
+  /* 半透明色保留层次，禁用 blur：气泡移动和流式输出时不能持续采样背景。 */
   background: color-mix(in srgb, var(--heige-surface) 80%, transparent) !important;
   box-shadow: 0 8px 24px color-mix(in srgb, var(--heige-accent) 12%, transparent) !important;
-  backdrop-filter: blur(8px) saturate(1.08);
+  backdrop-filter: none !important;
 }
 
 [data-app-action-sidebar-thread-active="true"] {

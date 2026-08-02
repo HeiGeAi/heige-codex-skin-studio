@@ -489,6 +489,25 @@ test("a stable healthy tick never acquires the durable operation lease", async (
   );
 });
 
+test("a retained session also stays on the one-scan lease-free healthy path", async () => {
+  const fx = fixture({
+    state: { persistenceEnabled: false },
+    session: activeSession({ keepUntilProcessExit: true }),
+    backgroundRegistered: false,
+  });
+  const controller = createSkinController(fx.deps);
+  await controller.start();
+  fx.calls.lease.length = 0;
+  fx.calls.inspect.length = 0;
+
+  const current = await controller.tick();
+
+  assert.equal(current.action, "idle");
+  assert.equal(current.persistenceEnabled, false);
+  assert.deepEqual(fx.calls.lease, []);
+  assert.equal(fx.calls.inspect.length, 1);
+});
+
 test("a healthy tick discards unused trailing port proof", async () => {
   let discarded = 0;
   const fx = fixture();

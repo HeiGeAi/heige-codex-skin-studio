@@ -73,7 +73,7 @@ async function bringTargetToFront(session) {
   } catch {}
 }
 
-async function evaluateTargets(targets, expression, Session) {
+async function evaluateTargets(targets, expression, Session, { bringToFront = true } = {}) {
   const succeeded = [];
   const failed = [];
   for (const target of targets) {
@@ -81,7 +81,7 @@ async function evaluateTargets(targets, expression, Session) {
     try {
       session = new Session(target.webSocketDebuggerUrl);
       await session.open();
-      await bringTargetToFront(session);
+      if (bringToFront) await bringTargetToFront(session);
       succeeded.push(safeTarget(target, { value: await session.evaluate(expression) }));
     } catch (error) {
       failed.push(safeTarget(target, { error: safeEvaluationError(error) }));
@@ -475,7 +475,7 @@ export async function skinStatus({ port, includeControlRequest = false, deps = {
       resultsFor(classified, { succeeded: [], failed: [] }),
     );
   }
-  const evaluated = await evaluateTargets(targets, expression, Session);
+  const evaluated = await evaluateTargets(targets, expression, Session, { bringToFront: false });
   const results = resultsFor(classified, evaluated);
   if (evaluated.succeeded.length === 0) {
     throw targetError(

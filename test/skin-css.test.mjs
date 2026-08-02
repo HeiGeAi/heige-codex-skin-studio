@@ -47,8 +47,23 @@ test("builds one fast generic skin from a theme and image data URL", () => {
   );
   assert.match(
     css,
-    /\.composer-surface-chrome,[\s\S]*backdrop-filter:\s*blur\(8px\)/,
-    "气泡/输入框模糊半径上限 8px：盖在流式内容上的大模糊是卡顿主因",
+    /\.browser-main-surface,\s*\[data-app-shell-main-surface="default"\]\s*\{[^}]*var\(--heige-surface\) 74%/s,
+    "新版 Codex 主内容容器必须保留旧版背景透明渐变",
+  );
+  assert.match(
+    css,
+    /\.composer-surface-chrome,[\s\S]*backdrop-filter:\s*none\s*!important/,
+    "气泡和输入框不得持续采样动态背景",
+  );
+  assert.match(
+    css,
+    /\.app-shell-left-panel\s*\{[^}]*backdrop-filter:\s*none\s*!important/s,
+    "常驻侧栏不得持续采样动态背景",
+  );
+  assert.doesNotMatch(
+    css,
+    /backdrop-filter:\s*blur\(/,
+    "聊天主界面的皮肤样式不得引入持续模糊合成",
   );
   assert.doesNotMatch(
     css,
