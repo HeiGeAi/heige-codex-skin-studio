@@ -24,8 +24,10 @@ function png(width, height, bytes = 24) {
 
 class FakeSession {
   static expressions = [];
+  static commands = [];
   constructor() { this.closed = false; }
   async open() { return this; }
+  async send(command) { FakeSession.commands.push(command); }
   async evaluate(expression) {
     FakeSession.expressions.push(expression);
     if (expression.includes("installed:")) {
@@ -75,6 +77,7 @@ async function fixture() {
 
 test("applies the skin to the main window only, never the pet overlay", async () => {
   FakeSession.expressions = [];
+  FakeSession.commands = [];
   const { loaded, deps } = await fixture();
   const result = await applySkin({ loadedTheme: loaded, port: 9341, deps });
   assert.equal(result.applied, 1);
@@ -84,6 +87,7 @@ test("applies the skin to the main window only, never the pet overlay", async ()
   ]);
   assert.match(FakeSession.expressions[0], /heige-codex-skin-style/);
   assert.match(FakeSession.expressions[0], /data:image\/png;base64/);
+  assert.deepEqual(FakeSession.commands, ["Page.bringToFront"]);
 });
 
 test("keeps waiting when only the pet overlay renderer exists", async () => {
@@ -143,6 +147,7 @@ test("removes and checks the live style without persistent machinery", async () 
   FakeSession.expressions = [];
   const { deps } = await fixture();
   assert.equal((await removeSkin({ port: 9341, deps })).removed, 2, "pause 要连宠物悬浮层一起清理");
+  FakeSession.commands = [];
   const status = await skinStatus({ port: 9341, deps });
   assert.deepEqual(status.statuses, [{
     installed: true,
@@ -158,6 +163,7 @@ test("removes and checks the live style without persistent machinery", async () 
   assert.match(FakeSession.expressions[0], /remove\(\)/);
   assert.match(FakeSession.expressions[0], /heige-codex-skin-menu/);
   assert.match(FakeSession.expressions[0], /__heigeCodexSkinRuntime\?\.dispose/);
+  assert.deepEqual(FakeSession.commands, [], "后台状态读取不得抢前台焦点");
 });
 
 test("status exposes renderer control requests only to an explicit internal caller", async () => {

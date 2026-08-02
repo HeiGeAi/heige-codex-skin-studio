@@ -1175,10 +1175,10 @@ export function createSkinController(input) {
         }
       }
       if (!sessionMatches) return null;
-      if (
-        before.state.persistenceEnabled !== true ||
-        before.session.keepUntilProcessExit !== false
-      ) return null;
+      const stableSession = before.state.persistenceEnabled === true
+        ? before.session.keepUntilProcessExit === false
+        : before.session.keepUntilProcessExit === true;
+      if (!stableSession) return null;
       const health = analyzeRendererHealth(observedHealth, before.state);
       if (health.repairTargets?.length !== 0) return null;
 
