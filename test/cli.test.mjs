@@ -21,6 +21,7 @@ import {
   probeWindowsNativeProcessFromSnapshot,
   productionLockOptions,
   productionPreflight,
+  productionRegisterEphemeral,
   runCli,
   runControllerProcess,
   spawnWindowsRestartIntoCdp,
@@ -692,6 +693,114 @@ test("waitForAppliedSkin emits progress while confirmation is pending", async ()
     progress: (message) => messages.push(message),
   });
   assert.ok(messages.some((message) => /无需点击/.test(message)));
+});
+
+test("production ephemeral registration injects in the foreground before spawning its keeper", async () => {
+  const events = [];
+  const loadedTheme = { manifest: { id: "miku-488137" } };
+  const themes = [loadedTheme];
+  const preflight = {
+    process: {
+      pid: 4242,
+      executablePath: "C:\\Program Files\\Codex\\Codex.exe",
+      startedAt: "2026-07-31T01:00:00.0000000Z",
+    },
+  };
+  const child = {
+    unref() { events.push(["unref"]); },
+  };
+
+  const result = await productionRegisterEphemeral({
+    deps: {
+      readCurrentPackageVersion: async () => "5.4.11",
+      applySkin: async (input) => {
+        events.push(["apply", structuredClone(input)]);
+        return { applied: 1 };
+      },
+      skinStatus: async () => {
+        throw new Error("confirmation is injected for this unit test");
+      },
+    },
+    paths: { stateRoot: "C:\\state" },
+    port: 9341,
+    preflight,
+    themeId: "miku-488137",
+    loadedTheme,
+    themes,
+    preferStored: true,
+  }, {
+    ensureState: async (input) => {
+      events.push(["state", structuredClone(input)]);
+    },
+    spawnController: (file, args, options) => {
+      events.push(["spawn", file, [...args], { ...options }]);
+      return child;
+    },
+    controllerEntry: "C:\\repo\\src\\cli.mjs",
+    confirmApplied: async (input) => {
+      events.push(["confirm", input.port, input.themeId]);
+    },
+  });
+
+  assert.deepEqual(result, { mode: "active" });
+  assert.deepEqual(events.map(([event]) => event), [
+    "state",
+    "apply",
+    "spawn",
+    "unref",
+    "confirm",
+  ]);
+  assert.deepEqual(events[0][1], {
+    paths: { stateRoot: "C:\\state" },
+    themeId: "miku-488137",
+    process: preflight.process,
+    keepUntilProcessExit: true,
+  });
+  assert.deepEqual(events[1][1], {
+    loadedTheme,
+    themes,
+    activeId: "miku-488137",
+    port: 9341,
+    currentVersion: "5.4.11",
+    preferStored: true,
+    control: null,
+  });
+  assert.deepEqual(events[2].slice(2), [[
+    "C:\\repo\\src\\cli.mjs",
+    "controller",
+    "--ephemeral",
+    "--port",
+    "9341",
+  ], {
+    detached: true,
+    stdio: "ignore",
+  }]);
+});
+
+test("production ephemeral registration does not spawn a keeper when foreground injection fails", async () => {
+  let spawned = false;
+  await assert.rejects(productionRegisterEphemeral({
+    deps: {
+      readCurrentPackageVersion: async () => "5.4.11",
+      applySkin: async () => {
+        throw new Error("foreground injection failed");
+      },
+    },
+    paths: { stateRoot: "C:\\state" },
+    port: 9341,
+    preflight: { process: { pid: 4242 } },
+    themeId: "miku-488137",
+    loadedTheme: { manifest: { id: "miku-488137" } },
+    themes: [],
+    preferStored: false,
+  }, {
+    ensureState: async () => {},
+    spawnController: () => {
+      spawned = true;
+      return { unref() {} };
+    },
+  }), /foreground injection failed/);
+  assert.equal(spawned, false);
 });
 
 test("apply on a native Codex queues one detached CDP restart and applies only after restart", async () => {

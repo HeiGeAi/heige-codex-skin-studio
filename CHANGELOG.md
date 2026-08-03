@@ -23,6 +23,9 @@
 - 统一菜单自定义图片的公开契约：新上传会落盘为正式用户主题，只有旧版 `custom-upload` 保留为本地兼容槽。
 - 恢复 `llms-full.txt` 同步、确定性 `.skill` 制品与发布哈希一致性。
 - 以 `package.json` 作为版本真相源，README 改为不绑定 patch 版本的最新 Release 链接。
+- 修复 Windows 缺少 `Set-Acl` 所需权限时，ACL 回退把裸 SID 传给 `icacls /setowner` 并触发 1332，最终误报 `LOCK_PERMISSIONS`、导致皮肤启动失败。
+- 修复 Windows Store 版把首次注入完全交给 detached 临时控制器时的启动竞态：前台在已验证 CDP 后同步完成首次注入，再启动临时控制器保活，避免连续 `160/160` 后误报“未确认皮肤已应用”。
+- 修复 Windows 前后台控制器每次抢锁都重复重写已合规状态目录 ACL，导致 `controller:start` 长时间持锁、后台 ACK 超时并补偿关闭：现对已有私有目录先做只读精确校验，仅在不合规时执行 ACL 迁移。
 
 ### 测试
 
