@@ -275,9 +275,9 @@ test("rejects MIME mismatch, image bombs, and aggregate theme bytes", async () =
     polaroid: "polaroid.png",
   }, async (root) => {
     for (const file of ["hero.png", "logo.png", "polaroid.png"]) {
-      await writeFile(join(root, file), png(100, 100, 6 * 1024 * 1024));
+      await writeFile(join(root, file), png(100, 100, 22 * 1024 * 1024));
     }
-    await assert.rejects(loadTheme(root), /theme.*16777216|16 MiB/i);
+    await assert.rejects(loadTheme(root), /theme.*68157440|65 MiB/i);
   });
 });
 

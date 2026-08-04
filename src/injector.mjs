@@ -10,9 +10,12 @@ import { readBoundedFile, RESOURCE_LIMITS, sumWithinLimit } from "./resource-lim
 
 const STYLE_ID = "heige-codex-skin-style";
 const MENU_ID = "heige-codex-skin-menu";
-const MIME = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp" };
+const MIME = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".mp4": "video/mp4", ".webm": "video/webm" };
 const REQUEST_ID = /^[a-f0-9]{32}$/;
 const THEME_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const RENDERER_CONTROL_CHUNK_BYTES = 512 * 1024;
+const VIDEO_CDP_CHUNK_CHARS = 128 * 1024;
+const VIDEO_ASSET_STORE = "__heigeCodexSkinVideoAssets";
 const STABLE_VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
 const RELEASE_URL =
   /^https:\/\/github\.com\/HeiGeAi\/heige-codex-skin-studio\/releases\/tag\/v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
@@ -73,7 +76,33 @@ async function bringTargetToFront(session) {
   } catch {}
 }
 
-async function evaluateTargets(targets, expression, Session, { bringToFront = true } = {}) {
+function videoTransportExpression(assetId, chunk, { append = false } = {}) {
+  const assignment = append
+    ? `assets[${JSON.stringify(assetId)}] = (assets[${JSON.stringify(assetId)}] ?? "") + ${JSON.stringify(chunk)};`
+    : `assets[${JSON.stringify(assetId)}] = ${JSON.stringify(chunk)};`;
+  return `(() => {
+    const assets = globalThis[${JSON.stringify(VIDEO_ASSET_STORE)}] ?? Object.create(null);
+    globalThis[${JSON.stringify(VIDEO_ASSET_STORE)}] = assets;
+    ${assignment}
+    return true;
+  })()`;
+}
+
+async function stageVideoAssets(session, videoAssets) {
+  if (videoAssets.length === 0) return;
+  await session.evaluate(`(() => {
+    globalThis[${JSON.stringify(VIDEO_ASSET_STORE)}] = Object.create(null);
+    return true;
+  })()`);
+  for (const { assetId, dataUrl } of videoAssets) {
+    for (let start = 0; start < dataUrl.length; start += VIDEO_CDP_CHUNK_CHARS) {
+      const chunk = dataUrl.slice(start, start + VIDEO_CDP_CHUNK_CHARS);
+      await session.evaluate(videoTransportExpression(assetId, chunk, { append: start > 0 }));
+    }
+  }
+}
+
+async function evaluateTargets(targets, expression, Session, { bringToFront = true, videoAssets = [] } = {}) {
   const succeeded = [];
   const failed = [];
   for (const target of targets) {
@@ -82,6 +111,7 @@ async function evaluateTargets(targets, expression, Session, { bringToFront = tr
       session = new Session(target.webSocketDebuggerUrl);
       await session.open();
       if (bringToFront) await bringTargetToFront(session);
+      await stageVideoAssets(session, videoAssets);
       succeeded.push(safeTarget(target, { value: await session.evaluate(expression) }));
     } catch (error) {
       failed.push(safeTarget(target, { error: safeEvaluationError(error) }));
@@ -135,17 +165,18 @@ function normalizeTargetIds(targetIds) {
 async function readThemeAsset(path, field, snapshot = null) {
   if (!path) return null;
   const mime = MIME[extname(path).toLowerCase()];
-  if (snapshot instanceof Uint8Array && snapshot.byteLength > RESOURCE_LIMITS.assetBytes) {
-    throw new RangeError(field + " 图片超过 " + RESOURCE_LIMITS.assetBytes + " bytes（8 MiB）");
+  const video = mime?.startsWith("video/") === true;
+  if (!video && snapshot instanceof Uint8Array && snapshot.byteLength > RESOURCE_LIMITS.assetBytes) {
+    throw new RangeError(field + " 素材超过 " + RESOURCE_LIMITS.assetBytes + " bytes");
   }
   if (!mime) throw new Error(`不支持的 ${field} 图片类型`);
   const bytes = snapshot instanceof Uint8Array
     ? Buffer.from(snapshot)
     : (await readBoundedFile(path, {
-      maxBytes: RESOURCE_LIMITS.assetBytes,
-      label: field + " 图片",
+      maxBytes: video ? null : RESOURCE_LIMITS.assetBytes,
+      label: field + " 素材",
     })).bytes;
-  validateImageMetadata(bytes, { expectedMime: mime });
+  if (mime.startsWith("image/")) validateImageMetadata(bytes, { expectedMime: mime });
   return { bytes, mime };
 }
 
@@ -159,8 +190,10 @@ async function readThemeResources(loadedTheme) {
   const polaroid = await readThemeAsset(loadedTheme.polaroidPath, "polaroid", loadedTheme.assetBuffers?.polaroid);
   const manifestBytes = loadedTheme.manifestBytes
     ?? Buffer.byteLength(JSON.stringify(loadedTheme.manifest), "utf8");
+  // 视频在发送时按 CDP 块传输，不占图片解码或菜单单请求预算；仅图片仍受资源预算保护。
+  const heroBudgetBytes = hero.mime.startsWith("video/") ? 0 : hero.bytes.byteLength;
   const resourceBytes = sumWithinLimit(
-    [manifestBytes, hero.bytes.byteLength, logo?.bytes.byteLength ?? 0, polaroid?.bytes.byteLength ?? 0],
+    [manifestBytes, heroBudgetBytes, logo?.bytes.byteLength ?? 0, polaroid?.bytes.byteLength ?? 0],
     RESOURCE_LIMITS.themeBytes,
     `theme ${loadedTheme.manifest.id}`,
   );
@@ -179,13 +212,28 @@ function themeEntry(resources) {
     thumbnailFocus: { ...loadedTheme.manifest.thumbnailFocus },
     thumbnailZoom: loadedTheme.manifest.thumbnailZoom,
     colors: { ...loadedTheme.manifest.colors },
+    videoDataUrl: hero.mime.startsWith("video/") ? dataUrl(hero) : null,
     css: buildSkinCss({
       theme: loadedTheme.manifest,
-      heroDataUrl: dataUrl(hero),
+      heroDataUrl: hero.mime.startsWith("video/") ? null : dataUrl(hero),
+      heroIsVideo: hero.mime.startsWith("video/"),
       logoDataUrl: dataUrl(logo),
       polaroidDataUrl: dataUrl(polaroid),
     }),
   };
+}
+
+function splitVideoAssets(entries) {
+  const videoAssets = [];
+  const stagedEntries = entries.map((entry) => {
+    if (typeof entry.videoDataUrl !== "string" || !entry.videoDataUrl.startsWith("data:video/")) {
+      return entry;
+    }
+    const assetId = `video:${entry.id}`;
+    videoAssets.push({ assetId, dataUrl: entry.videoDataUrl });
+    return { ...entry, videoDataUrl: null, videoAssetId: assetId };
+  });
+  return { stagedEntries, videoAssets };
 }
 
 export async function applySkin({
@@ -207,10 +255,11 @@ export async function applySkin({
   let menuBytes = 0;
   for (const theme of menuThemes) {
     const resources = await readThemeResources(theme);
-    menuBytes = sumWithinLimit([menuBytes, resources.resourceBytes], RESOURCE_LIMITS.menuBytes, "menu");
+    menuBytes = sumWithinLimit([menuBytes, resources.resourceBytes], Number.MAX_SAFE_INTEGER, "menu");
     resourceSets.push(resources);
   }
   const entries = resourceSets.map(themeEntry);
+  const { stagedEntries, videoAssets } = splitVideoAssets(entries);
   const themeId = activeId === undefined ? loadedTheme.manifest.id : activeId;
   // 自定义上传主题的客户端 CSS 模板：哨兵值占位，页面内替换，和内置主题同一套模板
   const cssTemplate = buildSkinCss({
@@ -228,7 +277,7 @@ export async function applySkin({
     heroDataUrl: CSS_SENTINELS.hero,
   });
   const expression = buildSkinMenuScript({
-    entries,
+    entries: stagedEntries,
     activeId: themeId,
     styleId: STYLE_ID,
     menuId: MENU_ID,
@@ -259,7 +308,7 @@ export async function applySkin({
       results,
     );
   }
-  const evaluated = await evaluateTargets(targets, expression, Session);
+  const evaluated = await evaluateTargets(targets, expression, Session, { videoAssets });
   const results = resultsFor(classified, evaluated);
   results.skipped.push(...unselected);
   if (evaluated.succeeded.length === 0) {
@@ -406,8 +455,7 @@ export async function skinStatus({ port, includeControlRequest = false, deps = {
           (exact(publishKeys) || exact(publishKeysWithColors)) &&
           typeof request.image === "string" &&
           request.image.length >= 32 &&
-          request.image.length <= 12_000_000 &&
-          /^data:image\\/(?:png|jpeg|webp);base64,/i.test(request.image) &&
+          /^data:(?:image\\/(?:png|jpeg|webp)|video\\/(?:mp4|webm));base64,/i.test(request.image) &&
           typeof request.name === "string"
         ) {
           controlRequest = {
@@ -417,7 +465,11 @@ export async function skinStatus({ port, includeControlRequest = false, deps = {
             capability: boundedString(request.capability, 128),
             expectedRevision: request.expectedRevision,
             name: boundedString(request.name.trim(), 80),
-            image: request.image
+            // CDP 对单条消息设有 1 MiB 防护上限。视频数据不能跟状态快照一起回传，
+            // 控制器随后会以 requestId 为锚点分块读取这个仍驻留在 renderer 内的字符串。
+            image: null,
+            imageLength: request.image.length,
+            imageMime: request.image.slice(5, request.image.indexOf(";"))
           };
           if (exact(publishKeysWithColors) && request.colors && typeof request.colors === "object") {
             const accent = boundedString(request.colors.accent, 16);
@@ -489,6 +541,59 @@ export async function skinStatus({ port, includeControlRequest = false, deps = {
     failed: evaluated.failed.map(({ id }) => id),
     results,
   };
+}
+
+export async function readRendererControlRequestChunk({
+  port,
+  requestId,
+  offset,
+  length = RENDERER_CONTROL_CHUNK_BYTES,
+  deps = {},
+}) {
+  if (typeof requestId !== "string" || !REQUEST_ID.test(requestId)) {
+    throw new TypeError("requestId 必须是 32 位十六进制字符串");
+  }
+  if (!Number.isSafeInteger(offset) || offset < 0) {
+    throw new TypeError("offset 必须是非负安全整数");
+  }
+  if (!Number.isSafeInteger(length) || length < 1 || length > RENDERER_CONTROL_CHUNK_BYTES) {
+    throw new RangeError(`length 必须介于 1 和 ${RENDERER_CONTROL_CHUNK_BYTES}`);
+  }
+  const fetchTargets = deps.fetchRendererTargets ?? fetchRendererTargets;
+  const Session = deps.Session ?? CdpSession;
+  const expression = `(() => {
+    try {
+      const request = window.__heigeCodexSkinRuntime?.status?.()?.controlRequest;
+      if (
+        request?.action !== "publish-user-theme" ||
+        request.requestId !== ${JSON.stringify(requestId)} ||
+        typeof request.image !== "string"
+      ) return null;
+      return request.image.slice(${offset}, ${offset + length});
+    } catch { return null; }
+  })()`;
+  const classified = classifyCodexTargets(await fetchTargets(port));
+  const targets = classified.filter(({ kind }) => kind === "main");
+  if (targets.length === 0) {
+    throw targetError(
+      "NO_MAIN_RENDERER",
+      "未发现经过严格识别的 Codex 主窗口 renderer",
+      resultsFor(classified, { succeeded: [], failed: [] }),
+    );
+  }
+  const evaluated = await evaluateTargets(targets, expression, Session, { bringToFront: false });
+  const results = resultsFor(classified, evaluated);
+  if (evaluated.succeeded.length !== targets.length || evaluated.failed.length !== 0) {
+    throw targetError("ALL_MAIN_TARGETS_FAILED", "Codex 主窗口视频数据分块读取失败", results);
+  }
+  const chunks = evaluated.succeeded.map(({ value }) => value);
+  if (chunks.some((chunk) => typeof chunk !== "string")) {
+    throw new Error("renderer control request is no longer available");
+  }
+  if (!chunks.every((chunk) => chunk === chunks[0])) {
+    throw new Error("renderer control request differs across windows");
+  }
+  return { chunk: chunks[0], results };
 }
 
 function normalizedUpdateDelivery({ generation, requestId, result }) {

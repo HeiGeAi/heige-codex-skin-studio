@@ -112,9 +112,9 @@ test("validates MIME bytes dimensions pixels and aspect ratio at exact boundarie
   );
 });
 
-test("rejects per-asset bytes above 8 MiB before returning metadata", () => {
+test("rejects image assets above the configured resource budget before returning metadata", () => {
   const exact = png(10, 10, RESOURCE_LIMITS.assetBytes);
   assert.equal(validateImageMetadata(exact).mime, "image/png");
   const tooLarge = png(10, 10, RESOURCE_LIMITS.assetBytes + 1);
-  assert.throws(() => validateImageMetadata(tooLarge), /8 MiB|8388608/);
+  assert.throws(() => validateImageMetadata(tooLarge), /64 MiB|67108864/);
 });

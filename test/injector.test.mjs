@@ -8,6 +8,7 @@ import {
   applySkin,
   deliverThemeSelectionResult,
   deliverUpdateCheckResult,
+  readRendererControlRequestChunk,
   removeSkin,
   skinStatus,
 } from "../src/injector.mjs";
@@ -25,11 +26,13 @@ function png(width, height, bytes = 24) {
 class FakeSession {
   static expressions = [];
   static commands = [];
+  static controlChunk = "";
   constructor() { this.closed = false; }
   async open() { return this; }
   async send(command) { FakeSession.commands.push(command); }
   async evaluate(expression) {
     FakeSession.expressions.push(expression);
+    if (expression.includes("return request.image.slice(")) return FakeSession.controlChunk;
     if (expression.includes("installed:")) {
       return {
         installed: true,
@@ -116,6 +119,32 @@ test("injects the in-app switcher menu with every loaded theme", async () => {
   assert.match(FakeSession.expressions[0], /"previewFocus":\{"x":50,"y":24\}/);
 });
 
+test("injects MP4 themes as muted looping video wallpaper entries", async () => {
+  FakeSession.expressions = [];
+  const { loaded, deps } = await fixture();
+  loaded.heroPath = join(loaded.root, "hero.mp4");
+  loaded.assetBuffers = { hero: Buffer.from("video-fixture"), logo: null, polaroid: null };
+  const result = await applySkin({ loadedTheme: loaded, port: 9341, deps });
+  assert.equal(result.applied, 1);
+  assert.match(FakeSession.expressions[1], /data:video\/mp4;base64/);
+  assert.match(FakeSession.expressions.at(-1), /videoAssetId/);
+  assert.match(FakeSession.expressions.at(-1), /video-wallpaper/);
+});
+
+test("stages large MP4 themes in CDP-sized chunks before injecting the menu", async () => {
+  FakeSession.expressions = [];
+  const { loaded, deps } = await fixture();
+  loaded.heroPath = join(loaded.root, "hero.mp4");
+  loaded.assetBuffers = { hero: Buffer.alloc(512 * 1024), logo: null, polaroid: null };
+
+  await applySkin({ loadedTheme: loaded, port: 9341, deps });
+
+  const transport = FakeSession.expressions.filter((expression) => expression.includes("__heigeCodexSkinVideoAssets"));
+  assert.ok(transport.length > 2);
+  assert.ok(transport.every((expression) => Buffer.byteLength(expression) < 1024 * 1024));
+  assert.doesNotMatch(FakeSession.expressions.at(-1), /data:video\/mp4;base64/);
+});
+
 test("keeps the menu resources while rendering the authoritative native selection", async () => {
   FakeSession.expressions = [];
   const { loaded, deps } = await fixture();
@@ -199,8 +228,36 @@ test("status extracts publish-user-theme and delete-user-theme for CDP fallback"
   const expression = FakeSession.expressions[0];
   assert.match(expression, /request\.action === "publish-user-theme"/);
   assert.match(expression, /request\.action === "delete-user-theme"/);
-  assert.match(expression, /data:image\\\/\(\?:png\|jpeg\|webp\)/);
-  assert.match(expression, /12_000_000/);
+  assert.match(expression, /video\\\/\(\?:mp4\|webm\)/);
+  assert.match(expression, /image: null/);
+  assert.match(expression, /imageLength: request\.image\.length/);
+  assert.match(expression, /imageMime: request\.image\.slice/);
+});
+
+test("reads renderer video control data in bounded CDP chunks", async () => {
+  FakeSession.expressions = [];
+  FakeSession.controlChunk = "x".repeat(512 * 1024);
+  const { deps } = await fixture();
+
+  const result = await readRendererControlRequestChunk({
+    port: 9341,
+    requestId: "a".repeat(32),
+    offset: 0,
+    deps,
+  });
+
+  assert.equal(result.chunk.length, 512 * 1024);
+  assert.match(FakeSession.expressions[0], /request\.image\.slice\(0, 524288\)/);
+  await assert.rejects(
+    readRendererControlRequestChunk({
+      port: 9341,
+      requestId: "a".repeat(32),
+      offset: 0,
+      length: 512 * 1024 + 1,
+      deps,
+    }),
+    /524288/,
+  );
 });
 
 test("delivers an update result only through the current renderer callback", async () => {
@@ -387,11 +444,11 @@ test("rejects an oversized in-memory snapshot before encoding or CDP evaluation"
   FakeSession.expressions = [];
   const { loaded, deps } = await fixture();
   loaded.assetBuffers = {
-    hero: new Uint8Array((8 * 1024 * 1024) + 1),
+    hero: new Uint8Array((64 * 1024 * 1024) + 1),
     logo: null,
     polaroid: null,
   };
-  await assert.rejects(applySkin({ loadedTheme: loaded, port: 9341, deps }), /8 MiB|8388608/);
+  await assert.rejects(applySkin({ loadedTheme: loaded, port: 9341, deps }), /67108864/);
   assert.equal(FakeSession.expressions.length, 0);
 });
 

@@ -23,7 +23,9 @@ import { parseBoundedJson, readBoundedFile, RESOURCE_LIMITS } from "./resource-l
 import { loadTheme } from "./theme-schema.mjs";
 
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
-// 单张源图上限：base64 后要内联进一条 CDP Runtime.evaluate，过大易触发 5 秒命令超时
+const VIDEO_EXTENSIONS = new Set([".mp4", ".webm"]);
+const HERO_EXTENSIONS = new Set([...IMAGE_EXTENSIONS, ...VIDEO_EXTENSIONS]);
+// 图片保留解码预算；视频保持原始编码且不设固定文件大小上限。
 const MAX_SOURCE_IMAGE_BYTES = RESOURCE_LIMITS.assetBytes;
 const IMAGE_MIME = new Map([
   [".png", "image/png"],
@@ -170,8 +172,8 @@ export async function createSingleImageThemeFromBytes({
     : typeof extension === "string"
       ? `.${extension.toLowerCase()}`
       : "";
-  if (!IMAGE_EXTENSIONS.has(normalizedExtension)) {
-    throw new Error("素材必须是 PNG、JPG、JPEG 或 WebP 图片");
+  if (!HERO_EXTENSIONS.has(normalizedExtension)) {
+    throw new Error("素材必须是 PNG、JPG、JPEG、WebP、MP4 或 WebM");
   }
   if (!Buffer.isBuffer(bytes)) {
     throw new TypeError("素材图片必须是 Buffer");
@@ -179,10 +181,12 @@ export async function createSingleImageThemeFromBytes({
   if (bytes.byteLength < 1) {
     throw new Error("素材图片为空");
   }
-  if (bytes.byteLength > MAX_SOURCE_IMAGE_BYTES) {
-    throw new Error("素材图片过大（上限 8MB），请先压缩后再做主题，否则注入会超时");
+  if (IMAGE_EXTENSIONS.has(normalizedExtension) && bytes.byteLength > MAX_SOURCE_IMAGE_BYTES) {
+    throw new Error("素材超过资源预算");
   }
-  validateImageMetadata(bytes, { expectedMime: IMAGE_MIME.get(normalizedExtension) });
+  if (IMAGE_EXTENSIONS.has(normalizedExtension)) {
+    validateImageMetadata(bytes, { expectedMime: IMAGE_MIME.get(normalizedExtension) });
+  }
 
   const digest = createHash("sha256")
     .update(name, "utf8")
@@ -272,21 +276,16 @@ export async function createSingleImageThemeFromBytes({
 
 export async function createSingleImageTheme({ imagePath, name, storeRoot, colors = {}, hooks = {} }) {
   const extension = extname(imagePath).toLowerCase();
-  if (!IMAGE_EXTENSIONS.has(extension)) {
-    throw new Error("素材必须是 PNG、JPG、JPEG 或 WebP 图片");
+  if (!HERO_EXTENSIONS.has(extension)) {
+    throw new Error("素材必须是 PNG、JPG、JPEG、WebP、MP4 或 WebM");
   }
   let sourceBytes;
   try {
     ({ bytes: sourceBytes } = await readBoundedFile(imagePath, {
-      maxBytes: MAX_SOURCE_IMAGE_BYTES,
+      maxBytes: IMAGE_EXTENSIONS.has(extension) ? MAX_SOURCE_IMAGE_BYTES : null,
       label: "素材图片",
     }));
-  } catch (error) {
-    if (/8388608|超过/.test(error?.message ?? "")) {
-      throw new Error("素材图片过大（上限 8MB），请先压缩后再做主题，否则注入会超时");
-    }
-    throw error;
-  }
+  } catch (error) { throw error; }
   return createSingleImageThemeFromBytes({
     bytes: sourceBytes,
     extension,

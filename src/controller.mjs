@@ -20,6 +20,7 @@ const RENDERER_GENERATION = /^[a-f0-9]{32}$/;
 const MENU_REQUEST_ID = /^[a-f0-9]{32}$/;
 const THEME_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const LOCAL_CUSTOM_THEME_ID = "custom-upload";
+const RENDERER_CONTROL_CHUNK_BYTES = 512 * 1024;
 const MAX_RELAUNCH_ATTEMPTS = 3;
 const LEASE_RETRY_DELAYS_MS = Object.freeze([20, 40, 80, 160, 320, 500]);
 const ACTIONS = new Set([
@@ -157,7 +158,31 @@ function normalizedRendererControlRequest(status) {
       "requestId",
       "schemaVersion",
     ]);
-    if (!withColors && !withoutColors) return undefined;
+    const metadataWithColors = hasExactKeys(request, [
+      "action",
+      "capability",
+      "colors",
+      "expectedRevision",
+      "image",
+      "imageLength",
+      "imageMime",
+      "name",
+      "requestId",
+      "schemaVersion",
+    ]);
+    const metadataWithoutColors = hasExactKeys(request, [
+      "action",
+      "capability",
+      "expectedRevision",
+      "image",
+      "imageLength",
+      "imageMime",
+      "name",
+      "requestId",
+      "schemaVersion",
+    ]);
+    if (!withColors && !withoutColors && !metadataWithColors && !metadataWithoutColors) return undefined;
+    const chunked = metadataWithColors || metadataWithoutColors;
     if (
       typeof request.capability !== "string" ||
       !CONTROL_TOKEN.test(request.capability) ||
@@ -165,8 +190,20 @@ function normalizedRendererControlRequest(status) {
       typeof request.name !== "string" ||
       request.name.trim().length < 1 ||
       request.name.trim().length > 80 ||
-      typeof request.image !== "string" ||
-      request.image.length < 32
+      (
+        chunked
+          ? (
+            request.image !== null ||
+            !Number.isSafeInteger(request.imageLength) ||
+            request.imageLength < 32 ||
+            !["image/png", "image/jpeg", "image/webp", "video/mp4", "video/webm"].includes(request.imageMime)
+          )
+          : (
+            typeof request.image !== "string" ||
+            request.image.length < 32 ||
+            !/^data:(?:image\/(?:png|jpeg|webp)|video\/(?:mp4|webm));base64,[A-Za-z0-9+/=\s]+$/.test(request.image)
+          )
+      )
     ) return undefined;
     return { ...request, name: request.name.trim() };
   }
@@ -407,6 +444,9 @@ function normalizedDependencies(input) {
       ? null
       : requireFunction(input.discardPortProof, "discardPortProof"),
     inspectSkin: input.inspectSkin,
+    readRendererControlRequestChunk: input.readRendererControlRequestChunk === undefined
+      ? null
+      : requireFunction(input.readRendererControlRequestChunk, "readRendererControlRequestChunk"),
     validateThemeSelection: input.validateThemeSelection === undefined
       ? async () => false
       : requireFunction(input.validateThemeSelection, "validateThemeSelection"),
@@ -1622,7 +1662,7 @@ export function createSkinController(input) {
 
   const parsePublishImage = (image) => {
     if (typeof image !== "string") return null;
-    const match = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=\s]+)$/.exec(image);
+    const match = /^data:((?:image\/(?:png|jpeg|webp)|video\/(?:mp4|webm)));base64,([A-Za-z0-9+/=\s]+)$/.exec(image);
     if (match === null) return null;
     let bytes;
     try {
@@ -1635,7 +1675,11 @@ export function createSkinController(input) {
       ? ".png"
       : match[1] === "image/webp"
         ? ".webp"
-        : ".jpg";
+        : match[1] === "video/mp4"
+          ? ".mp4"
+          : match[1] === "video/webm"
+            ? ".webm"
+            : ".jpg";
     return { bytes, extension };
   };
 
@@ -1753,8 +1797,39 @@ export function createSkinController(input) {
   publishUserThemePublic = (request) => publishUserTheme(request);
   deleteUserThemePublic = (request) => deleteUserTheme(request);
 
+  const materializeRendererPublishRequest = async (request) => {
+    if (request.action !== "publish-user-theme" || request.image !== null) return request;
+    if (typeof deps.readRendererControlRequestChunk !== "function") {
+      throw new Error("renderer video chunk reader is unavailable");
+    }
+    const chunks = [];
+    for (let offset = 0; offset < request.imageLength; offset += RENDERER_CONTROL_CHUNK_BYTES) {
+      const length = Math.min(RENDERER_CONTROL_CHUNK_BYTES, request.imageLength - offset);
+      const response = await deps.readRendererControlRequestChunk({
+        requestId: request.requestId,
+        offset,
+        length,
+      });
+      const chunk = typeof response === "string" ? response : response?.chunk;
+      if (typeof chunk !== "string" || chunk.length !== length) {
+        throw new Error("renderer video chunk is incomplete");
+      }
+      chunks.push(chunk);
+    }
+    const image = chunks.join("");
+    if (
+      image.length !== request.imageLength ||
+      !image.startsWith(`data:${request.imageMime};base64,`)
+    ) {
+      throw new Error("renderer video payload changed while reading");
+    }
+    const { imageLength, imageMime, ...materialized } = request;
+    return { ...materialized, image };
+  };
+
   processRendererRequest = async (request) => {
     try {
+      request = await materializeRendererPublishRequest(request);
       if (request.action === "check-update") {
         const state = validateControlState(await deps.readState());
         lastKnownState = state;

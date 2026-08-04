@@ -12,11 +12,11 @@ const PREFLIGHT_METHOD = "POST";
 const PREFLIGHT_HEADERS = ["content-type", "x-heige-control-token"];
 const RESPONSE_PREFLIGHT_HEADERS = "Content-Type, X-HeiGe-Control-Token";
 const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
-/** data URL base64 相对源图约 4/3，外加 JSON 外壳；与 RESOURCE_LIMITS.assetBytes(8MiB) 对齐 */
-const DEFAULT_USER_THEME_MAX_BODY_BYTES = 12 * 1024 * 1024;
-const DEFAULT_USER_THEME_REQUEST_TIMEOUT_MS = 30_000;
+// 视频发布没有固定大小或时长上限；实际可用容量由本机内存与磁盘决定。
+const DEFAULT_USER_THEME_MAX_BODY_BYTES = null;
+const DEFAULT_USER_THEME_REQUEST_TIMEOUT_MS = null;
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
-const DATA_URL_IMAGE = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=\s]+)$/;
+const DATA_URL_IMAGE = /^data:((?:image\/(?:png|jpeg|webp)|video\/(?:mp4|webm)));base64,([A-Za-z0-9+/=\s]+)$/;
 
 const SAFE_ERRORS = Object.freeze({
   NOT_FOUND: { status: 404, message: "控制接口不存在" },
@@ -112,6 +112,10 @@ function requirePositiveInteger(value, name) {
     throw new Error(`${name} 必须是正整数`);
   }
   return value;
+}
+
+function requireOptionalPositiveInteger(value, name) {
+  return value === null ? null : requirePositiveInteger(value, name);
 }
 
 function requirePort(value) {
@@ -392,7 +396,11 @@ function parseUserThemeImage(image) {
     ? ".png"
     : mime === "image/webp"
       ? ".webp"
-      : ".jpg";
+      : mime === "video/mp4"
+        ? ".mp4"
+        : mime === "video/webm"
+          ? ".webm"
+          : ".jpg";
   return { bytes, extension, mime };
 }
 
@@ -485,7 +493,7 @@ function readBody(request, maxBodyBytes, signal) {
     const onData = (chunk) => {
       const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       totalBytes += bytes.length;
-      if (totalBytes > maxBodyBytes) {
+      if (maxBodyBytes !== null && totalBytes > maxBodyBytes) {
         settle(reject, protocolError("PAYLOAD_TOO_LARGE"));
         request.resume();
         return;
@@ -546,7 +554,7 @@ function parseContentLength(request, maxBodyBytes) {
   if (!Number.isSafeInteger(length) || length === 0) {
     throw protocolError("INVALID_CONTENT_LENGTH");
   }
-  if (length > maxBodyBytes) throw protocolError("PAYLOAD_TOO_LARGE");
+  if (maxBodyBytes !== null && length > maxBodyBytes) throw protocolError("PAYLOAD_TOO_LARGE");
   return length;
 }
 
@@ -1043,15 +1051,17 @@ function requestHandler(context) {
     const timeoutMs = request.url === USER_THEME_PATH
       ? context.userThemeRequestTimeoutMs
       : context.requestTimeoutMs;
-    const timeout = new Promise((_, reject) => {
-      timeoutId = setTimeout(() => {
-        if (commitStarted) return;
-        const error = new RequestTimeoutError();
-        reject(error);
-        abortPrecommit(error);
-      }, timeoutMs);
-      timeoutId.unref?.();
-    });
+    const timeout = timeoutMs === null
+      ? new Promise(() => {})
+      : new Promise((_, reject) => {
+        timeoutId = setTimeout(() => {
+          if (commitStarted) return;
+          const error = new RequestTimeoutError();
+          reject(error);
+          abortPrecommit(error);
+        }, timeoutMs);
+        timeoutId.unref?.();
+      });
 
     try {
       const descriptor = await Promise.race([
@@ -1281,9 +1291,9 @@ export async function startControlServer({
     : requireFunction(onPersistenceResponseFinished, "onPersistenceResponseFinished");
   const safePort = requirePort(port);
   const bodyLimit = requirePositiveInteger(maxBodyBytes, "maxBodyBytes");
-  const userThemeBodyLimit = requirePositiveInteger(userThemeMaxBodyBytes, "userThemeMaxBodyBytes");
+  const userThemeBodyLimit = requireOptionalPositiveInteger(userThemeMaxBodyBytes, "userThemeMaxBodyBytes");
   const timeoutMs = requirePositiveInteger(requestTimeoutMs, "requestTimeoutMs");
-  const userThemeTimeoutMs = requirePositiveInteger(
+  const userThemeTimeoutMs = requireOptionalPositiveInteger(
     userThemeRequestTimeoutMs,
     "userThemeRequestTimeoutMs",
   );

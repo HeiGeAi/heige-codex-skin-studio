@@ -19,8 +19,8 @@ function copy(value, fallback = "") {
 
 const DATA_URL = /^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/=]+$/i;
 
-export function buildSkinCss({ theme, heroDataUrl, logoDataUrl = null, polaroidDataUrl = null }) {
-  if (!DATA_URL.test(heroDataUrl)) {
+export function buildSkinCss({ theme, heroDataUrl = null, heroIsVideo = false, logoDataUrl = null, polaroidDataUrl = null }) {
+  if ((!heroIsVideo && !DATA_URL.test(heroDataUrl)) || (heroIsVideo && heroDataUrl !== null)) {
     throw new Error("hero 必须是本地 PNG、JPEG 或 WebP 数据");
   }
   if (logoDataUrl !== null && !DATA_URL.test(logoDataUrl)) {
@@ -53,12 +53,15 @@ export function buildSkinCss({ theme, heroDataUrl, logoDataUrl = null, polaroidD
 }
 
 #root {
+  position: relative;
+  z-index: 1;
+  isolation: isolate;
   color: var(--heige-text) !important;
   background:
     linear-gradient(90deg, color-mix(in srgb, var(--heige-surface) 96%, transparent) 0 22%, transparent 46%),
     linear-gradient(180deg, transparent 0 45%, color-mix(in srgb, var(--heige-surface) 78%, transparent) 78% 100%),
     /* 不用 fixed 背景附着：流式输出/滚动时会强制整视口逐帧重绘 */
-    url(${JSON.stringify(heroDataUrl)}) right center / cover no-repeat !important;
+    ${heroIsVideo ? "none" : `url(${JSON.stringify(heroDataUrl)}) right center / cover no-repeat`} !important;
 }
 
 #root::before {
