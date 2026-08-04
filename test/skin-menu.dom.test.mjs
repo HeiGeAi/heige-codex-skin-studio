@@ -234,6 +234,29 @@ test("video wallpaper is a body background below the Codex work area", async (t)
   assert.equal(wallpapers.length, 1);
 });
 
+test("local video uploads render a video preview in the custom theme card", async (t) => {
+  const page = await menuWindow({
+    activeId: null,
+    preferStored: true,
+    initialStorage: {
+      heigeCodexSkinSelected: "custom-upload",
+      heigeCodexCustomTheme: JSON.stringify({
+        name: "My Video",
+        dataUrl: "data:video/mp4;base64,dmlkZW8=",
+        mediaType: "video",
+        colors: { accent: "#24c9d7", secondary: "#ef8fd3", surface: "#101820", text: "#f4f7fb" },
+      }),
+    },
+  });
+  t.after(() => page.close());
+
+  const card = page.document.querySelector('[data-heige-theme-id="custom-upload"]');
+  const video = card?.querySelector('video[data-heige-role="theme-video-preview"]');
+  assert.ok(video);
+  assert.equal(video.src, "data:video/mp4;base64,dmlkZW8=");
+  assert.equal(page.themeId, "custom-upload");
+});
+
 test("theme trigger opens an accessible modal and restores focus on close paths", async (t) => {
   const page = await menuWindow();
   t.after(() => page.close());

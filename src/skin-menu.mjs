@@ -1199,20 +1199,30 @@ export function buildSkinMenuScript({
     if (wasActive) clearTheme();
   };
   const ensureCustomRow = (theme) => {
+    const videoDataUrl = theme.mediaType === "video" || theme.dataUrl?.startsWith("data:video/")
+      ? theme.dataUrl
+      : null;
+    const previewTheme = {
+      id: data.customId,
+      name: theme.name,
+      dataUrl: videoDataUrl === null ? theme.dataUrl : null,
+      videoDataUrl,
+      colors: theme.colors,
+      css: "",
+    };
     if (customRow) {
       customRow.querySelector('[data-heige-role="theme-card-copy"] strong').textContent = theme.name;
-      customRow.querySelector('[data-heige-role="theme-preview"]').style.backgroundImage =
-        "url(" + JSON.stringify(theme.dataUrl) + ")";
+      const previousPreview = customRow.querySelector('[data-heige-role="theme-preview"]');
+      previousPreview?.replaceWith(themePreview({
+        dataUrl: previewTheme.dataUrl,
+        videoDataUrl: previewTheme.videoDataUrl,
+        colors: previewTheme.colors,
+        label: previewTheme.name + " 主题预览",
+      }));
       customDelete.setAttribute("aria-label", "删除自定义主题：" + theme.name);
       return;
     }
-    customRow = createThemeCard({
-      id: data.customId,
-      name: theme.name,
-      dataUrl: theme.dataUrl,
-      colors: theme.colors,
-      css: "",
-    }, () => {
+    customRow = createThemeCard(previewTheme, () => {
       const next = currentCustom ?? loadCustom() ?? theme;
       if (!next) return;
       // 控制通道可用时：旧本机快捷槽点击改为写入启动器，不再停留在「仅本机快捷」。
@@ -1251,10 +1261,13 @@ export function buildSkinMenuScript({
       for (const key of ["accent", "secondary", "surface", "text"]) {
         if (typeof saved.colors[key] !== "string" || !/^#[0-9a-f]{6}$/i.test(saved.colors[key])) return null;
       }
-      parseDataUrlImage(saved.dataUrl);
+      const isVideo = saved.mediaType === "video"
+        || /^data:video\\/(?:mp4|webm);base64,[A-Za-z0-9+/=]+$/.test(saved.dataUrl);
+      if (!isVideo) parseDataUrlImage(saved.dataUrl);
       return {
         name: typeof saved.name === "string" ? saved.name.slice(0, 120) : "我的图片",
         dataUrl: saved.dataUrl,
+        mediaType: isVideo ? "video" : "image",
         colors: Object.fromEntries(["accent", "secondary", "surface", "text"].map((key) => [key, saved.colors[key]])),
         appearance: ["light", "dark"].includes(saved.appearance)
           ? saved.appearance
