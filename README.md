@@ -61,12 +61,12 @@ open "<仓库路径>/scripts/install.command"
 
 Windows 用 `scripts\windows\install.bat` 安装；日常入口是 `scripts/windows/apply.ps1`、兼容名 `scripts/windows/enable-skin.bat`（只恢复当前会话）、`scripts/windows/pause.ps1`、`scripts/windows/resume.ps1`、`scripts/windows/restore.ps1` 和 `scripts/windows/close-codex.bat`（只安全完整退出 Codex/GPT 桌面端并保持关闭，不改常驻、不自动重启）。彻底移除时运行 `scripts\windows\uninstall.bat`：它会注销当前用户计划任务、移除开始菜单入口、清理 AppData 状态和稳定安装目录。即使稳定安装目录已被手动删除，也可从源码目录运行该卸载入口清理残留。Microsoft Store/MSIX 真机待验证，细节见[完整手册](docs/manual.md)。
 
-## 用一张图做你自己的主题
+## 用图片或视频做你自己的主题
 
 三条路，从省事到好玩：
 
-1. **菜单直接传**：🎨 菜单里选「＋ 自定义图片」，上传成功后写入本机用户主题库，成为正式用户主题，并自动取色、自动配深浅外观。
-2. **做成正式主题**：双击 `customize.command`，任意 PNG、JPG、JPEG、WebP 都能生成一套完整皮肤（配色 + 背景底图）。
+1. **菜单直接传**：🎨 菜单里选「＋ 自定义图片 / 视频」。PNG、JPG、JPEG、WebP 会自动取色、压缩；MP4、WebM 会作为静音循环视频壁纸。两种素材都会写入本机用户主题库，成为正式用户主题。
+2. **做成正式主题**：命令行 `node src/cli.mjs create --image PATH --name NAME` 支持 PNG、JPG、JPEG、WebP、MP4、WebM。图片保留 64 MiB 解码预算；视频没有固定文件大小上限，不再受旧版 8 MiB 限制。
 3. **让 AI 全包**：把 `output/heige-codex-skin-studio.skill` 交给 Codex，直接说「先生成一张蓝紫色赛博城市主图，再做成皮肤」，从生成到应用全自动，不需要额外 API Key。
 
 现成的生图提示词在[主题提示词库](docs/theme-prompts.md)：8 套风格，复制就能用。做出好看的主题，来[晒图区](https://github.com/HeiGeAi/heige-codex-skin-studio/discussions)贴一张，或者用[主题晒图模板](https://github.com/HeiGeAi/heige-codex-skin-studio/issues/new/choose)投稿，被选中会进 README 精选。

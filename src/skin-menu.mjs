@@ -117,6 +117,9 @@ export function buildSkinMenuScript({
         surface: colorValue(entry.colors?.surface, "#f5f6fc"),
         text: colorValue(entry.colors?.text, "#17344f"),
       },
+      videoDataUrl: typeof entry.videoDataUrl === "string" && entry.videoDataUrl.startsWith("data:video/")
+        ? entry.videoDataUrl
+        : null,
       css: entry.css,
     };
   });
@@ -198,6 +201,19 @@ export function buildSkinMenuScript({
     clearTimeout(id);
     trackedTimers.delete(id);
   };
+  // Electron 的部分 HEVC/H.265 硬解码路径在 <video loop> 回到第 0 帧时会出现
+  // 色彩异常。禁用浏览器原生 loop，在 ended 后显式 seek 并重播，背景、卡片和横幅
+  // 统一走这条路径，既能循环，也不会闪出错误帧。
+  const enableStableVideoLoop = (video) => {
+    video.loop = false;
+    video.dataset.heigeLoop = "manual";
+    listen(video, "ended", () => {
+      if (!isCurrent() || !video.isConnected) return;
+      try { video.currentTime = 0; } catch {}
+      void Promise.resolve(video.play?.()).catch(() => {});
+    });
+    return video;
+  };
   const childController = () => {
     const controller = new AbortController();
     trackedControllers.add(controller);
@@ -214,6 +230,16 @@ export function buildSkinMenuScript({
   });
   let disposed = false;
   let runtime;
+  let wallpaperVideo = null;
+  // 视频背景放在 body 内，注入更新时不能只依赖当前闭包保存的引用：上一代
+  // runtime 已失联的背景节点仍会处于同一 z-index，遮住刚切换的新视频。
+  const removeWallpaperVideos = () => {
+    for (const video of document.querySelectorAll('video[data-heige-role="video-wallpaper"]')) {
+      try { video.pause?.(); video.removeAttribute("src"); video.load?.(); } catch {}
+      try { video.remove(); } catch {}
+    }
+    wallpaperVideo = null;
+  };
   const dispose = () => {
     if (disposed) return false;
     disposed = true;
@@ -235,6 +261,7 @@ export function buildSkinMenuScript({
     }
     trackedImages.clear();
     channel.close();
+    removeWallpaperVideos();
     const ownedMenu = document.getElementById(data.menuId);
     const ownedStyle = document.getElementById(data.styleId);
     const ownedChromeStyle = document.querySelector(
@@ -547,11 +574,27 @@ export function buildSkinMenuScript({
     return item;
   };
 
-  const themePreview = ({ dataUrl, colors, label }) => {
+  const themePreview = ({ dataUrl, videoDataUrl, colors, label }) => {
     const preview = document.createElement("span");
     preview.dataset.heigeRole = "theme-preview";
     preview.setAttribute("aria-label", label);
-    if (dataUrl !== null) {
+    if (typeof videoDataUrl === "string" && videoDataUrl.startsWith("data:video/")) {
+      const list = [colors.accent, colors.secondary, colors.surface];
+      preview.dataset.fallbackColors = list.join(",");
+      preview.style.background = "linear-gradient(135deg," + list[0] + "," + list[1] + " 52%," + list[2] + ")";
+      const video = document.createElement("video");
+      video.dataset.heigeRole = "theme-video-preview";
+      video.src = videoDataUrl;
+      video.autoplay = true;
+      video.muted = true;
+      enableStableVideoLoop(video);
+      video.playsInline = true;
+      video.preload = "auto";
+      video.setAttribute("aria-hidden", "true");
+      video.style.cssText = "position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none;";
+      preview.append(video);
+      void Promise.resolve(video.play?.()).catch(() => {});
+    } else if (dataUrl !== null) {
       preview.style.backgroundImage = "url(" + JSON.stringify(dataUrl) + ")";
     } else {
       const list = [colors.accent, colors.secondary, colors.surface];
@@ -570,6 +613,7 @@ export function buildSkinMenuScript({
     card.setAttribute("aria-pressed", "false");
     const preview = themePreview({
       dataUrl: theme.dataUrl ?? previewFromGeneratedCss(theme.css),
+      videoDataUrl: theme.videoDataUrl,
       colors: theme.colors,
       label: theme.name + " 主题预览",
     });
@@ -641,11 +685,32 @@ export function buildSkinMenuScript({
     return true;
   };
 
+  const applyVideoWallpaper = (source) => {
+    removeWallpaperVideos();
+    if (typeof source !== "string" || !source.startsWith("data:video/")) return;
+    const video = document.createElement("video");
+    video.dataset.heigeRole = "video-wallpaper";
+    video.src = source;
+    video.autoplay = true;
+    video.muted = true;
+    enableStableVideoLoop(video);
+    video.playsInline = true;
+    video.setAttribute("aria-hidden", "true");
+    // 菜单 root 本身是高层 fixed overlay；把视频插到它里面会让 z-index:-1
+    // 仍处在 overlay 的 stacking context，直接盖住 Codex 工作区。视频必须是
+    // body 的独立背景层，应用 root 明确位于其上。
+    video.style.cssText = "position:fixed;inset:0;width:100vw;height:100vh;object-fit:cover;pointer-events:none;z-index:0;background:#101820;";
+    document.body?.prepend(video);
+    wallpaperVideo = video;
+    void video.play().catch(() => {});
+  };
+
   const setTheme = (id, persist = true, broadcast = true) => {
     if (!alive()) return;
     const theme = themes.find((candidate) => candidate.id === id);
     if (!theme) return;
     style.textContent = theme.css;
+    applyVideoWallpaper(theme.videoDataUrl);
     document.documentElement.dataset.heigeCodexSkin = theme.id;
     applyCodexAppearance(theme.appearance);
     paint(theme.id);
@@ -656,6 +721,7 @@ export function buildSkinMenuScript({
   const clearTheme = (persist = true, broadcast = true) => {
     if (!alive()) return;
     style.textContent = "";
+    applyVideoWallpaper(null);
     delete document.documentElement.dataset.heigeCodexSkin;
     paint(data.nativeSel);
     paintCurrentTheme(data.nativeSel);
@@ -832,7 +898,7 @@ export function buildSkinMenuScript({
   };
   const validateBrowserImage = (input, expectedMime) => {
     const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
-    if (bytes.byteLength > data.limits.assetBytes) throw imageError("图片超过 8388608 bytes（8 MiB）");
+    if (bytes.byteLength > data.limits.assetBytes) throw imageError("图片超过资源预算");
     const metadata = parseBrowserImage(bytes);
     if (expectedMime && metadata.mime !== expectedMime) throw imageError("MIME 不匹配：期望 " + expectedMime + "，实际 " + metadata.mime);
     if (metadata.width > data.limits.imageWidth) throw imageError("图片宽度 width 超过 " + data.limits.imageWidth);
@@ -844,7 +910,7 @@ export function buildSkinMenuScript({
     return metadata;
   };
   const parseDataUrlImage = (dataUrl) => {
-    if (typeof dataUrl !== "string" || dataUrl.length > 12_000_000 || !dataUrl.startsWith("data:image/")) throw imageError("图片 data URL 无效或过大");
+    if (typeof dataUrl !== "string" || dataUrl.length > 90 * 1024 * 1024 || !dataUrl.startsWith("data:image/")) throw imageError("图片 data URL 无效或超过上传预算");
     const marker = ";base64,";
     const split = dataUrl.indexOf(marker);
     if (split < 0) throw imageError("图片 data URL 必须使用 base64");
@@ -853,7 +919,7 @@ export function buildSkinMenuScript({
     let binary;
     try { binary = atob(dataUrl.slice(split + marker.length)); }
     catch { throw imageError("图片 base64 无效"); }
-    if (binary.length > data.limits.assetBytes) throw imageError("图片超过 8388608 bytes（8 MiB）");
+    if (binary.length > data.limits.assetBytes) throw imageError("图片超过资源预算");
     const bytes = new Uint8Array(binary.length);
     for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
     return { bytes, metadata: validateBrowserImage(bytes, mime) };
@@ -974,9 +1040,33 @@ export function buildSkinMenuScript({
     const custom = themeId === data.customId
       ? currentCustom ?? loadCustom()
       : (theme ? null : currentCustom);
+    const videoDataUrl = theme?.videoDataUrl ?? (
+      custom?.mediaType === "video" || custom?.dataUrl?.startsWith("data:video/")
+        ? custom.dataUrl
+        : null
+    );
     const preview = theme
       ? (theme.dataUrl ?? previewFromGeneratedCss(theme.css))
       : custom?.dataUrl ?? null;
+    currentHero.querySelector('[data-heige-role="current-theme-video-preview"]')?.remove();
+    if (typeof videoDataUrl === "string" && videoDataUrl.startsWith("data:video/")) {
+      const video = document.createElement("video");
+      video.dataset.heigeRole = "current-theme-video-preview";
+      video.src = videoDataUrl;
+      video.autoplay = true;
+      video.muted = true;
+      enableStableVideoLoop(video);
+      video.playsInline = true;
+      video.preload = "auto";
+      video.setAttribute("aria-hidden", "true");
+      currentHero.prepend(video);
+      void Promise.resolve(video.play?.()).catch(() => {});
+      heroCopy.style.position = "relative";
+      heroCopy.style.zIndex = "1";
+    } else {
+      heroCopy.style.position = "";
+      heroCopy.style.zIndex = "";
+    }
     currentHero.dataset.themeId = themeId;
     const previewFocus = theme?.previewFocus ?? { x: 50, y: 50 };
     const thumbnailFocus = theme?.thumbnailFocus ?? { x: 50, y: 50 };
@@ -990,7 +1080,9 @@ export function buildSkinMenuScript({
       currentHero.style.backgroundSize = "";
       currentHero.style.backgroundRepeat = "";
     }
-    currentHero.style.backgroundImage = preview === null
+    currentHero.style.backgroundImage = videoDataUrl !== null
+      ? "linear-gradient(90deg,rgba(7,28,52,.68),rgba(7,28,52,.12))"
+      : preview === null
       ? "linear-gradient(135deg,#26343b,#67757a)"
       : "linear-gradient(90deg,rgba(7,28,52,.84),rgba(7,28,52,.18)),url("
         + JSON.stringify(preview) + ")";
@@ -1017,7 +1109,11 @@ export function buildSkinMenuScript({
     if (!alive()) return;
     currentCustom = theme;
     applyCodexAppearance(theme.appearance ?? appearanceFromColors(theme.colors));
-    style.textContent = buildCustomCss(theme.dataUrl, theme.colors);
+    const videoDataUrl = theme.mediaType === "video" || theme.dataUrl?.startsWith("data:video/")
+      ? theme.dataUrl
+      : null;
+    applyVideoWallpaper(videoDataUrl);
+    style.textContent = buildCustomCss(videoDataUrl === null ? theme.dataUrl : data.sentinels.hero, theme.colors);
     document.documentElement.dataset.heigeCodexSkin = data.customId;
     ensureCustomRow(theme);
     paint(data.customId);
@@ -1050,6 +1146,9 @@ export function buildSkinMenuScript({
     const name = typeof source.name === "string" && source.name.trim()
       ? source.name.trim()
       : "我的主题";
+    const videoDataUrl = source.mediaType === "video" || source.dataUrl.startsWith("data:video/")
+      ? source.dataUrl
+      : null;
     const entry = {
       id: themeId,
       name,
@@ -1057,8 +1156,11 @@ export function buildSkinMenuScript({
       accent: source.colors.accent,
       appearance,
       colors: source.colors,
-      css: buildCustomCss(source.dataUrl, source.colors, themeId),
-      dataUrl: source.dataUrl,
+      css: videoDataUrl === null
+        ? buildCustomCss(source.dataUrl, source.colors, themeId)
+        : buildCustomCss("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLJ0QAAAABJRU5ErkJggg==", source.colors, themeId),
+      dataUrl: videoDataUrl === null ? source.dataUrl : null,
+      videoDataUrl,
     };
     const index = themes.findIndex((candidate) => candidate.id === themeId);
     if (index >= 0) themes[index] = entry;
@@ -1256,7 +1358,7 @@ export function buildSkinMenuScript({
     return importValidatedDataUrl(dataUrl, name, validated.metadata);
   };
 
-  const readFileAsDataUrl = (file) => new Promise((resolve, reject) => {
+  const readFileAsDataUrl = (file, timeoutMs = data.limits.browserOperationMs) => new Promise((resolve, reject) => {
     assertCurrent();
     let settled = false;
     const reader = new FileReader();
@@ -1278,10 +1380,10 @@ export function buildSkinMenuScript({
       try { reader.abort(); } catch {}
       finish(reject, new DOMException("HeiGe menu generation disposed", "AbortError"));
     };
-    const timeoutId = later(() => {
+    const timeoutId = timeoutMs === null ? null : later(() => {
       finish(reject, imageError("文件读取超时，请重试"));
       try { reader.abort(); } catch {}
-    }, data.limits.browserOperationMs);
+    }, timeoutMs);
     signal.addEventListener("abort", onAbort, { once: true });
     trackedReaders.add(reader);
     reader.onload = () => {
@@ -1297,7 +1399,6 @@ export function buildSkinMenuScript({
   const uploadFile = async (file) => {
     assertCurrent();
     if (!Number.isSafeInteger(file.size) || file.size < 1) throw imageError("图片文件大小无效");
-    if (file.size > data.limits.assetBytes) throw imageError("图片超过 8388608 bytes（8 MiB）");
     if (typeof file.arrayBuffer !== "function") throw imageError("浏览器无法读取图片文件");
     const expectedMime = expectedUploadMime(file);
     const arrayBuffer = await boundedOperation(() => file.arrayBuffer(), "文件读取");
@@ -1318,9 +1419,27 @@ export function buildSkinMenuScript({
     return importValidatedDataUrl(dataUrl, file.name.replace(/\\.[a-z0-9]+$/i, ""), metadata);
   };
 
+  const uploadVideoFile = async (file) => {
+    assertCurrent();
+    if (!Number.isSafeInteger(file.size) || file.size < 1) throw imageError("视频文件大小无效");
+    const mime = file.type || (file.name.toLowerCase().endsWith(".webm") ? "video/webm" : "video/mp4");
+    if (mime !== "video/mp4" && mime !== "video/webm") throw imageError("只支持 MP4 或 WebM 视频");
+    const dataUrl = await readFileAsDataUrl(file, null);
+    if (!dataUrl.startsWith("data:" + mime + ";base64,")) throw imageError("视频读取内容无效");
+    const theme = {
+      name: file.name.replace(/\\.[a-z0-9]+$/i, "") || "我的视频壁纸",
+      dataUrl,
+      colors: { accent: "#24c9d7", secondary: "#ef8fd3", surface: "#101820", text: "#f4f7fb" },
+      appearance: "dark",
+      mediaType: "video",
+    };
+    await publishUserThemeToLauncher(theme);
+    return theme.colors;
+  };
+
   const picker = document.createElement("input");
   picker.type = "file";
-  picker.accept = "image/png,image/jpeg,image/webp";
+  picker.accept = "image/png,image/jpeg,image/webp,video/mp4,video/webm";
   picker.style.display = "none";
   listen(picker, "change", () => {
     assertCurrent();
@@ -1328,14 +1447,14 @@ export function buildSkinMenuScript({
     if (!file) return;
     hideUploadAlert();
     setUploadPending(1);
-    void uploadFile(file)
+    void (file.type.startsWith("video/") || /\\.(mp4|webm)$/i.test(file.name) ? uploadVideoFile(file) : uploadFile(file))
       .catch((error) => { if (isCurrent()) showUploadAlert(safeUploadError(error)); })
       .finally(() => { if (isCurrent()) setUploadPending(-1); });
     picker.value = "";
     setPanelOpen(true);
   });
 
-  const uploadRow = row("\\uff0b \\u81ea\\u5b9a\\u4e49\\u56fe\\u7247", "rgba(36,201,215,.9)", () => picker.click(), null, { role: "upload-trigger" });
+  const uploadRow = row("\\uff0b \\u81ea\\u5b9a\\u4e49\\u56fe\\u7247 / \\u89c6\\u9891", "rgba(36,201,215,.9)", () => picker.click(), null, { role: "upload-trigger" });
   uploadRow.style.borderTop = "1px solid rgba(0,0,0,.08)";
 
   const native = row("\\u539f\\u751f\\u754c\\u9762", "rgba(0,0,0,.24)", () => {
@@ -1747,7 +1866,11 @@ export function buildSkinMenuScript({
       }
       controlRequest = request;
       // 常驻 CDP 兜底不宜拖太久；主题 / 用户主题发布仍保留较长窗口。
-      const fallbackTimeoutMs = request.action === "set-persistence" ? 20_000 : 60_000;
+      const fallbackTimeoutMs = request.action === "set-persistence"
+        ? 20_000
+        : request.action === "publish-user-theme" && request.image.startsWith("data:video/")
+          ? 120_000
+          : 60_000;
       controlRequestTimeout = later(() => {
         if (controlRequest?.requestId !== request.requestId) return;
         const timedOut = controlRequest;
@@ -1928,7 +2051,7 @@ export function buildSkinMenuScript({
       showUploadAlert("正在写入启动器主题库…", "success");
       for (const item of rows.values()) item.disabled = true;
       const abortController = childController();
-      const timeoutId = later(() => abortController.abort(), 30000);
+      const timeoutId = later(() => abortController.abort(), 90_000);
       let queued = false;
       try {
         const response = await fetch(userThemeEndpoint, {
@@ -1992,7 +2115,14 @@ export function buildSkinMenuScript({
             // 等待 ACK 期间保留本机快捷预览，避免「我的主题」先空一截。
             currentCustom = theme;
             ensureCustomRow(theme);
-            style.textContent = buildCustomCss(theme.dataUrl, theme.colors);
+            const videoDataUrl = theme.mediaType === "video" || theme.dataUrl.startsWith("data:video/")
+              ? theme.dataUrl
+              : null;
+            applyVideoWallpaper(videoDataUrl);
+            style.textContent = buildCustomCss(
+              videoDataUrl === null ? theme.dataUrl : data.sentinels.hero,
+              theme.colors,
+            );
             applyCodexAppearance(theme.appearance ?? appearanceFromColors(theme.colors));
             paintCurrentTheme(data.customId);
             showUploadAlert("正在等待后台确认写入启动器…", "success");

@@ -231,7 +231,7 @@ export function validateImageMetadata(
 ) {
   const bytes = asBytes(input);
   if (bytes.byteLength > limits.assetBytes) {
-    throw new RangeError(`图片超过 ${limits.assetBytes} bytes（8 MiB）`);
+    throw new RangeError(`图片超过 ${limits.assetBytes} bytes`);
   }
 
   const metadata = parseImageMetadata(bytes);

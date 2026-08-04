@@ -177,6 +177,60 @@ function contrastRatio(left, right) {
   return (values[0] + 0.05) / (values[1] + 0.05);
 }
 
+test("video wallpaper is a body background below the Codex work area", async (t) => {
+  const page = await menuWindow({
+    activeId: "video-theme",
+    entries: [
+      {
+        id: "video-theme",
+        name: "Video",
+        accent: "#19c9e5",
+        css: "#root { position:relative; z-index:1; }",
+        videoDataUrl: "data:video/mp4;base64,dmlkZW8=",
+      },
+      {
+        id: "video-theme-next",
+        name: "Next video",
+        accent: "#ef8fd3",
+        css: "#root { position:relative; z-index:1; }",
+        videoDataUrl: "data:video/mp4;base64,bmV4dA==",
+      },
+    ],
+  });
+  t.after(() => page.close());
+
+  const video = page.document.querySelector('video[data-heige-role="video-wallpaper"]');
+  assert.ok(video);
+  assert.equal(video.parentElement, page.document.body);
+  assert.equal(page.document.getElementById("heige-codex-skin-menu").contains(video), false);
+  assert.equal(video.style.zIndex, "0");
+  assert.equal(page.document.body.firstElementChild, video);
+  const cardVideo = page.document.querySelector('video[data-heige-role="theme-video-preview"]');
+  assert.ok(cardVideo);
+  assert.equal(cardVideo.parentElement?.dataset.heigeRole, "theme-preview");
+  assert.equal(cardVideo.src, "data:video/mp4;base64,dmlkZW8=");
+  assert.equal(cardVideo.muted, true);
+  assert.equal(cardVideo.loop, false);
+  assert.equal(cardVideo.dataset.heigeLoop, "manual");
+  const heroVideo = page.document.querySelector('video[data-heige-role="current-theme-video-preview"]');
+  assert.ok(heroVideo);
+  assert.equal(heroVideo.parentElement?.dataset.heigeRole, "current-theme-hero");
+  assert.equal(heroVideo.src, "data:video/mp4;base64,dmlkZW8=");
+  assert.equal(heroVideo.loop, false);
+  assert.equal(video.loop, false);
+  video.dispatchEvent(new page.window.Event("ended"));
+  assert.equal(video.dataset.heigeLoop, "manual");
+
+  page.window.__heigeCodexSkin.setTheme("video-theme-next");
+  let wallpapers = page.document.querySelectorAll('video[data-heige-role="video-wallpaper"]');
+  assert.equal(wallpapers.length, 1);
+  assert.equal(wallpapers[0].src, "data:video/mp4;base64,bmV4dA==");
+
+  await page.injectAgain();
+  wallpapers = page.document.querySelectorAll('video[data-heige-role="video-wallpaper"]');
+  assert.equal(wallpapers.length, 1);
+});
+
 test("theme trigger opens an accessible modal and restores focus on close paths", async (t) => {
   const page = await menuWindow();
   t.after(() => page.close());
@@ -881,11 +935,10 @@ test("browser upload rejects byte and dimension bombs before decode", async (t) 
   page.window.FileReader = class CountingReader { constructor() { readerCalls += 1; } };
 
   await upload(page, {
-    bytes: png(10, 10),
-    size: (8 * 1024 * 1024) + 1,
+    bytes: png(10, 10, (64 * 1024 * 1024) + 1),
   });
   const alert = page.document.querySelector('[data-heige-role="upload-alert"]');
-  assert.match(alert.textContent, /8 MiB|8388608/);
+  assert.match(alert.textContent, /资源预算/);
   assert.equal(page.backdrop.hidden, false);
   assert.equal(imageCalls, 0);
   assert.equal(readerCalls, 0);

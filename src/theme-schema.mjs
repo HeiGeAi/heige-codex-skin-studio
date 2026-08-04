@@ -21,6 +21,7 @@ import {
 const COLOR_KEYS = ["accent", "secondary", "surface", "text"];
 const COPY_KEYS = ["brand", "headline", "tagline"];
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
+const VIDEO_EXTENSIONS = new Set([".mp4", ".webm"]);
 const IMAGE_MIME = new Map([
   [".png", "image/png"],
   [".jpg", "image/jpeg"],
@@ -51,7 +52,7 @@ function isInside(root, candidate) {
   );
 }
 
-function normalizeAssetPath(value, field) {
+function normalizeAssetPath(value, field, extensions = IMAGE_EXTENSIONS) {
   if (
     typeof value !== "string" ||
     !value.trim() ||
@@ -61,14 +62,14 @@ function normalizeAssetPath(value, field) {
   ) {
     throw new Error(`theme ${field} must be a relative path inside the theme directory`);
   }
-  if (!IMAGE_EXTENSIONS.has(extname(value).toLowerCase())) {
+  if (!extensions.has(extname(value).toLowerCase())) {
     throw new Error(`theme ${field} must be PNG, JPEG, or WebP`);
   }
   return value;
 }
 
 function normalizeHero(hero) {
-  return normalizeAssetPath(hero, "hero");
+  return normalizeAssetPath(hero, "hero", new Set([...IMAGE_EXTENSIONS, ...VIDEO_EXTENSIONS]));
 }
 
 function normalizeColors(colors) {
@@ -196,8 +197,10 @@ async function resolveAsset(root, realRoot, relative, field) {
   if (!isInside(realRoot, realAssetPath)) {
     throw new Error(`theme ${field} escapes the theme directory`);
   }
+  const expectedMime = IMAGE_MIME.get(extname(relative).toLowerCase());
   const { bytes, stat: openedInfo } = await readBoundedFile(assetPath, {
-    maxBytes: RESOURCE_LIMITS.assetBytes,
+    // 图片保留解码预算；视频没有固定文件大小上限。
+    maxBytes: expectedMime ? RESOURCE_LIMITS.assetBytes : null,
     label: "theme " + field,
   });
   const info = await lstat(assetPath);
@@ -212,8 +215,7 @@ async function resolveAsset(root, realRoot, relative, field) {
   ) {
     throw new Error("theme asset changed or escapes the theme directory");
   }
-  const expectedMime = IMAGE_MIME.get(extname(relative).toLowerCase());
-  const metadata = validateImageMetadata(bytes, { expectedMime });
+  const metadata = expectedMime ? validateImageMetadata(bytes, { expectedMime }) : null;
   return { path: assetPath, bytes: bytes.byteLength, buffer: bytes, metadata };
 }
 
@@ -244,7 +246,9 @@ export async function loadTheme(themeDir) {
   const polaroid = manifest.polaroid ? await resolveAsset(root, realRoot, manifest.polaroid, "polaroid") : null;
   const resourceBytes = sumWithinLimit(
     [manifestBytes.byteLength, hero.bytes, logo?.bytes ?? 0, polaroid?.bytes ?? 0],
-    RESOURCE_LIMITS.themeBytes,
+    extname(manifest.hero).toLowerCase() === ".mp4" || extname(manifest.hero).toLowerCase() === ".webm"
+      ? Number.MAX_SAFE_INTEGER
+      : RESOURCE_LIMITS.themeBytes,
     "theme",
   );
 

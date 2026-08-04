@@ -112,6 +112,8 @@ export const THEME_CENTER_STYLE = String.raw`
   padding: 20px 24px 24px;
 }
 [data-heige-role="current-theme-hero"] {
+  position: relative;
+  overflow: hidden;
   min-height: 112px;
   display: flex;
   align-items: end;
@@ -122,6 +124,14 @@ export const THEME_CENTER_STYLE = String.raw`
   background-size: cover;
   box-shadow: 0 15px 35px rgba(29,97,120,.2);
   color: #fff;
+}
+[data-heige-role="current-theme-video-preview"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
 }
 [data-heige-role="update-bar"] {
   min-height: 42px;
@@ -224,6 +234,8 @@ export const THEME_CENTER_STYLE = String.raw`
   filter: grayscale(.12);
 }
 [data-heige-role="theme-preview"] {
+  position: relative;
+  overflow: hidden;
   width: 92px;
   height: 62px;
   border-radius: 11px;

@@ -36,6 +36,7 @@ import {
   applySkin,
   deliverThemeSelectionResult,
   deliverUpdateCheckResult,
+  readRendererControlRequestChunk,
   removeSkin,
   skinStatus,
 } from "./injector.mjs";
@@ -1584,6 +1585,7 @@ export async function productionController({
       port,
       includeControlRequest: options?.purpose === "renderer-control-request",
     }),
+    readRendererControlRequestChunk: (input) => deps.readRendererControlRequestChunk({ port, ...input }),
     validateThemeSelection: async (themeId) => {
       try {
         const resolve = deps.resolveAndLoadTheme ?? resolveAndLoadTheme;
@@ -2566,6 +2568,7 @@ function defaults(overrides, {
     applySkin,
     removeSkin,
     skinStatus,
+    readRendererControlRequestChunk,
     deliverUpdateCheckResult,
     deliverThemeSelectionResult,
     readCurrentPackageVersion,

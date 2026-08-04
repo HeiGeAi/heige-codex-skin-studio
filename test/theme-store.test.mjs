@@ -81,17 +81,26 @@ test("createSingleImageThemeFromBytes matches path-based create and is idempoten
   );
 });
 
-test("createSingleImageThemeFromBytes rejects oversized buffers", async () => {
+test("createSingleImageThemeFromBytes accepts files above the former 8 MiB limit", async () => {
   const root = await temporaryRoot("heige-theme-bytes-big-");
-  await assert.rejects(
-    () => createSingleImageThemeFromBytes({
-      bytes: png(640, 360, 9 * 1024 * 1024),
-      extension: ".png",
-      name: "Too Big",
-      storeRoot: join(root, "themes"),
-    }),
-    /8MB/,
-  );
+  const created = await createSingleImageThemeFromBytes({
+    bytes: png(640, 360, 9 * 1024 * 1024),
+    extension: ".png",
+    name: "Above Eight",
+    storeRoot: join(root, "themes"),
+  });
+  assert.equal(created.manifest.hero, "hero.png");
+});
+
+test("creates a durable MP4 video wallpaper theme", async () => {
+  const root = await temporaryRoot("heige-video-theme-");
+  const created = await createSingleImageThemeFromBytes({
+    bytes: Buffer.from("video-fixture"),
+    extension: ".mp4",
+    name: "Motion Background",
+    storeRoot: join(root, "themes"),
+  });
+  assert.equal(created.manifest.hero, "hero.mp4");
 });
 
 test("rejects unsupported source files", async () => {
@@ -101,7 +110,7 @@ test("rejects unsupported source files", async () => {
 
   await assert.rejects(
     () => createSingleImageTheme({ imagePath: image, name: "No", storeRoot: join(root, "themes") }),
-    /PNG、JPG、JPEG 或 WebP/,
+    /PNG、JPG、JPEG、WebP、MP4 或 WebM/,
   );
 });
 
@@ -150,14 +159,12 @@ test("resolveAndLoadTheme loads only the target theme by id", async () => {
   );
 });
 
-test("createSingleImageTheme rejects oversized source images", async () => {
+test("createSingleImageTheme accepts a source image above the former 8 MiB limit", async () => {
   const root = await temporaryRoot("heige-bigimg-");
   const big = join(root, "big.png");
   await writeFile(big, png(640, 360, 9 * 1024 * 1024));
-  await assert.rejects(
-    createSingleImageTheme({ imagePath: big, name: "Big", storeRoot: join(root, "store") }),
-    /过大/,
-  );
+  const created = await createSingleImageTheme({ imagePath: big, name: "Big", storeRoot: join(root, "store") });
+  assert.equal(created.manifest.hero, "hero.png");
 });
 
 test("createSingleImageTheme validates magic MIME and dimensions before publishing", async () => {

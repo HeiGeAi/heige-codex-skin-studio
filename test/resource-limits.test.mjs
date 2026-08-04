@@ -16,9 +16,9 @@ test("exports the approved immutable resource budget", () => {
   assert.deepEqual(RESOURCE_LIMITS, {
     manifestBytes: 64 * 1024,
     jsonDepth: 12,
-    assetBytes: 8 * 1024 * 1024,
-    themeBytes: 16 * 1024 * 1024,
-    menuBytes: 48 * 1024 * 1024,
+    assetBytes: 64 * 1024 * 1024,
+    themeBytes: 65 * 1024 * 1024,
+    menuBytes: 195 * 1024 * 1024,
     imageWidth: 8192,
     imageHeight: 8192,
     imagePixels: 32_000_000,
@@ -55,7 +55,7 @@ test("sumWithinLimit rejects overflow and unsafe integer input", () => {
   );
   assert.throws(
     () => sumWithinLimit([RESOURCE_LIMITS.menuBytes, 1], RESOURCE_LIMITS.menuBytes, "menu"),
-    /menu.*50331648/,
+    /menu.*204472320/,
   );
   assert.throws(() => sumWithinLimit([Number.MAX_SAFE_INTEGER, 1], Number.MAX_SAFE_INTEGER, "theme"), /安全整数/);
   assert.throws(() => sumWithinLimit([-1], 16, "theme"), /非负/);
@@ -83,6 +83,10 @@ test("bounded file reads exact bytes and rejects plus one or final symlinks", as
     const oversized = join(root, "oversized.bin");
     await writeFile(oversized, Buffer.alloc(9, 7));
     await assert.rejects(readBoundedFile(oversized, { maxBytes: 8, label: "asset" }), /asset.*8/);
+    assert.equal(
+      (await readBoundedFile(oversized, { maxBytes: null, label: "video" })).bytes.byteLength,
+      9,
+    );
 
     if (process.platform !== "win32") {
       const linked = join(root, "linked.bin");

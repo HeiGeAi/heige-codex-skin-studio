@@ -1051,6 +1051,52 @@ test("a polled menu theme request commits and reinjects the authoritative select
   }]);
 });
 
+test("a chunked MP4 renderer request is reassembled before publishing", async () => {
+  const video = `data:video/mp4;base64,${Buffer.from("chunked-video-fixture").toString("base64")}`;
+  const themeId = "chunked-video-0123456789abcdef";
+  const fx = fixture({
+    validateThemeSelection: async (id) => id === themeId,
+  });
+  const chunks = [];
+  let created = null;
+  fx.deps.readRendererControlRequestChunk = async ({ offset, length }) => {
+    chunks.push({ offset, length });
+    return { chunk: video.slice(offset, offset + length) };
+  };
+  fx.deps.createUserThemeFromBytes = async (input) => {
+    created = input;
+    return { id: themeId };
+  };
+  const controller = createSkinController(fx.deps);
+  await controller.start();
+  fx.setHealth(rendererRequestHealth({
+    schemaVersion: 1,
+    requestId: "e".repeat(32),
+    action: "publish-user-theme",
+    capability: CONTROL_TOKEN,
+    expectedRevision: 1,
+    name: "Chunked MP4",
+    image: null,
+    imageLength: video.length,
+    imageMime: "video/mp4",
+    colors: { accent: "#112233", secondary: "#445566", surface: "#778899", text: "#AABBCC" },
+  }));
+
+  const result = await controller.tick();
+
+  assert.equal(result.action, "repair");
+  assert.deepEqual(chunks, [{ offset: 0, length: video.length }]);
+  assert.equal(created.extension, ".mp4");
+  assert.deepEqual(created.bytes, Buffer.from("chunked-video-fixture"));
+  assert.equal(fx.state.selectedThemeId, themeId);
+  assert.deepEqual(fx.calls.themeDelivery, [{
+    requestId: "e".repeat(32),
+    themeId,
+    revision: 2,
+    persistenceEnabled: true,
+  }]);
+});
+
 test("delete-user-theme is drained even when session theme lags the launcher state", async () => {
   const userThemeId = "my-lake-0123456789abcdef";
   const fx = fixture({

@@ -4,9 +4,9 @@ import { open } from "node:fs/promises";
 export const RESOURCE_LIMITS = Object.freeze({
   manifestBytes: 64 * 1024,
   jsonDepth: 12,
-  assetBytes: 8 * 1024 * 1024,
-  themeBytes: 16 * 1024 * 1024,
-  menuBytes: 48 * 1024 * 1024,
+  assetBytes: 64 * 1024 * 1024,
+  themeBytes: 65 * 1024 * 1024,
+  menuBytes: 195 * 1024 * 1024,
   imageWidth: 8192,
   imageHeight: 8192,
   imagePixels: 32_000_000,
@@ -24,10 +24,7 @@ export async function readBoundedFile(
     requireNonEmpty = true,
   },
 ) {
-  requireNonNegativeSafeInteger(maxBytes, label + "字节上限");
-  if (maxBytes > RESOURCE_LIMITS.menuBytes) {
-    throw new RangeError(label + "字节上限超过全局资源预算");
-  }
+  if (maxBytes !== null) requireNonNegativeSafeInteger(maxBytes, label + "字节上限");
   if (typeof path !== "string" || path.length === 0) {
     throw new TypeError(label + "路径无效");
   }
@@ -37,16 +34,19 @@ export async function readBoundedFile(
     const info = await handle.stat();
     if (!info.isFile()) throw new TypeError(label + "必须是普通文件");
     if (!Number.isSafeInteger(info.size) || info.size < 0) throw new RangeError(label + "大小无效");
-    if (info.size > maxBytes) throw new RangeError(label + "超过 " + maxBytes + " bytes");
+    if (maxBytes !== null && info.size > maxBytes) {
+      throw new RangeError(label + "超过 " + maxBytes + " bytes");
+    }
 
-    const buffer = Buffer.allocUnsafe(maxBytes + 1);
+    const allocation = maxBytes === null ? info.size : maxBytes;
+    const buffer = Buffer.allocUnsafe(allocation);
     let offset = 0;
     while (offset < buffer.byteLength) {
       const { bytesRead } = await handle.read(buffer, offset, buffer.byteLength - offset, offset);
       if (bytesRead === 0) break;
       offset += bytesRead;
     }
-    if (offset > maxBytes) throw new RangeError(label + "超过 " + maxBytes + " bytes");
+    if (maxBytes !== null && offset > maxBytes) throw new RangeError(label + "超过 " + maxBytes + " bytes");
     if (offset !== info.size) throw new Error(label + "在读取期间发生变化");
     if (requireNonEmpty && offset === 0) throw new RangeError(label + "不能为空");
     return { bytes: Buffer.from(buffer.subarray(0, offset)), stat: info };

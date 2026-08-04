@@ -29,7 +29,7 @@ One image becomes one theme. After install, switching skins is a single click in
 A local skin switcher for OpenAI Codex Desktop. It injects themes at runtime through loopback Chrome DevTools Protocol (`127.0.0.1:9341`) and never modifies `app.asar`, application binaries, or signature resources. Sidebar, suggestion cards, and the composer stay fully native and interactive.
 
 - **One-click switching**: a 🎨 menu appears at the top of Codex; every installed theme and the native UI switch instantly, with light/dark appearance synced automatically.
-- **One image, one theme**: any PNG, JPG, JPEG, or WebP becomes a full skin (palette + backdrop).
+- **Image or video, one theme**: PNG, JPG, JPEG, WebP, MP4, and WebM become durable skins; videos play muted and loop as the backdrop.
 - **AI-generated themes**: hand `output/heige-codex-skin-studio.skill` to Codex and say "generate a cyberpunk hero image, then turn it into a skin". No extra API key needed.
 - **12 built-in presets**: the high-detail `Miku 488137`, two lightweight themes each for Genshin Impact, Wuthering Waves, Naruto, and Love and Deepspace, two new Dragon Ball themes, plus one easter-egg preset.
 - **Optional pet**: the package ships an independent `Miku Future` animated desktop pet. Installing it is your call.
@@ -50,11 +50,13 @@ Applying a skin quits Codex normally and relaunches it with a local debug port, 
 
 ## Make your own theme
 
-1. Upload any image through the 🎨 menu ("＋ 自定义图片"): new menu uploads are saved as durable user themes, with colors and appearance picked automatically. The legacy `custom-upload` path is a local compatibility slot; new uploads no longer use that slot as authoritative storage.
-2. Run `customize.command` to turn an image into a full saved theme.
+1. Upload an image or video through the 🎨 menu ("＋ 自定义图片 / 视频"): images are palette-picked automatically and MP4/WebM videos loop silently. Images retain a 64 MiB decode budget; videos have no fixed file-size limit.
+2. Use `node src/cli.mjs create --image PATH --name NAME` to save an image or video as a full theme.
 3. Give the `.skill` package to Codex and let it generate the artwork and build the theme end to end.
 
 Ready-to-copy image prompts live in the [theme prompt gallery](docs/theme-prompts.md) (Chinese). Share your results in the [showcase discussions](https://github.com/HeiGeAi/heige-codex-skin-studio/discussions).
+
+New uploads are durable user themes. The legacy `custom-upload` entry remains a local compatibility slot only and is not the authoritative saved theme.
 
 ## Honest notes
 
