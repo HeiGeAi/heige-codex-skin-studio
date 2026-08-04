@@ -219,7 +219,10 @@ test("video wallpaper is a body background below the Codex work area", async (t)
   assert.equal(heroVideo.loop, false);
   assert.equal(video.loop, false);
   video.dispatchEvent(new page.window.Event("ended"));
-  assert.equal(video.dataset.heigeLoop, "manual");
+  const replayedVideo = page.document.querySelector('video[data-heige-role="video-wallpaper"]');
+  assert.notEqual(replayedVideo, video);
+  assert.equal(replayedVideo.dataset.heigeLoop, "recreate");
+  assert.equal(replayedVideo.src, "data:video/mp4;base64,dmlkZW8=");
 
   page.window.__heigeCodexSkin.setTheme("video-theme-next");
   let wallpapers = page.document.querySelectorAll('video[data-heige-role="video-wallpaper"]');

@@ -126,8 +126,23 @@ test("injects MP4 themes as muted looping video wallpaper entries", async () => 
   loaded.assetBuffers = { hero: Buffer.from("video-fixture"), logo: null, polaroid: null };
   const result = await applySkin({ loadedTheme: loaded, port: 9341, deps });
   assert.equal(result.applied, 1);
-  assert.match(FakeSession.expressions[0], /data:video\/mp4;base64/);
-  assert.match(FakeSession.expressions[0], /video-wallpaper/);
+  assert.match(FakeSession.expressions[1], /data:video\/mp4;base64/);
+  assert.match(FakeSession.expressions.at(-1), /videoAssetId/);
+  assert.match(FakeSession.expressions.at(-1), /video-wallpaper/);
+});
+
+test("stages large MP4 themes in CDP-sized chunks before injecting the menu", async () => {
+  FakeSession.expressions = [];
+  const { loaded, deps } = await fixture();
+  loaded.heroPath = join(loaded.root, "hero.mp4");
+  loaded.assetBuffers = { hero: Buffer.alloc(512 * 1024), logo: null, polaroid: null };
+
+  await applySkin({ loadedTheme: loaded, port: 9341, deps });
+
+  const transport = FakeSession.expressions.filter((expression) => expression.includes("__heigeCodexSkinVideoAssets"));
+  assert.ok(transport.length > 2);
+  assert.ok(transport.every((expression) => Buffer.byteLength(expression) < 1024 * 1024));
+  assert.doesNotMatch(FakeSession.expressions.at(-1), /data:video\/mp4;base64/);
 });
 
 test("keeps the menu resources while rendering the authoritative native selection", async () => {

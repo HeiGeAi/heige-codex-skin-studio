@@ -14,6 +14,8 @@ const MIME = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
 const REQUEST_ID = /^[a-f0-9]{32}$/;
 const THEME_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const RENDERER_CONTROL_CHUNK_BYTES = 512 * 1024;
+const VIDEO_CDP_CHUNK_CHARS = 128 * 1024;
+const VIDEO_ASSET_STORE = "__heigeCodexSkinVideoAssets";
 const STABLE_VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
 const RELEASE_URL =
   /^https:\/\/github\.com\/HeiGeAi\/heige-codex-skin-studio\/releases\/tag\/v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
@@ -74,7 +76,33 @@ async function bringTargetToFront(session) {
   } catch {}
 }
 
-async function evaluateTargets(targets, expression, Session, { bringToFront = true } = {}) {
+function videoTransportExpression(assetId, chunk, { append = false } = {}) {
+  const assignment = append
+    ? `assets[${JSON.stringify(assetId)}] = (assets[${JSON.stringify(assetId)}] ?? "") + ${JSON.stringify(chunk)};`
+    : `assets[${JSON.stringify(assetId)}] = ${JSON.stringify(chunk)};`;
+  return `(() => {
+    const assets = globalThis[${JSON.stringify(VIDEO_ASSET_STORE)}] ?? Object.create(null);
+    globalThis[${JSON.stringify(VIDEO_ASSET_STORE)}] = assets;
+    ${assignment}
+    return true;
+  })()`;
+}
+
+async function stageVideoAssets(session, videoAssets) {
+  if (videoAssets.length === 0) return;
+  await session.evaluate(`(() => {
+    globalThis[${JSON.stringify(VIDEO_ASSET_STORE)}] = Object.create(null);
+    return true;
+  })()`);
+  for (const { assetId, dataUrl } of videoAssets) {
+    for (let start = 0; start < dataUrl.length; start += VIDEO_CDP_CHUNK_CHARS) {
+      const chunk = dataUrl.slice(start, start + VIDEO_CDP_CHUNK_CHARS);
+      await session.evaluate(videoTransportExpression(assetId, chunk, { append: start > 0 }));
+    }
+  }
+}
+
+async function evaluateTargets(targets, expression, Session, { bringToFront = true, videoAssets = [] } = {}) {
   const succeeded = [];
   const failed = [];
   for (const target of targets) {
@@ -83,6 +111,7 @@ async function evaluateTargets(targets, expression, Session, { bringToFront = tr
       session = new Session(target.webSocketDebuggerUrl);
       await session.open();
       if (bringToFront) await bringTargetToFront(session);
+      await stageVideoAssets(session, videoAssets);
       succeeded.push(safeTarget(target, { value: await session.evaluate(expression) }));
     } catch (error) {
       failed.push(safeTarget(target, { error: safeEvaluationError(error) }));
@@ -192,6 +221,19 @@ function themeEntry(resources) {
   };
 }
 
+function splitVideoAssets(entries) {
+  const videoAssets = [];
+  const stagedEntries = entries.map((entry) => {
+    if (typeof entry.videoDataUrl !== "string" || !entry.videoDataUrl.startsWith("data:video/")) {
+      return entry;
+    }
+    const assetId = `video:${entry.id}`;
+    videoAssets.push({ assetId, dataUrl: entry.videoDataUrl });
+    return { ...entry, videoDataUrl: null, videoAssetId: assetId };
+  });
+  return { stagedEntries, videoAssets };
+}
+
 export async function applySkin({
   loadedTheme,
   themes,
@@ -215,6 +257,7 @@ export async function applySkin({
     resourceSets.push(resources);
   }
   const entries = resourceSets.map(themeEntry);
+  const { stagedEntries, videoAssets } = splitVideoAssets(entries);
   const themeId = activeId === undefined ? loadedTheme.manifest.id : activeId;
   // 自定义上传主题的客户端 CSS 模板：哨兵值占位，页面内替换，和内置主题同一套模板
   const cssTemplate = buildSkinCss({
@@ -232,7 +275,7 @@ export async function applySkin({
     heroDataUrl: CSS_SENTINELS.hero,
   });
   const expression = buildSkinMenuScript({
-    entries,
+    entries: stagedEntries,
     activeId: themeId,
     styleId: STYLE_ID,
     menuId: MENU_ID,
@@ -263,7 +306,7 @@ export async function applySkin({
       results,
     );
   }
-  const evaluated = await evaluateTargets(targets, expression, Session);
+  const evaluated = await evaluateTargets(targets, expression, Session, { videoAssets });
   const results = resultsFor(classified, evaluated);
   results.skipped.push(...unselected);
   if (evaluated.succeeded.length === 0) {

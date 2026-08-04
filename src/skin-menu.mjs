@@ -120,6 +120,10 @@ export function buildSkinMenuScript({
       videoDataUrl: typeof entry.videoDataUrl === "string" && entry.videoDataUrl.startsWith("data:video/")
         ? entry.videoDataUrl
         : null,
+      videoAssetId: typeof entry.videoAssetId === "string" && entry.videoAssetId.length > 0
+        && entry.videoAssetId.length <= 160
+        ? entry.videoAssetId
+        : null,
       css: entry.css,
     };
   });
@@ -155,7 +159,19 @@ export function buildSkinMenuScript({
   try { window.__heigeCodexSkinRuntime?.dispose?.(); } catch {}
   const data = ${payload};
   // 可变副本：上传成功后立刻 upsert 正式用户主题，不依赖 reinject 才出现在「我的主题」。
-  const themes = data.themes.slice();
+  const stagedVideoAssets = globalThis.__heigeCodexSkinVideoAssets;
+  const themes = data.themes.map((theme) => {
+    const staged = theme.videoAssetId === null || stagedVideoAssets === null || typeof stagedVideoAssets !== "object"
+      ? null
+      : stagedVideoAssets[theme.videoAssetId];
+    return {
+      ...theme,
+      videoDataUrl: typeof staged === "string" && staged.startsWith("data:video/")
+        ? staged
+        : theme.videoDataUrl,
+    };
+  });
+  try { delete globalThis.__heigeCodexSkinVideoAssets; } catch {}
   const previewFromGeneratedCss = ${previewParserSource};
 
   const runtimeAbortController = new AbortController();
@@ -201,9 +217,8 @@ export function buildSkinMenuScript({
     clearTimeout(id);
     trackedTimers.delete(id);
   };
-  // Electron 的部分 HEVC/H.265 硬解码路径在 <video loop> 回到第 0 帧时会出现
-  // 色彩异常。禁用浏览器原生 loop，在 ended 后显式 seek 并重播，背景、卡片和横幅
-  // 统一走这条路径，既能循环，也不会闪出错误帧。
+  // Electron 的部分硬解码路径在 <video loop> 回到第 0 帧时会出现色彩异常。
+  // 卡片和横幅预览使用显式 seek；全屏背景会在 ended 时重建节点，避免复用异常解码器。
   const enableStableVideoLoop = (video) => {
     video.loop = false;
     video.dataset.heigeLoop = "manual";
@@ -231,6 +246,7 @@ export function buildSkinMenuScript({
   let disposed = false;
   let runtime;
   let wallpaperVideo = null;
+  let wallpaperSource = null;
   // 视频背景放在 body 内，注入更新时不能只依赖当前闭包保存的引用：上一代
   // runtime 已失联的背景节点仍会处于同一 z-index，遮住刚切换的新视频。
   const removeWallpaperVideos = () => {
@@ -686,14 +702,16 @@ export function buildSkinMenuScript({
   };
 
   const applyVideoWallpaper = (source) => {
+    wallpaperSource = typeof source === "string" && source.startsWith("data:video/") ? source : null;
     removeWallpaperVideos();
-    if (typeof source !== "string" || !source.startsWith("data:video/")) return;
+    if (!wallpaperSource) return;
     const video = document.createElement("video");
     video.dataset.heigeRole = "video-wallpaper";
-    video.src = source;
+    video.src = wallpaperSource;
     video.autoplay = true;
     video.muted = true;
-    enableStableVideoLoop(video);
+    video.loop = false;
+    video.dataset.heigeLoop = "recreate";
     video.playsInline = true;
     video.setAttribute("aria-hidden", "true");
     // 菜单 root 本身是高层 fixed overlay；把视频插到它里面会让 z-index:-1
@@ -702,6 +720,11 @@ export function buildSkinMenuScript({
     video.style.cssText = "position:fixed;inset:0;width:100vw;height:100vh;object-fit:cover;pointer-events:none;z-index:0;background:#101820;";
     document.body?.prepend(video);
     wallpaperVideo = video;
+    listen(video, "ended", () => {
+      if (!isCurrent() || !video.isConnected || wallpaperVideo !== video || !wallpaperSource) return;
+      // 完整替换节点会新建 MediaPlayer，规避循环 seek 后偶发的红色视频帧。
+      applyVideoWallpaper(wallpaperSource);
+    });
     void video.play().catch(() => {});
   };
 
