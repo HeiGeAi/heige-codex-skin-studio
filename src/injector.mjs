@@ -190,8 +190,10 @@ async function readThemeResources(loadedTheme) {
   const polaroid = await readThemeAsset(loadedTheme.polaroidPath, "polaroid", loadedTheme.assetBuffers?.polaroid);
   const manifestBytes = loadedTheme.manifestBytes
     ?? Buffer.byteLength(JSON.stringify(loadedTheme.manifest), "utf8");
+  // 视频在发送时按 CDP 块传输，不占图片解码或菜单单请求预算；仅图片仍受资源预算保护。
+  const heroBudgetBytes = hero.mime.startsWith("video/") ? 0 : hero.bytes.byteLength;
   const resourceBytes = sumWithinLimit(
-    [manifestBytes, hero.bytes.byteLength, logo?.bytes.byteLength ?? 0, polaroid?.bytes.byteLength ?? 0],
+    [manifestBytes, heroBudgetBytes, logo?.bytes.byteLength ?? 0, polaroid?.bytes.byteLength ?? 0],
     RESOURCE_LIMITS.themeBytes,
     `theme ${loadedTheme.manifest.id}`,
   );
