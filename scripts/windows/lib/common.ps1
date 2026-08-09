@@ -294,6 +294,54 @@ function New-CodexStoreApp {
         -ProductName $product -PackageFullName ([string]$Package.PackageFullName) -Aumid $aumid
 }
 
+function Resolve-CodexStorePackageExecutablePath {
+    param(
+        [Parameter(Mandatory = $true)]$AppInfo,
+        [object[]]$Packages
+    )
+    if ([string]$AppInfo.Kind -cne "StoreAumid") {
+        throw "只有没有执行别名的 Windows Store 应用才能解析包内启动文件。"
+    }
+    # Validate the exact resolver tuple before trusting package identity fields supplied by a caller.
+    ConvertTo-HeiGeCodexAppIdentityDocument -App $AppInfo | Out-Null
+    $currentPackages = if ($PSBoundParameters.ContainsKey("Packages")) {
+        @($Packages)
+    } else {
+        @(Get-CodexStorePackages)
+    }
+    $observed = Resolve-HeiGeExactStoreCodexApp -Expected $AppInfo -Packages $currentPackages
+    if ([string]$observed.Kind -cne "StoreAumid") {
+        throw "当前 Windows Store 应用已经有执行别名，不应使用包内启动回退。"
+    }
+    $package = @($currentPackages | Where-Object {
+        [string]$_.PackageFullName -ceq [string]$observed.PackageFullName
+    })
+    if ($package.Count -ne 1) {
+        throw "Windows Store 包内启动文件的归属不唯一。"
+    }
+    $package = $package[0]
+    $packageFamilyName = [string]$package.PackageFamilyName
+    $applications = @(Get-CodexPackageApplications -Package $package | Where-Object {
+        "$packageFamilyName!$([string]$_.Id)" -ceq [string]$observed.Aumid
+    })
+    if ($applications.Count -ne 1) {
+        throw "Windows Store AUMID 没有唯一的包内应用入口。"
+    }
+    $relative = [string]$applications[0].Executable
+    if (-not $relative -or [System.IO.Path]::IsPathRooted($relative) -or
+        (Split-Path $relative -Leaf) -notmatch '^(Codex|ChatGPT)\.exe$') {
+        throw "Windows Store 包内应用入口不是可信的 Codex 可执行文件。"
+    }
+    $candidate = Get-HeiGeFullPath -Path (Join-Path ([string]$observed.InstallPath) $relative)
+    if (-not (Test-HeiGePathWithin -Root ([string]$observed.InstallPath) -Path $candidate)) {
+        throw "Windows Store 包内应用入口越出了已验证的安装根。"
+    }
+    if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+        throw "Windows Store 包内应用入口不存在：$candidate"
+    }
+    return $candidate
+}
+
 function Get-CodexVersionFromDirectory {
     param([string]$Path)
     $parent = Split-Path $Path -Parent
@@ -1378,10 +1426,23 @@ function Start-CodexWithCdp {
         $AppInfo,
         [scriptblock]$SleepProvider,
         [scriptblock]$MainRendererProvider,
-        [scriptblock]$ShowWindowProvider
+        [scriptblock]$ShowWindowProvider,
+        [scriptblock]$CdpEndpointProvider,
+        [scriptblock]$ActivationProvider,
+        [scriptblock]$StartProvider,
+        [scriptblock]$StoreExecutableProvider,
+        [scriptblock]$ProcessProvider,
+        [scriptblock]$FlaggedProcessProvider
     )
     $ProgressPreference = "SilentlyContinue"
     if (-not $AppInfo) { $AppInfo = Resolve-CodexApp }
+    if (-not $SleepProvider) {
+        $SleepProvider = { param($Milliseconds) Start-Sleep -Milliseconds $Milliseconds }
+    }
+    $testCdp = {
+        if ($CdpEndpointProvider) { return [bool](& $CdpEndpointProvider $Port) }
+        return (Test-CdpEndpoint -Port $Port)
+    }
     $app = if ($AppInfo.Kind -eq "StoreAumid") { "aumid:$($AppInfo.Aumid)" } else { $AppInfo.ExecutablePath }
     $finish = {
         Wait-HeiGeCodexMainRenderer -Port $Port -AppInfo $AppInfo `
@@ -1389,16 +1450,20 @@ function Start-CodexWithCdp {
             -MainRendererProvider $MainRendererProvider `
             -ShowWindowProvider $ShowWindowProvider | Out-Null
     }
-    if (Test-CdpEndpoint -Port $Port) {
+    if (& $testCdp) {
         Get-CdpOwner -Port $Port -App $AppInfo | Out-Null
         Write-Host ("调试端口 {0} 已就绪。" -f $Port)
         & $finish
         return
     }
-    $running = @(Get-RunningCodex -AppInfo $AppInfo)
+    $runningArgs = @{ AppInfo = $AppInfo }
+    if ($ProcessProvider) { $runningArgs.ProcessProvider = $ProcessProvider }
+    $running = @(Get-RunningCodex @runningArgs)
     if ($running) {
         Write-Host "正在正常退出 Codex，以调试端口重新打开……"
-        Stop-CodexNormally -AppInfo $AppInfo | Out-Null
+        $stopArgs = @{ AppInfo = $AppInfo; SleepProvider = $SleepProvider }
+        if ($ProcessProvider) { $stopArgs.ProcessProvider = $ProcessProvider }
+        Stop-CodexNormally @stopArgs | Out-Null
     }
 
     $isStore = $app -like "aumid:*"
@@ -1406,16 +1471,45 @@ function Start-CodexWithCdp {
     for ($launch = 1; $launch -le $launchAttempts; $launch++) {
         try {
             if ($isStore) {
-                Write-Host "商店版没有执行别名，改用系统激活接口带参启动……"
-                Write-Host "正在激活 Codex（无需按键，请稍候）……"
-                $activatedPid = Start-CodexViaActivation -Aumid $app.Substring(6) `
-                    -Arguments "--remote-debugging-address=127.0.0.1 --remote-debugging-port=$Port"
-                Write-Host ("已发出激活请求（PID {0}），等待调试端口 {1} 开放……" -f $activatedPid, $Port)
-            } else {
-                Start-Process -FilePath $app -ArgumentList @(
+                $arguments = @(
                     "--remote-debugging-address=127.0.0.1",
                     "--remote-debugging-port=$Port"
                 )
+                if ($launch -eq 1) {
+                    Write-Host "商店版没有执行别名，改用系统激活接口带参启动……"
+                    Write-Host "正在激活 Codex（无需按键，请稍候）……"
+                    $argumentLine = $arguments -join " "
+                    $activatedPid = if ($ActivationProvider) {
+                        & $ActivationProvider $app.Substring(6) $argumentLine
+                    } else {
+                        Start-CodexViaActivation -Aumid $app.Substring(6) -Arguments $argumentLine
+                    }
+                    Write-Host ("已发出激活请求（PID {0}），等待调试端口 {1} 开放……" -f $activatedPid, $Port)
+                } else {
+                    Write-Host "系统激活未保留调试参数，改用同一已验证 MSIX 包内入口启动……"
+                    $storeExecutable = if ($StoreExecutableProvider) {
+                        & $StoreExecutableProvider $AppInfo
+                    } else {
+                        Resolve-CodexStorePackageExecutablePath -AppInfo $AppInfo
+                    }
+                    if ($StartProvider) {
+                        & $StartProvider $storeExecutable $arguments | Out-Null
+                    } else {
+                        Start-Process -FilePath $storeExecutable -ArgumentList $arguments `
+                            -WorkingDirectory (Split-Path $storeExecutable -Parent) | Out-Null
+                    }
+                    Write-Host ("已从验证过的 MSIX 包启动 Codex，等待调试端口 {0} 开放……" -f $Port)
+                }
+            } else {
+                $arguments = @(
+                    "--remote-debugging-address=127.0.0.1",
+                    "--remote-debugging-port=$Port"
+                )
+                if ($StartProvider) {
+                    & $StartProvider $app $arguments | Out-Null
+                } else {
+                    Start-Process -FilePath $app -ArgumentList $arguments | Out-Null
+                }
                 Write-Host ("已启动 Codex，等待调试端口 {0} 开放……" -f $Port)
             }
         } catch {
@@ -1431,7 +1525,7 @@ function Start-CodexWithCdp {
         }
         $waitAttempts = 80
         for ($i = 0; $i -lt $waitAttempts; $i++) {
-            if (Test-CdpEndpoint -Port $Port) {
+            if (& $testCdp) {
                 Get-CdpOwner -Port $Port -App $AppInfo | Out-Null
                 Write-Host ("调试端口 {0} 已就绪。" -f $Port)
                 & $finish
@@ -1441,14 +1535,18 @@ function Start-CodexWithCdp {
                 Write-Host ("仍在等待调试端口 {0}… {1}/{2}（约 {3} 秒）" -f `
                     $Port, ($i + 1), $waitAttempts, [int](($i + 1) * 0.25))
             }
-            Start-Sleep -Milliseconds 250
+            & $SleepProvider 250 | Out-Null
         }
 
-        $flagged = @(Get-CimInstance Win32_Process -Filter "Name='ChatGPT.exe' or Name='Codex.exe'" -ErrorAction SilentlyContinue |
-            Where-Object {
-                $_.CommandLine -match "remote-debugging-port" -and
-                -not (Test-HeiGeCodexInternalBackendPath -Path ([string]$_.ExecutablePath))
-            })
+        $flagged = if ($FlaggedProcessProvider) {
+            @(& $FlaggedProcessProvider $AppInfo $Port)
+        } else {
+            @(Get-CimInstance Win32_Process -Filter "Name='ChatGPT.exe' or Name='Codex.exe'" -ErrorAction SilentlyContinue |
+                Where-Object {
+                    $_.CommandLine -match "remote-debugging-port" -and
+                    -not (Test-HeiGeCodexInternalBackendPath -Path ([string]$_.ExecutablePath))
+                })
+        }
         if ($flagged.Count -gt 0) {
             throw @"
 Codex 已带调试参数启动，但端口 $Port 未开放：当前 Codex 版本或本机 MSIX 会话可能禁用了本机调试端口。
@@ -1456,13 +1554,15 @@ Codex 已带调试参数启动，但端口 $Port 未开放：当前 Codex 版本
 "@
         }
         if ($launch -lt $launchAttempts) {
-            Write-Host "商店版激活未带上调试参数，正在再次退出并重试……"
-            Stop-CodexNormally -AppInfo $AppInfo | Out-Null
+            Write-Host "商店版激活未带上调试参数，正在退出后切换到包内入口回退……"
+            $stopArgs = @{ AppInfo = $AppInfo; SleepProvider = $SleepProvider }
+            if ($ProcessProvider) { $stopArgs.ProcessProvider = $ProcessProvider }
+            Stop-CodexNormally @stopArgs | Out-Null
             continue
         }
         throw @"
-调试参数未生效：可能被残留的旧实例接管，或商店版激活没把参数传进应用。
-请彻底退出 Codex（任务管理器确认无 ChatGPT/Codex 进程）后重试；商店版反复失败请改装官方独立版，或开 Issue 附报错原文。
+调试参数未生效：系统激活和已验证的 MSIX 包内入口都没有打开调试端口。
+请附 doctor 输出、Codex 版本号和本段报错到 https://github.com/HeiGeAi/heige-codex-skin-studio/issues 反馈。
 "@
     }
 }

@@ -1219,6 +1219,85 @@ try {
         Assert-Equal "" $script:ActivationArguments
     }
 
+    Test-Case "Store package executable fallback stays inside the exact bound MSIX package" {
+        $packageRoot = Join-Path $script:Root "WindowsApps\OpenAI.Codex_26.727.6591.0_x64__2p2nqsd0c76g0"
+        $packageExe = Join-Path $packageRoot "app\ChatGPT.exe"
+        New-Item -ItemType Directory -Path (Split-Path $packageExe -Parent) -Force | Out-Null
+        New-Item -ItemType File -Path $packageExe -Force | Out-Null
+        $package = [pscustomobject]@{
+            Name = "OpenAI.Codex"
+            IsFramework = $false
+            SignatureKind = "Store"
+            PackageFullName = "OpenAI.Codex_26.727.6591.0_x64__2p2nqsd0c76g0"
+            PackageFamilyName = "OpenAI.Codex_2p2nqsd0c76g0"
+            InstallLocation = $packageRoot
+            Applications = @([pscustomobject]@{
+                Id = "App"
+                Executable = "app\ChatGPT.exe"
+                ExecutionAliases = @()
+            })
+        }
+        $app = [pscustomobject][ordered]@{
+            Kind = "StoreAumid"
+            ExecutablePath = $null
+            InstallPath = $packageRoot
+            ProductName = "Codex"
+            PackageFullName = $package.PackageFullName
+            Aumid = "$($package.PackageFamilyName)!App"
+        }
+
+        $resolved = Resolve-CodexStorePackageExecutablePath -AppInfo $app -Packages @($package)
+        Assert-Equal $packageExe $resolved
+
+        $package.Applications[0].Executable = "..\outside\ChatGPT.exe"
+        Assert-Throws {
+            Resolve-CodexStorePackageExecutablePath -AppInfo $app -Packages @($package)
+        } "越出了已验证的安装根"
+    }
+
+    Test-Case "Store CDP launch falls back once from AUMID to the verified package executable" {
+        $script:ActivationCalls = @()
+        $script:DirectCalls = @()
+        $packageRoot = "C:\Program Files\WindowsApps\OpenAI.Codex_26.727.6591.0_x64__2p2nqsd0c76g0"
+        $packageExe = Join-Path $packageRoot "app\ChatGPT.exe"
+        $app = [pscustomobject][ordered]@{
+            Kind = "StoreAumid"
+            ExecutablePath = $null
+            InstallPath = $packageRoot
+            ProductName = "Codex"
+            PackageFullName = "OpenAI.Codex_26.727.6591.0_x64__2p2nqsd0c76g0"
+            Aumid = "OpenAI.Codex_2p2nqsd0c76g0!App"
+        }
+
+        Assert-Throws {
+            Start-CodexWithCdp -Port 9341 -AppInfo $app `
+                -CdpEndpointProvider { param($Port) $false } `
+                -ActivationProvider {
+                    param($Aumid, $Arguments)
+                    $script:ActivationCalls += [pscustomobject]@{ Aumid = $Aumid; Arguments = $Arguments }
+                    4101
+                } `
+                -StoreExecutableProvider { param($Info) $packageExe } `
+                -StartProvider {
+                    param($Path, $Arguments)
+                    $script:DirectCalls += [pscustomobject]@{ Path = $Path; Arguments = @($Arguments) }
+                } `
+                -ProcessProvider { @() } `
+                -FlaggedProcessProvider { @() } `
+                -SleepProvider { param($Milliseconds) }
+        } "调试参数未生效"
+
+        Assert-Equal 1 $script:ActivationCalls.Count
+        Assert-Equal "OpenAI.Codex_2p2nqsd0c76g0!App" $script:ActivationCalls[0].Aumid
+        Assert-Equal "--remote-debugging-address=127.0.0.1 --remote-debugging-port=9341" $script:ActivationCalls[0].Arguments
+        Assert-Equal 1 $script:DirectCalls.Count
+        Assert-Equal $packageExe $script:DirectCalls[0].Path
+        Assert-Equal @(
+            "--remote-debugging-address=127.0.0.1",
+            "--remote-debugging-port=9341"
+        ) $script:DirectCalls[0].Arguments
+    }
+
     Test-Case "Windows entrypoints never invoke the macOS lifecycle helper defaults" {
         $source = [System.IO.File]::ReadAllText(
             (Join-Path $script:RepositoryRoot "scripts\windows\lib\entrypoints.ps1")
