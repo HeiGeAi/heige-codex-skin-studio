@@ -1,11 +1,11 @@
 ---
 name: heige-codex-skin-studio
-description: Use when 用户希望在 macOS 或 Windows 安装、制作、应用、暂停、恢复或设置 HeiGe Codex Desktop 皮肤常驻。
+description: Use when 用户希望在 macOS 或 Windows 安装、制作、应用、暂停、恢复或设置 HeiGe Codex Desktop 皮肤常驻，或给腾讯 CodeBuddy 桌面端（WorkBuddy）一次性换肤。
 ---
 
 # HeiGe Codex Skin Studio
 
-通过本机 CDP 注入为 Codex Desktop 换肤，不修改 `app.asar`、应用签名或二进制文件。
+通过本机 CDP 注入为 Codex Desktop 换肤，不修改 `app.asar`、应用签名或二进制文件。同一引擎支持给腾讯 CodeBuddy 桌面端（WorkBuddy）一次性换肤，见「WorkBuddy 支持」一节。
 
 ## 必须遵守
 
@@ -113,6 +113,17 @@ Windows PowerShell 运行：
 ```
 
 需要直接调用 CLI 时，使用 `<verified-node> "$ROOT/src/cli.mjs" install-pet --source "$ROOT/custom-pet/miku-future"`。不因用户只要换肤而自动安装宠物。
+
+## WorkBuddy 支持
+
+同一个 Skill 也能给 WorkBuddy（腾讯 CodeBuddy 桌面端）换肤，入口独立，别和 Codex 的混用：
+
+- 应用：`"$ROOT/scripts/workbuddy-apply.command" [--restart] [主题 id]`。默认端口 9342；`--restart` 先安全退出 WorkBuddy 再以调试模式拉起。
+- 还原：`"$ROOT/scripts/workbuddy-restore.command"`。
+- `workbuddy-enable-skin.command` 是 workbuddy-apply 的兼容名，只应用当前会话。
+- Node CLI 的等价写法是加 `--app workbuddy`。
+- WorkBuddy 不支持常驻：`set-persistence --app workbuddy` 会明确报错。这是刻意的安全决定（`file://` renderer 回调控制服务带 `Origin: null`，不进来源白名单），不得试图绕过来源校验或代用户改配置。重启 WorkBuddy 后皮肤消失属预期，重跑一次 workbuddy-apply 即可。
+- 需要系统 Node.js 22 或更新版本。macOS 在 WorkBuddy 5.3.11 真机验证；Windows 侧未在真机验证，不得宣称已验证。
 
 ## Windows 验证边界
 

@@ -49,6 +49,20 @@ Windows 11 版本现已发布：[查看最新 Release](https://github.com/HeiGeA
 
 > Microsoft Store/MSIX 客户端仍需真机验证；若其阻止本机调试端口，自动接管无法完成。
 
+## WorkBuddy（腾讯 CodeBuddy 桌面端）
+
+同一套引擎也能给 WorkBuddy 换肤，走本机回环 CDP（`127.0.0.1:9342`，与 Codex 的 9341 互不干扰），同样不修改 `app.asar`：
+
+```bash
+"<仓库路径>/scripts/workbuddy-apply.command" --restart
+```
+
+应用后 WorkBuddy 顶部出现 🎨 主题中心，内置主题即点即换；还原运行 `scripts/workbuddy-restore.command`。三点实话：
+
+- WorkBuddy 侧只做一次性皮肤，不支持常驻。它的 renderer 是本地 `file://` 页面，回调控制服务时带的来源是 `Origin: null`，放行会削弱控制服务的来源校验，所以这版直接不开控制通道。重启 WorkBuddy 后皮肤消失属预期，重跑一次 apply 即可。
+- 需要本机 Node.js 22 或更新版本（WorkBuddy 自身不带可执行的 Node）。
+- macOS 在 WorkBuddy 5.3.11 真机验证；Windows 侧只写了结构，未在真机验证。
+
 ## 快速开始（macOS）
 
 需要已装好的 Codex Desktop。下载本仓库后双击安装：

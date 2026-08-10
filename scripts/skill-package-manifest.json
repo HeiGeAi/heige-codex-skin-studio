@@ -152,8 +152,20 @@
       "exclude": []
     },
     {
+      "source": "src/products.mjs",
+      "destination": "payload/src/products.mjs",
+      "recursive": false,
+      "exclude": []
+    },
+    {
       "source": "src/resource-limits.mjs",
       "destination": "payload/src/resource-limits.mjs",
+      "recursive": false,
+      "exclude": []
+    },
+    {
+      "source": "src/skin-css-workbuddy.mjs",
+      "destination": "payload/src/skin-css-workbuddy.mjs",
       "recursive": false,
       "exclude": []
     },

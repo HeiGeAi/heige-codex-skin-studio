@@ -22,6 +22,10 @@ Skill 保留 12 个内置预设，默认是 `miku-488137`。切换预设会同�
 
 主题中心的「阅读增强」默认开启，为最终回复和过程回复增加统一的 90％ 主题自适应半透明阅读底与对称留白；用户可随时关闭。它只使用 renderer 本地偏好和现有窗口同步，不改变常驻状态，也不增加模糊、阴影、观察器、滚动监听或后台请求。
 
+## WorkBuddy 支持
+
+同一引擎支持腾讯 CodeBuddy 桌面端（WorkBuddy）：macOS 运行 `scripts/workbuddy-apply.command`（默认端口 9342，可带 `--restart` 或主题 id），还原用 `scripts/workbuddy-restore.command`，Node CLI 的等价开关是 `--app workbuddy`。WorkBuddy 只做一次性皮肤，不支持常驻：它的 renderer 是 `file://`，回调控制服务带 `Origin: null`，放行会削弱来源校验，因此 `set-persistence` 在该产品下会明确报错。macOS 真机验证（WorkBuddy 5.3.11）；Windows 侧只有结构，未在真机验证。
+
 ## Windows 证据边界
 
 自动化门禁要求在 `windows-latest` 上同时通过 Windows PowerShell 5.1 与 PowerShell 7 测试，覆盖解析、Node.js 22、当前用户 Scheduled Task、入口语义、编码和中文空格路径。真实任务集成测试只使用 GUID 测试名，不触碰生产任务。

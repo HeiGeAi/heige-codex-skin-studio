@@ -1,5 +1,35 @@
 # 更新日志
 
+## 5.5.0 - 2026-08-11
+
+### 新增
+
+- 支持给腾讯 CodeBuddy 桌面端（WorkBuddy）换肤：CLI 新增 `--app codex|workbuddy` 开关（环境变量 `HEIGE_SKIN_APP` 为回退），新增 `scripts/workbuddy-apply.command`、`scripts/workbuddy-enable-skin.command`、`scripts/workbuddy-restore.command` 三个稳定入口。默认调试端口 9342，与 Codex 的 9341 互不干扰，可同时开着。
+- 新增产品档案层 `src/products.mjs`：宿主应用的身份（bundle id、Team ID、可执行文件名）、端口、调试端口开法、状态目录全部收进档案，上层代码只读档案字段。Codex 侧对外行为一字不变，老用户升级不迁移。
+- 新增 WorkBuddy 皮肤 CSS 档案 `src/skin-css-workbuddy.mjs`：同时覆盖 `--wb-*` 结构层、`--cb-*` 语义层、`--cb-vscode-*` 桥接层三层设计令牌；令牌同时声明在 `:root` 和 `body` 上（宿主主题用 `:root, body[data-vscode-theme-name="IDE Light"]` 选择器把整套令牌在 body 又声明了一遍，只写 `:root` 会被盖掉）；只挂稳定选择器，构建哈希类名零出现。
+- 状态目录按产品隔离：WorkBuddy 使用 `HeiGeCodexSkinStudio-workbuddy`，两个产品的锁、state.json 与用户主题库互不干扰。
+
+### 安全
+
+- WorkBuddy 这一版只做一次性皮肤，不开控制通道、不支持常驻：它的 renderer 是 `app.asar` 里的本地 `file://` 页面，回调控制服务时带 `Origin: null`，放行等于掏空来源校验；控制服务保持只认 `app://-`。`set-persistence --app workbuddy` 明确报错。
+
+### 修复
+
+- 进程识别不再把宿主的脚本子进程当成主进程候选：Electron 应用会拿同一个主可执行文件跑内部脚本（WorkBuddy 真机上 daemon、sidecar、CLI 预热都是 `Electron <脚本路径> …`），此前会被误判成多实例并拒绝接管。现在以第一个参数判身份，位置参数只有子进程才有，主进程要么零参数要么以 `--flag` 开头。
+- 重启续作找回产品身份：分离式重启的续作此前不带 `--app`，WorkBuddy 重启后按 Codex 跑 preflight 必然失败并触发补偿回滚。现在续作从动作文件的 `appPath` 反推产品（动作文件不落产品字段），`workbuddy-apply.command --restart` 全链路真机跑通。
+
+### 已知边界
+
+- WorkBuddy 皮肤在 macOS 真机验证（WorkBuddy 5.3.11，浅色与深色主题均有截图证据）；Windows 侧只写了结构，未在真机验证。
+- WorkBuddy 自身不带可执行的 Node，运行入口需要系统 Node.js 22 或更新版本。
+- 宿主机在换肤操作中途断电或强杀，状态目录可能留下断裂的锁链并报 `LOCK_CHAIN_CORRUPT`；确认没有本工具进程在跑后，删除状态目录下的 `operation.lock*` 文件即可恢复。
+
+### 测试
+
+- 新增 `test/products.test.mjs`：产品档案事实、状态隔离、CDP 启动方式与皮肤 CSS 不变量断言。
+- CLI 层新增 `--app` 闸门用例：未知产品拒绝、WorkBuddy 拒常驻放行只读命令、`HEIGE_SKIN_APP` 回退与显式参数优先级。
+- 进程表解析新增回归用例：同一 Electron 可执行文件跑的脚本子进程不算主进程候选（用 WorkBuddy 真机 ps 快照复刻，token 已置零）；重启续作契约断言现在包含 `appPath` 透传。
+
 ## 5.4.12 - 2026-08-02
 
 ### 修复

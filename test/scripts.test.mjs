@@ -480,6 +480,8 @@ test("a detached restart can run only the exact allowlisted CLI continuation aft
       port: 9341,
     }],
     ["after", {
+      // appPath 随动作传给续作，产品身份由它反推（WorkBuddy 的续作要补 --app）
+      appPath: "/Applications/ChatGPT.app",
       command: "apply",
       cliPath: "/trusted/src/cli.mjs",
       nodePath: "/trusted/node",

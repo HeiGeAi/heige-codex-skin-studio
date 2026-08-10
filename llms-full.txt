@@ -14,6 +14,7 @@
 - macOS 有自动化与日期化真机证据；Windows 有 Windows PowerShell 5.1、PowerShell 7、32 位解析和隔离任务自动化，Microsoft Store/MSIX 真机待验证。
 - 使用系统 Node 时要求 Node.js 22 或更新版本。生产安装不含 npm 运行时依赖；开发依赖仅用于测试与确定性打包。
 - CDP 即使绑定 `127.0.0.1` 仍无认证，本机同权限进程属于威胁边界。未来 Codex Desktop 变化仍可能要求兼容适配。
+- 同一引擎支持给腾讯 CodeBuddy 桌面端（WorkBuddy）换肤：CLI 加 `--app workbuddy`，默认端口 9342，入口是 `scripts/workbuddy-apply.command` 与 `scripts/workbuddy-restore.command`。WorkBuddy 只做一次性皮肤，不支持常驻：其 `file://` renderer 回调控制服务带 `Origin: null`，不进来源白名单。macOS 真机验证（WorkBuddy 5.3.11）；Windows 侧只有结构，待真机验证。
 
 ## 核心页面
 
@@ -79,6 +80,20 @@ Windows 11 版本现已发布：[查看最新 Release](https://github.com/HeiGeA
 - 随机主题：提供持久化的随机主题开关，随机选择主题并尽量避免连续重复。
 
 > Microsoft Store/MSIX 客户端仍需真机验证；若其阻止本机调试端口，自动接管无法完成。
+
+## WorkBuddy（腾讯 CodeBuddy 桌面端）
+
+同一套引擎也能给 WorkBuddy 换肤，走本机回环 CDP（`127.0.0.1:9342`，与 Codex 的 9341 互不干扰），同样不修改 `app.asar`：
+
+```bash
+"<仓库路径>/scripts/workbuddy-apply.command" --restart
+```
+
+应用后 WorkBuddy 顶部出现 🎨 主题中心，内置主题即点即换；还原运行 `scripts/workbuddy-restore.command`。三点实话：
+
+- WorkBuddy 侧只做一次性皮肤，不支持常驻。它的 renderer 是本地 `file://` 页面，回调控制服务时带的来源是 `Origin: null`，放行会削弱控制服务的来源校验，所以这版直接不开控制通道。重启 WorkBuddy 后皮肤消失属预期，重跑一次 apply 即可。
+- 需要本机 Node.js 22 或更新版本（WorkBuddy 自身不带可执行的 Node）。
+- macOS 在 WorkBuddy 5.3.11 真机验证；Windows 侧只写了结构，未在真机验证。
 
 ## 快速开始（macOS）
 

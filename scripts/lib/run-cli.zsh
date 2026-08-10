@@ -69,6 +69,36 @@ validate_app() {
   [[ -f "$app/Contents/MacOS/ChatGPT" ]] || fail "$source 缺少 Codex 主程序：$app"
 }
 
+validate_workbuddy_app() {
+  local app="$1"
+  local source="$2"
+  [[ "$app" == /* ]] || fail "$source 必须是绝对路径：$app"
+  [[ -d "$app" && ! -L "$app" ]] || fail "$source 不存在或不是可信应用目录：$app"
+  # WorkBuddy 是标准 Electron 打包，主程序名就叫 Electron，不是应用名
+  [[ -f "$app/Contents/MacOS/Electron" ]] || fail "$source 缺少 WorkBuddy 主程序：$app"
+}
+
+# WorkBuddy 分支：它只带 node.tar.gz 压缩包，没有能直接执行的内置 Node，
+# 所以不走下面那套「先找宿主内置 node」的逻辑，直接要系统 Node 22+。
+# 校验也换成 WorkBuddy 自己的：拿 ChatGPT 主程序去校 WorkBuddy 必然误报。
+if [[ "${HEIGE_SKIN_PRODUCT:-codex}" == "workbuddy" ]]; then
+  if (( ${+HEIGE_WORKBUDDY_APP} )); then
+    [[ -n "$HEIGE_WORKBUDDY_APP" ]] || fail "HEIGE_WORKBUDDY_APP 不能为空"
+    validate_workbuddy_app "$HEIGE_WORKBUDDY_APP" "HEIGE_WORKBUDDY_APP"
+    export HEIGE_WORKBUDDY_APP
+  fi
+  if (( ${+HEIGE_NODE} )); then
+    [[ -n "$HEIGE_NODE" ]] || fail "HEIGE_NODE 不能为空"
+    validate_node "$HEIGE_NODE" "HEIGE_NODE"
+  else
+    candidate="$(command -v node 2>/dev/null || true)"
+    [[ -n "$candidate" ]] || fail "WorkBuddy 换肤需要系统 Node.js 22 或更高版本（WorkBuddy 自身不带可执行的 Node）" 127
+    [[ "$candidate" == /* ]] || candidate="${candidate:A}"
+    validate_node "$candidate" "系统 Node"
+  fi
+  exec "$REPLY" "$ROOT/src/cli.mjs" "$@"
+fi
+
 if (( ${+HEIGE_CODEX_APP} )); then
   [[ -n "$HEIGE_CODEX_APP" ]] || fail "HEIGE_CODEX_APP 不能为空"
   validate_app "$HEIGE_CODEX_APP" "HEIGE_CODEX_APP"

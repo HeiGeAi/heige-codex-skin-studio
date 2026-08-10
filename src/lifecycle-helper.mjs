@@ -14,6 +14,16 @@ import {
   parseMacPsTreeTable,
   sameProcessIdentity,
 } from "./codex-app.mjs";
+import { DEFAULT_PRODUCT_ID, productCdpLaunchSpec, profileForAppPath } from "./products.mjs";
+
+// 生命周期动作文件里不存产品字段，一律从 appPath 反推，避免动落盘 schema
+function hostProfile(appPath) {
+  return profileForAppPath(appPath, { platform: "darwin" });
+}
+
+function hostExecutable(appPath) {
+  return join(appPath, "Contents", "MacOS", hostProfile(appPath).macExecutableName);
+}
 
 const execFile = promisify(execFileCallback);
 const ACTION_BYTES = 16 * 1024;
@@ -160,9 +170,9 @@ export function validateLifecycleAction(value, { now = () => new Date() } = {}) 
   const identity = value.process === null ? null : processIdentity(value.process);
   const appPath = absolutePath(value.appPath, "appPath");
   if (!appPath.endsWith(".app")) throw new TypeError("appPath 必须指向 macOS 应用包");
-  const expectedExecutable = join(appPath, "Contents", "MacOS", "ChatGPT");
+  const expectedExecutable = hostExecutable(appPath);
   if (identity !== null && identity.executablePath !== expectedExecutable) {
-    throw new TypeError("进程身份不属于已解析的 Codex 应用");
+    throw new TypeError(`进程身份不属于已解析的 ${hostProfile(appPath).label} 应用`);
   }
   if (value.launchMode === "cdp") {
     if (!Number.isInteger(value.port) || value.port < 1024 || value.port > 65535) {
@@ -377,32 +387,39 @@ function run(argv) {
   await run("/usr/bin/osascript", ["-l", "JavaScript", "-e", source, "--", String(target.pid)]);
 }
 
-export async function launchMacosAppExecutable({ appPath, args }, {
+export async function launchMacosAppExecutable({ appPath, args, env = null }, {
   spawnImpl = spawn,
+  baseEnv = process.env,
 } = {}) {
   absolutePath(appPath, "appPath");
-  if (
-    !Array.isArray(args) ||
-    args.some((value) => typeof value !== "string" || value.includes("\0") || /[\r\n]/.test(value))
-  ) {
-    throw new TypeError("Codex 启动参数无效");
+  const invalidValue = (value) => typeof value !== "string" || value.includes("\0") || /[\r\n]/.test(value);
+  if (!Array.isArray(args) || args.some(invalidValue)) {
+    throw new TypeError(`${hostProfile(appPath).label} 启动参数无效`);
+  }
+  // 环境变量式调试开关（WorkBuddy）：键名和值同样按参数标准过一遍，不许夹换行和空字节
+  if (env !== null && (
+    !isRecord(env) ||
+    Object.entries(env).some(([key, value]) => invalidValue(key) || invalidValue(value) || !/^[A-Z][A-Z0-9_]*$/.test(key))
+  )) {
+    throw new TypeError(`${hostProfile(appPath).label} 启动环境变量无效`);
   }
   if (typeof spawnImpl !== "function") throw new TypeError("spawnImpl 必须是函数");
-  const executablePath = join(appPath, "Contents", "MacOS", "ChatGPT");
+  const executablePath = hostExecutable(appPath);
   const child = spawnImpl(executablePath, args, {
     detached: true,
     shell: false,
     stdio: "ignore",
+    ...(env === null ? {} : { env: { ...baseEnv, ...env } }),
   });
   if (!child || typeof child.once !== "function" || typeof child.unref !== "function") {
-    throw new Error("无法创建 Codex 启动进程");
+    throw new Error(`无法创建 ${hostProfile(appPath).label} 启动进程`);
   }
   await new Promise((resolve, reject) => {
     child.once("spawn", resolve);
     child.once("error", reject);
   });
   if (!Number.isSafeInteger(child.pid) || child.pid <= 0) {
-    throw new Error("Codex 启动进程没有有效 PID");
+    throw new Error(`${hostProfile(appPath).label} 启动进程没有有效 PID`);
   }
   child.unref();
   return { pid: child.pid };
@@ -506,16 +523,19 @@ export async function readMacCdpProcess({ appPath, port } = {}, {
   if (ownerPids.some((pid) => !Number.isSafeInteger(pid))) {
     throw new Error(`CDP 端口 ${port} 的监听进程无效`);
   }
-  const executablePath = join(appPath, "Contents", "MacOS", "ChatGPT");
-  const processes = await listProcesses({ app: { executablePath }, exec: run });
-  if (!Array.isArray(processes)) throw new Error("Codex 进程列表无效");
+  const profile = hostProfile(appPath);
+  const executablePath = hostExecutable(appPath);
+  const processes = await listProcesses({ app: { executablePath }, exec: run, product: profile.id });
+  if (!Array.isArray(processes)) throw new Error(`${profile.label} 进程列表无效`);
   const candidates = processes.filter((candidate) => (
     candidate?.executablePath === executablePath
-    && candidate.cdpPort === port
+    // 端口在命令行里看得见就必须对上；看不见的产品（WorkBuddy 走环境变量）
+    // 由 lsof 的端口归属认人，此时 cdpPort 只能是 null，不接受任何其他值
+    && (profile.cdpPortVisibleInArgs ? candidate.cdpPort === port : candidate.cdpPort === null)
     && ownerPids.includes(candidate.pid)
   ));
   if (candidates.length !== 1) {
-    throw new Error(`CDP 端口 ${port} 的 Codex 根进程不唯一`);
+    throw new Error(`CDP 端口 ${port} 的 ${hostProfile(appPath).label} 根进程不唯一`);
   }
   const expected = processIdentity({
     pid: candidates[0].pid,
@@ -525,7 +545,7 @@ export async function readMacCdpProcess({ appPath, port } = {}, {
   await verifyMacProcessOwnerTree({ rootProcess: expected, ownerPids, run });
   const observed = await identityReader(expected.pid, expected);
   if (!sameProcessIdentity(observed, expected)) {
-    throw new Error(`CDP 端口 ${port} 的 Codex 根进程身份已变化`);
+    throw new Error(`CDP 端口 ${port} 的 ${hostProfile(appPath).label} 根进程身份已变化`);
   }
   return processIdentity({
     pid: observed.pid,
@@ -536,7 +556,8 @@ export async function readMacCdpProcess({ appPath, port } = {}, {
 
 async function defaultReadAppProcesses({ appPath }) {
   return listCodexProcesses({
-    app: { executablePath: join(appPath, "Contents", "MacOS", "ChatGPT") },
+    app: { executablePath: hostExecutable(appPath) },
+    product: hostProfile(appPath).id,
   });
 }
 
@@ -555,9 +576,9 @@ async function restoreContinuationPrestate(action, {
     appPath: action.appPath,
     port: action.port,
   }));
-  const expectedExecutable = join(action.appPath, "Contents", "MacOS", "ChatGPT");
+  const expectedExecutable = hostExecutable(action.appPath);
   if (launched.executablePath !== expectedExecutable) {
-    throw new Error("新启动的 CDP 进程不属于已解析的 Codex 应用");
+    throw new Error(`新启动的 CDP 进程不属于已解析的 ${hostProfile(action.appPath).label} 应用`);
   }
   const beforeQuit = await readProcessIdentity(launched.pid, launched);
   if (!sameProcessIdentity(beforeQuit, launched)) {
@@ -615,9 +636,13 @@ async function defaultRunAfterLaunch(input) {
   if (realNode !== currentNode || realCli !== currentCli) {
     throw new Error("afterLaunch 运行时或 CLI 不属于当前稳定安装");
   }
+  // 产品从 appPath 反推（动作文件不存产品字段）。不带 --app 的话续作按 Codex
+  // 跑 preflight，WorkBuddy 重启后的 apply 会因「端口不属于目标 Codex」失败并触发补偿回滚。
+  const productId = hostProfile(input.appPath).id;
   await execFile(input.nodePath, [
     input.cliPath,
     input.command,
+    ...(productId === DEFAULT_PRODUCT_ID ? [] : ["--app", productId]),
     "--theme",
     input.themeId,
     "--port",
@@ -654,7 +679,7 @@ async function executeLifecycleActionCore(action, deps, progress) {
   if (action.process !== null) {
     const observed = await readProcessIdentity(action.process.pid, action.process);
     if (!sameProcessIdentity(observed, action.process)) {
-      throw new Error("记录的 Codex 进程身份已变化，拒绝退出或启动");
+      throw new Error(`记录的 ${hostProfile(action.appPath).label} 进程身份已变化，拒绝退出或启动`);
     }
     progress.stage = "quit-requested";
     await requestQuit({ appPath: action.appPath, process: action.process });
@@ -668,17 +693,23 @@ async function executeLifecycleActionCore(action, deps, progress) {
       await wait(waitIntervalMs);
     }
     if (!disappeared) {
-      throw new Error("Codex 未正常退出，拒绝强制终止或启动第二个实例");
+      throw new Error(`${hostProfile(action.appPath).label} 未正常退出，拒绝强制终止或启动第二个实例`);
     }
     progress.oldProcessExited = true;
     progress.stage = "old-process-exited";
   }
 
-  const args = action.launchMode === "cdp"
-    ? ["--remote-debugging-address=127.0.0.1", `--remote-debugging-port=${action.port}`]
-    : [];
+  // Codex 走命令行参数开调试端口，WorkBuddy 走环境变量，具体由产品档案决定
+  const launchSpec = action.launchMode === "cdp"
+    ? productCdpLaunchSpec(hostProfile(action.appPath).id, action.port)
+    : { args: [], env: {} };
   progress.stage = "launch-starting";
-  await launchApp({ appPath: action.appPath, args });
+  await launchApp({
+    appPath: action.appPath,
+    args: launchSpec.args,
+    // 没有环境变量要设就整个字段不带，Codex 侧的启动调用保持原样
+    ...(Object.keys(launchSpec.env).length > 0 ? { env: launchSpec.env } : {}),
+  });
   progress.launchStarted = true;
   progress.stage = "launch-started";
   const result = {
@@ -694,9 +725,9 @@ async function executeLifecycleActionCore(action, deps, progress) {
       appPath: action.appPath,
       port: action.port,
     }));
-    const expectedExecutable = join(action.appPath, "Contents", "MacOS", "ChatGPT");
+    const expectedExecutable = hostExecutable(action.appPath);
     if (launched.executablePath !== expectedExecutable) {
-      throw new Error("新启动的 CDP 进程不属于已解析的 Codex 应用");
+      throw new Error(`新启动的 CDP 进程不属于已解析的 ${hostProfile(action.appPath).label} 应用`);
     }
     progress.processVerified = true;
     progress.stage = "process-verified";
@@ -705,7 +736,8 @@ async function executeLifecycleActionCore(action, deps, progress) {
     try {
       progress.continuationStarted = true;
       progress.stage = "renderer-applying";
-      await runAfterLaunch(action.afterLaunch);
+      // appPath 随动作传入而非落盘在 afterLaunch 里：产品身份由它反推
+      await runAfterLaunch({ ...action.afterLaunch, appPath: action.appPath });
       progress.stage = "renderer-applied";
     } catch (continuationError) {
       try {

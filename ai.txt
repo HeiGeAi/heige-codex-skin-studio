@@ -9,5 +9,6 @@
 # Evidence: macOS dated live evidence is separate from automated Windows evidence; Microsoft Store/MSIX live validation is pending.
 # Dependencies: No npm production runtime dependencies; pinned development dependencies support tests and reproducible packaging.
 # Compatibility: Future Codex Desktop changes may require startup, target-classification, or selector adaptation.
+# WorkBuddy: The same engine reskins Tencent CodeBuddy Desktop via --app workbuddy on port 9342; session-only by design (its file:// renderer would send Origin null to the control server, so persistence stays disabled); macOS verified live, Windows pending live validation.
 # License: MIT covers software code only. See ASSET_PROVENANCE.md and NOTICE.md for artwork and trademark boundaries.
 # Contact: https://github.com/HeiGeAi

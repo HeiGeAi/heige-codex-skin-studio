@@ -17,7 +17,7 @@
 
 | 项目 | 参数 |
 |---|---|
-| 适用应用 | OpenAI Codex Desktop（ChatGPT 桌面端） |
+| 适用应用 | OpenAI Codex Desktop（ChatGPT 桌面端）；腾讯 CodeBuddy 桌面端（WorkBuddy）一次性换肤 |
 | 支持平台 | macOS 自动化与真机验证；Windows 跨 PowerShell 自动化，Microsoft Store/MSIX 真机待验证 |
 | 注入方式 | Chrome DevTools Protocol，调试端口仅绑定本机回环 `127.0.0.1:9341` |
 | 内置主题 | 12 个（1 个高精度 Miku 488137 + 10 个游戏轻量主题 + 1 个彩蛋「大佬 · 点烟」） |
@@ -25,7 +25,7 @@
 | 开发依赖 | `happy-dom` 与 `yazl` 均锁定精确版本，只用于测试与确定性打包 |
 | 自动化验证 | Node、macOS、Windows、安装包与文档门禁，不在文档中写死易过期的测试数量 |
 | 协议 | 代码 MIT，角色素材权利归各自权利人 |
-| 最近更新 | 2026-07-18 |
+| 最近更新 | 2026-08-11 |
 
 ## 版本与更新检查
 
@@ -116,6 +116,35 @@ Windows 入口位于 `scripts\windows`。安装只写当前用户目录，并创
 
 传统安装与任务计划程序行为由 Windows PowerShell 5.1、PowerShell 7、32 位解析和隔离的 GUID 任务测试覆盖。Microsoft Store/MSIX 的包发现与激活代码已实现，但真实 Store 应用能否完整接收 CDP 参数仍标记为真机待验证，不能把自动化结果冒充真机结论。
 
+## WorkBuddy（腾讯 CodeBuddy 桌面端）
+
+同一套注入引擎支持给 WorkBuddy 换肤。所有跟宿主应用绑定的事实收在 `src/products.mjs` 的产品档案层：
+
+| 项目 | Codex | WorkBuddy |
+|---|---|---|
+| 调试端口 | `127.0.0.1:9341` | `127.0.0.1:9342` |
+| 端口开法 | 命令行参数 | 环境变量 `WORKBUDDY_REMOTE_DEBUGGING_PORT`，`ps` 里看不到端口，进程身份判定走端口归属 |
+| renderer 来源 | `app://-` | `file://`，跨源请求带 `Origin: null` |
+| 控制通道与常驻 | 支持 | 不支持，原因见下 |
+| 状态目录 | `HeiGeCodexSkinStudio` | `HeiGeCodexSkinStudio-workbuddy`，锁与主题库都按产品隔离 |
+| 真机验证 | macOS 与 Windows 传统安装 | macOS（WorkBuddy 5.3.11）；Windows 只有结构，未在真机验证 |
+
+日常入口：
+
+```bash
+"<仓库路径>/scripts/workbuddy-apply.command" --restart          # 先安全退出 WorkBuddy，再以调试模式拉起并应用
+"<仓库路径>/scripts/workbuddy-apply.command" genshin-night      # 应用指定主题
+"<仓库路径>/scripts/workbuddy-restore.command"                  # 还原原生界面
+```
+
+`workbuddy-enable-skin.command` 是 `workbuddy-apply.command` 的兼容名，只应用当前会话。Node CLI 的等价写法是任意命令加 `--app workbuddy`，环境变量 `HEIGE_SKIN_APP=workbuddy` 是回退，显式参数优先。
+
+为什么不支持常驻：常驻开关由 renderer 回调本机控制服务完成，控制服务的来源校验只认 `app://-`。WorkBuddy 的 renderer 是 `app.asar` 里的本地 `file://` 页面，请求带的是 `Origin: null`，放行它等于掏空 CSRF 闸门，所以这一版明确拒绝 `set-persistence --app workbuddy`，宁可少个功能，不动安全校验。重启 WorkBuddy 后皮肤消失属预期，重跑一次 apply 即可。
+
+皮肤 CSS 有独立档案 `src/skin-css-workbuddy.mjs`，同时覆盖 WorkBuddy 的三层设计令牌：`--wb-*` 结构层、`--cb-*` 语义层、`--cb-vscode-*` 桥接层。令牌同时声明在 `:root` 和 `body` 上，因为宿主主题文件用 `:root, body[data-vscode-theme-name="IDE Light"]` 选择器把整套令牌在 body 又声明了一遍，只写 `:root` 会被盖掉。选择器只挂语义类名和稳定 data 属性，不使用会随构建变化的 CSS Module 哈希类名。品牌色、状态色（错误、成功、警告）和自洽的深色配对（tooltip、遮罩）保持原样不动。
+
+WorkBuddy 自身不带可执行的 Node，运行入口需要系统 Node.js 22 或更新版本。
+
 ## 交给 Codex 使用
 
 把 `output/heige-codex-skin-studio.skill` 交给 Codex，可以直接说：
@@ -171,6 +200,8 @@ node src/cli.mjs resume
 node src/cli.mjs restore
 node src/cli.mjs doctor
 ```
+
+所有命令支持 `--app codex|workbuddy` 选择宿主产品，缺省是 codex；`set-persistence` 在 `--app workbuddy` 下会明确报错，见上方 WorkBuddy 一节。
 
 ## 常见问题
 

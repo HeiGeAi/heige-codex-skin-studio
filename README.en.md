@@ -56,6 +56,10 @@ Applying a skin quits Codex normally and relaunches it with a local debug port, 
 
 Ready-to-copy image prompts live in the [theme prompt gallery](docs/theme-prompts.md) (Chinese). Share your results in the [showcase discussions](https://github.com/HeiGeAi/heige-codex-skin-studio/discussions).
 
+## WorkBuddy (Tencent CodeBuddy Desktop)
+
+The same engine reskins WorkBuddy through loopback CDP on `127.0.0.1:9342` (separate from Codex's 9341). Run `scripts/workbuddy-apply.command` (add `--restart` to relaunch into debug mode), switch themes in the injected 🎨 theme center, and run `scripts/workbuddy-restore.command` to return to the native UI. WorkBuddy support is session-only by design: its `file://` renderer would send `Origin: null` to the local control server, so persistence stays disabled instead of weakening the CSRF origin check. Requires system Node.js 22+. Verified live on macOS (WorkBuddy 5.3.11); the Windows path is implemented but pending live-machine validation.
+
 ## Honest notes
 
 - Loopback CDP is unauthenticated; local same-user processes remain inside the threat boundary. See [SECURITY.md](SECURITY.md).

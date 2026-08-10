@@ -23,6 +23,11 @@ export const CSS_SENTINELS = {
   text: "#0a0b0c",
 };
 
+// 缺省文案 = Codex 原字。任何没显式传的调用路径，菜单文案跟改造前一字不差。
+const DEFAULT_APPEARANCE_HELP =
+  "字体颜色显示不对？这通常是 Codex 本体的外观配色不匹配。点击左下角头像👉设置👉外观👉选择 浅色/深色 主题✅即可。";
+const DEFAULT_NATIVE_LABEL = "原生 Codex";
+
 function normalizeControl(control) {
   if (control === undefined || control === null) return null;
   if (typeof control !== "object" || Array.isArray(control)) {
@@ -77,6 +82,8 @@ export function buildSkinMenuScript({
   cssTemplate = "",
   preferStored = false,
   control = null,
+  appearanceHelp = DEFAULT_APPEARANCE_HELP,
+  nativeLabel = DEFAULT_NATIVE_LABEL,
 }) {
   if (!Array.isArray(entries) || entries.length === 0) {
     throw new Error("皮肤菜单至少需要一个主题");
@@ -130,6 +137,13 @@ export function buildSkinMenuScript({
     styleId,
     menuId,
     currentVersion,
+    // 宿主相关的两句文案由产品档案给，默认值保持 Codex 原字
+    appearanceHelp: typeof appearanceHelp === "string" && appearanceHelp
+      ? appearanceHelp
+      : DEFAULT_APPEARANCE_HELP,
+    nativeLabel: typeof nativeLabel === "string" && nativeLabel
+      ? nativeLabel
+      : DEFAULT_NATIVE_LABEL,
     activeId,
     themes,
     cssTemplate,
@@ -382,7 +396,7 @@ export function buildSkinMenuScript({
   appearanceHelp.dataset.heigeRole = "appearance-help";
   appearanceHelp.setAttribute("role", "note");
   appearanceHelp.setAttribute("aria-label", "字体颜色显示异常处理");
-  appearanceHelp.textContent = "字体颜色显示不对？这通常是 Codex 本体的外观配色不匹配。点击左下角头像👉设置👉外观👉选择 浅色/深色 主题✅即可。";
+  appearanceHelp.textContent = data.appearanceHelp;
   const quickActions = document.createElement("section");
   quickActions.dataset.heigeRole = "quick-actions";
   const customSection = document.createElement("section");
@@ -995,7 +1009,7 @@ export function buildSkinMenuScript({
       : "linear-gradient(90deg,rgba(7,28,52,.84),rgba(7,28,52,.18)),url("
         + JSON.stringify(preview) + ")";
     heroName.textContent = theme?.name
-      ?? (custom ? custom?.name ?? "我的主题" : "原生 Codex");
+      ?? (custom ? custom?.name ?? "我的主题" : data.nativeLabel);
     for (const [id, card] of rows) {
       const selected = id === themeId || (themeId === data.nativeSel && id === null);
       card.setAttribute("aria-pressed", String(selected));

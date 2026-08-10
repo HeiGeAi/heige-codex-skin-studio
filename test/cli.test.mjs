@@ -364,6 +364,44 @@ test("rejects unknown commands and missing options", async () => {
   await assert.rejects(() => runCli(["launch"], deps()), /未知命令/);
 });
 
+test("--app 闸门：未知产品拒绝，WorkBuddy 拒常驻但放行只读命令", async () => {
+  await assert.rejects(() => runCli(["list", "--app", "cursor"], deps()), /--app 只能是 codex 或 workbuddy/);
+  // 常驻开关走 renderer 回调控制服务，WorkBuddy 的 file:// renderer 发的是 Origin: null，
+  // 放行等于掏空 CSRF 校验，所以两个方向的 set-persistence 都必须明确报错而不是悄悄降级
+  for (const flag of ["true", "false"]) {
+    await assert.rejects(
+      () => runCli(["set-persistence", flag, "--app", "workbuddy"], deps()),
+      /WorkBuddy 这一版只支持一次性皮肤（apply \/ enable-skin \/ restore），暂不支持常驻/,
+    );
+  }
+  // 只读命令不碰宿主进程，--app workbuddy 必须照常工作
+  assert.deepEqual(await runCli(["list", "--app", "workbuddy"], deps()), [
+    { id: "miku-488137", name: "Miku", path: "/bundle/themes/miku-488137" },
+  ]);
+});
+
+test("HEIGE_SKIN_APP 环境变量是 --app 的回退，命令行显式值优先", async () => {
+  const saved = process.env.HEIGE_SKIN_APP;
+  try {
+    process.env.HEIGE_SKIN_APP = "workbuddy";
+    await assert.rejects(
+      () => runCli(["set-persistence", "false"], deps()),
+      /暂不支持常驻/,
+    );
+    // 显式 --app codex 盖过环境变量，Codex 的常驻路径不受影响
+    const fx = lifecycleDeps();
+    assert.deepEqual(await runCli(["set-persistence", "false", "--app", "codex"], fx.deps), {
+      persistenceEnabled: false,
+      revision: 6,
+    });
+    process.env.HEIGE_SKIN_APP = "cursor";
+    await assert.rejects(() => runCli(["list"], deps()), /--app 只能是/);
+  } finally {
+    if (saved === undefined) delete process.env.HEIGE_SKIN_APP;
+    else process.env.HEIGE_SKIN_APP = saved;
+  }
+});
+
 test("running through a bin symlink still executes instead of silently no-op", async () => {
   const { execFile } = await import("node:child_process");
   const { promisify } = await import("node:util");

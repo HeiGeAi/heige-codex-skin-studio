@@ -432,6 +432,9 @@ function normalizedDependencies(input) {
       "verifyBackgroundHandshake",
     ),
     backgroundProcess: input.backgroundProcess === true,
+    // 宿主 renderer 够不到本机控制服务时传 false：不起服务，菜单退回纯本地切换。
+    // 缺省 true，任何没显式传的老路径行为不变。
+    supportsControlChannel: input.supportsControlChannel !== false,
     allowInternalPersistenceEnable: input.allowInternalPersistenceEnable === true,
     newTransitionNonce: input.newTransitionNonce ?? randomUUID,
     fault: input.fault ?? (async () => {}),
@@ -770,6 +773,8 @@ export function createSkinController(input) {
   let processRendererRequest;
 
   const ensureServer = async (state) => {
+    // 不支持控制通道的宿主：不起服务，control 传 null，菜单自动降级成本地切换
+    if (!deps.supportsControlChannel) return { started: false, control: null };
     const started = server === null;
     if (server === null) {
       server = await deps.startControlServer({

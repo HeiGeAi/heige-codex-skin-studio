@@ -2,9 +2,11 @@ import { extname } from "node:path";
 
 import { CdpSession, fetchRendererTargets, waitForRendererTargets } from "./cdp-client.mjs";
 import { NATIVE_THEME_ID } from "./constants.mjs";
+import { productProfile } from "./products.mjs";
 import { buildSkinCss } from "./skin-css.mjs";
+import { buildWorkBuddySkinCss } from "./skin-css-workbuddy.mjs";
 import { buildSkinMenuScript, CSS_SENTINELS } from "./skin-menu.mjs";
-import { classifyCodexTargets } from "./target-classifier.mjs";
+import { classifyTargetsFor } from "./target-classifier.mjs";
 import { validateImageMetadata } from "./image-metadata.mjs";
 import { readBoundedFile, RESOURCE_LIMITS, sumWithinLimit } from "./resource-limits.mjs";
 
@@ -16,17 +18,37 @@ const THEME_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const STABLE_VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
 const RELEASE_URL =
   /^https:\/\/github\.com\/HeiGeAi\/heige-codex-skin-studio\/releases\/tag\/v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
-async function waitForMainTargets(wait, port, { timeoutMs = 20_000, pollMs = 500 } = {}) {
+// 每个宿主产品一套 renderer 识别规则和皮肤 CSS 档案，注入层本身不认产品
+const CSS_BUILDERS = new Map([
+  ["codex", buildSkinCss],
+  ["workbuddy", buildWorkBuddySkinCss],
+]);
+
+function skinProfile(product) {
+  const profile = productProfile(product);
+  const buildCss = CSS_BUILDERS.get(profile.id);
+  if (!buildCss) throw new Error(`产品 ${profile.id} 缺少皮肤 CSS 档案`);
+  return {
+    id: profile.id,
+    label: profile.label,
+    menuAppearanceHelp: profile.menuAppearanceHelp,
+    menuNativeLabel: profile.menuNativeLabel,
+    classify: (targets) => classifyTargetsFor(profile.id, targets),
+    buildCss,
+  };
+}
+
+async function waitForMainTargets(wait, port, profile, { timeoutMs = 20_000, pollMs = 500 } = {}) {
   const deadline = Date.now() + timeoutMs;
   while (true) {
     const remainingMs = Math.max(1, deadline - Date.now());
-    const targets = classifyCodexTargets(await wait(port, { timeoutMs: remainingMs }));
+    const targets = profile.classify(await wait(port, { timeoutMs: remainingMs }));
     if (targets.some(({ kind }) => kind === "main")) return targets;
     if (Date.now() + pollMs >= deadline) {
       throw targetError(
         "NO_MAIN_RENDERER",
-        "等不到经过严格识别的 Codex 主窗口 renderer",
-        resultsFor(targets, { succeeded: [], failed: [] }),
+        `等不到经过严格识别的 ${profile.label} 主窗口 renderer`,
+        resultsFor(targets, { succeeded: [], failed: [] }, new Set(["main"]), profile.label),
       );
     }
     await new Promise((resolve) => setTimeout(resolve, pollMs));
@@ -92,21 +114,21 @@ async function evaluateTargets(targets, expression, Session, { bringToFront = tr
   return { succeeded, failed };
 }
 
-function skippedTarget(target) {
+function skippedTarget(target, label = "Codex") {
   return safeTarget(target, {
     reason: target.kind === "overlay"
       ? "该操作不会把宠物悬浮层当作主窗口"
-      : "页面 URL 不属于已审核的 Codex renderer",
+      : `页面 URL 不属于已审核的 ${label} renderer`,
   });
 }
 
-function resultsFor(classified, { succeeded, failed }, touchedKinds = new Set(["main"])) {
+function resultsFor(classified, { succeeded, failed }, touchedKinds = new Set(["main"]), label = "Codex") {
   return {
     succeeded,
     failed,
     skipped: classified
       .filter(({ kind }) => !touchedKinds.has(kind))
-      .map(skippedTarget),
+      .map((target) => skippedTarget(target, label)),
   };
 }
 
@@ -167,7 +189,7 @@ async function readThemeResources(loadedTheme) {
   return { loadedTheme, hero, logo, polaroid, resourceBytes };
 }
 
-function themeEntry(resources) {
+function themeEntry(resources, profile) {
   const { loadedTheme, hero, logo, polaroid } = resources;
   return {
     id: loadedTheme.manifest.id,
@@ -179,7 +201,7 @@ function themeEntry(resources) {
     thumbnailFocus: { ...loadedTheme.manifest.thumbnailFocus },
     thumbnailZoom: loadedTheme.manifest.thumbnailZoom,
     colors: { ...loadedTheme.manifest.colors },
-    css: buildSkinCss({
+    css: profile.buildCss({
       theme: loadedTheme.manifest,
       heroDataUrl: dataUrl(hero),
       logoDataUrl: dataUrl(logo),
@@ -197,8 +219,10 @@ export async function applySkin({
   preferStored = false,
   control = null,
   targetIds = null,
+  product = undefined,
   deps = {},
 }) {
+  const profile = skinProfile(product);
   const targetAllowlist = normalizeTargetIds(targetIds);
   const wait = deps.waitForRendererTargets ?? waitForRendererTargets;
   const Session = deps.Session ?? CdpSession;
@@ -210,10 +234,10 @@ export async function applySkin({
     menuBytes = sumWithinLimit([menuBytes, resources.resourceBytes], RESOURCE_LIMITS.menuBytes, "menu");
     resourceSets.push(resources);
   }
-  const entries = resourceSets.map(themeEntry);
+  const entries = resourceSets.map((resources) => themeEntry(resources, profile));
   const themeId = activeId === undefined ? loadedTheme.manifest.id : activeId;
   // 自定义上传主题的客户端 CSS 模板：哨兵值占位，页面内替换，和内置主题同一套模板
-  const cssTemplate = buildSkinCss({
+  const cssTemplate = profile.buildCss({
     theme: {
       id: CSS_SENTINELS.id,
       name: "custom",
@@ -236,8 +260,10 @@ export async function applySkin({
     cssTemplate,
     preferStored,
     control,
+    appearanceHelp: profile.menuAppearanceHelp,
+    nativeLabel: profile.menuNativeLabel,
   });
-  const classified = await waitForMainTargets(wait, port, {
+  const classified = await waitForMainTargets(wait, port, profile, {
     timeoutMs: deps.waitTimeoutMs ?? 20_000,
     pollMs: deps.pollMs ?? 500,
   });
@@ -251,21 +277,21 @@ export async function applySkin({
       .filter((target) => !targetAllowlist.has(safeId(target)))
       .map((target) => safeTarget(target, { reason: "未被本次目标 allowlist 选中" }));
   if (targetAllowlist !== null && targets.length === 0) {
-    const results = resultsFor(classified, { succeeded: [], failed: [] });
+    const results = resultsFor(classified, { succeeded: [], failed: [] }, new Set(["main"]), profile.label);
     results.skipped.push(...unselected);
     throw targetError(
       "NO_SELECTED_MAIN_RENDERER",
-      "未发现 targetIds 选中的 Codex 主窗口 renderer",
+      `未发现 targetIds 选中的 ${profile.label} 主窗口 renderer`,
       results,
     );
   }
   const evaluated = await evaluateTargets(targets, expression, Session);
-  const results = resultsFor(classified, evaluated);
+  const results = resultsFor(classified, evaluated, new Set(["main"]), profile.label);
   results.skipped.push(...unselected);
   if (evaluated.succeeded.length === 0) {
     throw targetError(
       "ALL_MAIN_TARGETS_FAILED",
-      `全部 ${targets.length} 个 Codex 主窗口注入失败`,
+      `全部 ${targets.length} 个 ${profile.label} 主窗口注入失败`,
       results,
     );
   }
@@ -279,7 +305,8 @@ export async function applySkin({
   };
 }
 
-export async function removeSkin({ port, deps = {} }) {
+export async function removeSkin({ port, product = undefined, deps = {} }) {
+  const profile = skinProfile(product);
   const fetchTargets = deps.fetchRendererTargets ?? fetchRendererTargets;
   const Session = deps.Session ?? CdpSession;
   const expression = `(() => {
@@ -292,7 +319,7 @@ export async function removeSkin({ port, deps = {} }) {
     try { delete window.__heigeCodexSkinRuntime; } catch (error) { window.__heigeCodexSkinRuntime = undefined; }
     return true;
   })()`;
-  const classified = classifyCodexTargets(await fetchTargets(port));
+  const classified = profile.classify(await fetchTargets(port));
   const mainTargets = classified.filter(({ kind }) => kind === "main");
   const touchedKinds = new Set(["main", "overlay"]);
   const evaluated = await evaluateTargets(
@@ -300,11 +327,11 @@ export async function removeSkin({ port, deps = {} }) {
     expression,
     Session,
   );
-  const results = resultsFor(classified, evaluated, touchedKinds);
+  const results = resultsFor(classified, evaluated, touchedKinds, profile.label);
   if (mainTargets.length === 0) {
     throw targetError(
       "NO_MAIN_RENDERER",
-      "未发现经过严格识别的 Codex 主窗口 renderer",
+      `未发现经过严格识别的 ${profile.label} 主窗口 renderer`,
       results,
     );
   }
@@ -314,7 +341,7 @@ export async function removeSkin({ port, deps = {} }) {
   if (succeededMainIds.size === 0) {
     throw targetError(
       "ALL_MAIN_TARGETS_FAILED",
-      `全部 ${mainTargets.length} 个 Codex 主窗口清理失败`,
+      `全部 ${mainTargets.length} 个 ${profile.label} 主窗口清理失败`,
       results,
     );
   }
@@ -325,10 +352,11 @@ export async function removeSkin({ port, deps = {} }) {
   };
 }
 
-export async function skinStatus({ port, includeControlRequest = false, deps = {} }) {
+export async function skinStatus({ port, includeControlRequest = false, product = undefined, deps = {} }) {
   if (typeof includeControlRequest !== "boolean") {
     throw new TypeError("includeControlRequest 必须是布尔值");
   }
+  const profile = skinProfile(product);
   const fetchTargets = deps.fetchRendererTargets ?? fetchRendererTargets;
   const Session = deps.Session ?? CdpSession;
   const expression = `(() => {
@@ -466,21 +494,21 @@ export async function skinStatus({ port, includeControlRequest = false, deps = {
       ...(includeControlRequest ? { controlRequest } : {})
     };
   })()`;
-  const classified = classifyCodexTargets(await fetchTargets(port));
+  const classified = profile.classify(await fetchTargets(port));
   const targets = classified.filter(({ kind }) => kind === "main");
   if (targets.length === 0) {
     throw targetError(
       "NO_MAIN_RENDERER",
-      "未发现经过严格识别的 Codex 主窗口 renderer",
-      resultsFor(classified, { succeeded: [], failed: [] }),
+      `未发现经过严格识别的 ${profile.label} 主窗口 renderer`,
+      resultsFor(classified, { succeeded: [], failed: [] }, new Set(["main"]), profile.label),
     );
   }
   const evaluated = await evaluateTargets(targets, expression, Session, { bringToFront: false });
-  const results = resultsFor(classified, evaluated);
+  const results = resultsFor(classified, evaluated, new Set(["main"]), profile.label);
   if (evaluated.succeeded.length === 0) {
     throw targetError(
       "ALL_MAIN_TARGETS_FAILED",
-      `全部 ${targets.length} 个 Codex 主窗口状态读取失败`,
+      `全部 ${targets.length} 个 ${profile.label} 主窗口状态读取失败`,
       results,
     );
   }
@@ -542,8 +570,10 @@ export async function deliverUpdateCheckResult({
   generation,
   requestId,
   result,
+  product = undefined,
   deps = {},
 }) {
+  const profile = skinProfile(product);
   const payload = normalizedUpdateDelivery({ generation, requestId, result });
   const fetchTargets = deps.fetchRendererTargets ?? fetchRendererTargets;
   const Session = deps.Session ?? CdpSession;
@@ -556,17 +586,17 @@ export async function deliverUpdateCheckResult({
       return false;
     }
   })()`;
-  const classified = classifyCodexTargets(await fetchTargets(port));
+  const classified = profile.classify(await fetchTargets(port));
   const targets = classified.filter(({ kind }) => kind === "main");
   if (targets.length === 0) {
     throw targetError(
       "NO_MAIN_RENDERER",
-      "未发现经过严格识别的 Codex 主窗口 renderer",
-      resultsFor(classified, { succeeded: [], failed: [] }),
+      `未发现经过严格识别的 ${profile.label} 主窗口 renderer`,
+      resultsFor(classified, { succeeded: [], failed: [] }, new Set(["main"]), profile.label),
     );
   }
   const evaluated = await evaluateTargets(targets, expression, Session);
-  const results = resultsFor(classified, evaluated);
+  const results = resultsFor(classified, evaluated, new Set(["main"]), profile.label);
   const delivered = evaluated.succeeded.filter(({ value }) => value === true).length;
   if (delivered === 0) {
     throw targetError(
@@ -616,8 +646,10 @@ export async function deliverThemeSelectionResult({
   themeId,
   revision,
   persistenceEnabled,
+  product = undefined,
   deps = {},
 }) {
+  const profile = skinProfile(product);
   const payload = normalizedThemeSelectionDelivery({
     requestId,
     themeId,
@@ -635,17 +667,17 @@ export async function deliverThemeSelectionResult({
       return false;
     }
   })()`;
-  const classified = classifyCodexTargets(await fetchTargets(port));
+  const classified = profile.classify(await fetchTargets(port));
   const targets = classified.filter(({ kind }) => kind === "main");
   if (targets.length === 0) {
     throw targetError(
       "NO_MAIN_RENDERER",
-      "未发现经过严格识别的 Codex 主窗口 renderer",
-      resultsFor(classified, { succeeded: [], failed: [] }),
+      `未发现经过严格识别的 ${profile.label} 主窗口 renderer`,
+      resultsFor(classified, { succeeded: [], failed: [] }, new Set(["main"]), profile.label),
     );
   }
   const evaluated = await evaluateTargets(targets, expression, Session);
-  const results = resultsFor(classified, evaluated);
+  const results = resultsFor(classified, evaluated, new Set(["main"]), profile.label);
   const delivered = evaluated.succeeded.filter(({ value }) => value === true).length;
   if (delivered === 0) {
     throw targetError(

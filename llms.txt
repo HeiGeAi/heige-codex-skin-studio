@@ -14,6 +14,7 @@
 - macOS 有自动化与日期化真机证据；Windows 有 Windows PowerShell 5.1、PowerShell 7、32 位解析和隔离任务自动化，Microsoft Store/MSIX 真机待验证。
 - 使用系统 Node 时要求 Node.js 22 或更新版本。生产安装不含 npm 运行时依赖；开发依赖仅用于测试与确定性打包。
 - CDP 即使绑定 `127.0.0.1` 仍无认证，本机同权限进程属于威胁边界。未来 Codex Desktop 变化仍可能要求兼容适配。
+- 同一引擎支持给腾讯 CodeBuddy 桌面端（WorkBuddy）换肤：CLI 加 `--app workbuddy`，默认端口 9342，入口是 `scripts/workbuddy-apply.command` 与 `scripts/workbuddy-restore.command`。WorkBuddy 只做一次性皮肤，不支持常驻：其 `file://` renderer 回调控制服务带 `Origin: null`，不进来源白名单。macOS 真机验证（WorkBuddy 5.3.11）；Windows 侧只有结构，待真机验证。
 
 ## 核心页面
 

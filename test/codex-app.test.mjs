@@ -198,6 +198,43 @@ test("ps lstart parser accepts Chinese locale month/day merge and English paddin
   assert.equal(rows[0].cdpPort, 9341);
 });
 
+test("同一 Electron 可执行文件跑的脚本子进程不算主进程候选", () => {
+  // WorkBuddy 真机进程表：主进程零参数，daemon / sidecar / CLI 预热都以脚本路径开头。
+  // 这些子进程混进候选会让唯一主进程被误判成多实例（CODEX_PROCESS_AMBIGUOUS）。
+  const app = {
+    appPath: "/Applications/WorkBuddy.app",
+    executablePath: "/Applications/WorkBuddy.app/Contents/MacOS/Electron",
+  };
+  const executable = app.executablePath;
+  const rows = parseCodexProcessTable(
+    [
+      ` 1310 Mon Aug 10 23:52:03 2026 ${executable}`,
+      ` 1381 Mon Aug 10 23:52:05 2026 ${executable} /Applications/WorkBuddy.app/Contents/Resources/app.asar/main/daemon-app-server-entry.js --stdio`,
+      ` 1401 Mon Aug 10 23:52:06 2026 ${executable} /Applications/WorkBuddy.app/Contents/Resources/app.asar/main/sidecar-entry.js --token 00000000-0000-0000-0000-000000000000`,
+      ` 1416 Mon Aug 10 23:52:07 2026 ${executable} /Applications/WorkBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy --prewarm`,
+    ].join("\n"),
+    app,
+    { product: "workbuddy" },
+  );
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].pid, 1310);
+  // WorkBuddy 端口在环境变量里，参数判不出调试状态，必须报「未知」而非「没开」
+  assert.equal(rows[0].hasCdp, null);
+  assert.equal(rows[0].cdpPort, null);
+
+  // Codex 侧不受影响：主进程带 --flag 参数仍是唯一候选
+  const codexApp = {
+    appPath: "/Applications/ChatGPT.app",
+    executablePath: "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
+  };
+  const codexRows = parseCodexProcessTable(
+    `   42 Thu Jul 16 16:49:24 2026 ${codexApp.executablePath} --remote-debugging-port=9341`,
+    codexApp,
+  );
+  assert.equal(codexRows.length, 1);
+  assert.equal(codexRows[0].cdpPort, 9341);
+});
+
 test("parser accepts an actual ps row for the current process", { skip: process.platform !== "darwin" }, async () => {
   const { stdout } = await execFileAsync("/bin/ps", ["-axo", "pid=,lstart=,command="], {
     encoding: "utf8",
