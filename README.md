@@ -18,6 +18,14 @@
 
 </div>
 
+> ## 🆕 重大升级：现已支持国产 AI 编程工具 WorkBuddy
+>
+> 同一套引擎，现在也能给腾讯 CodeBuddy 桌面端（WorkBuddy）换肤。一次性皮肤、即点即换、一键还原原生界面，用法见 [WorkBuddy 章节](#workbuddy腾讯-codebuddy-桌面端)。
+
+![真机截图：WorkBuddy 换上 Miku 488137 主题](docs/images/workbuddy-miku-live.webp)
+
+*真机截图：WorkBuddy 5.3.11 换上 Miku 488137 主题，顶部中间同样是「主题」入口，主题中心即点即换。*
+
 ![真机截图：Miku 主题与顶部主题切换入口](docs/images/theme-switcher-live.webp)
 
 *真机截图：Miku 488137 高精度主题，顶部中间的「主题」入口直接打开主题中心。*

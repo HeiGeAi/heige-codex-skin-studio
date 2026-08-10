@@ -16,6 +16,14 @@ One image becomes one theme. After install, switching skins is a single click in
 
 </div>
 
+> ## 🆕 Major update: WorkBuddy (Tencent CodeBuddy Desktop) is now supported
+>
+> The same engine now skins WorkBuddy, a popular AI coding tool made in China. Session-only skins, instant switching, one-click restore to the native UI. See the [WorkBuddy section](#workbuddy-tencent-codebuddy-desktop).
+
+![Live screenshot: WorkBuddy wearing the Miku 488137 theme](docs/images/workbuddy-miku-live.webp)
+
+*Live screenshot: WorkBuddy 5.3.11 wearing the Miku 488137 theme. The same top-center menu opens the theme center.*
+
 ![Live screenshot: Miku theme with the top theme menu](docs/images/theme-switcher-live.webp)
 
 *Live screenshot: the Miku 488137 preset. The top-center menu opens the theme center.*
