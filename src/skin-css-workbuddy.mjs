@@ -444,6 +444,58 @@ body {
   background: ${accentMix(12)} !important;
 }
 
+/* AI 回复原生没有任何底色，正文颜色写死 rgb(0,0,0)，整段直接压在主题背景图上。
+   浅色图勉强能读，深色图和高饱和图上就糊成一片。这和 Codex 侧是同一类问题，
+   解法也照搬 Codex：阅读增强开着时，给整条回复垫一层主题色蒙版并接管文字色。
+   钩子取稳定的 cb-assistant-message，同节点并存的 _assistantMessage_7jxnj_178 不碰。
+   消息列表是 virtuoso 虚拟滚动，条目高度由 ResizeObserver 重测，改内边距不会错位。
+   真机核对自 WorkBuddy 5.3.11 */
+:root[data-heige-readability="on"] .cb-assistant-message {
+  box-sizing: border-box;
+  color: var(--heige-text) !important;
+  background: ${surfaceMix(90)} !important;
+  border: 1px solid ${accentMix(18)} !important;
+  border-radius: 22px;
+  /* 原生左右内边距就是 24px，跟着保留；只补垂直方向，蒙版才不会贴着字 */
+  padding: 14px 24px 12px !important;
+  /* 常驻表面覆盖动态背景，禁用背景采样以避免流式输出逐帧重合成 */
+  backdrop-filter: none !important;
+}
+
+/* 回复里的引用块、行内代码和分隔线原生也吃写死的浅色，垫上蒙版后要跟着换成主题色，
+   否则深色主题下是浅块压深蒙版，比不垫还刺眼 */
+:root[data-heige-readability="on"] .cb-assistant-message .cb-markdown :is(pre, code, blockquote) {
+  background: ${accentMix(10)} !important;
+  color: var(--heige-text) !important;
+}
+
+/* 正文和底部那排图标、消耗计数、时间的颜色也写死在各自节点上（rgb(0,0,0) 和
+   rgba(0,0,0,.7)），不继承外层容器。只垫蒙版不接管这两处，深色主题下就是黑字压
+   深色蒙版，比不垫更糊。所以这里和侧栏、输入区一样不挂阅读增强开关：颜色写死是
+   WorkBuddy 自己的毛病，关掉蒙版也一样要治。
+   正文按稳定的 cb-markdown 打；图标按钮没有稳定类名，用元素选择器限定在回复内部，
+   构建改名也不受影响；哈希类名一律不碰。真机核对自 WorkBuddy 5.3.11 */
+.cb-assistant-message .cb-markdown,
+.cb-assistant-message .cb-markdown :is(p, li, td, th, h1, h2, h3, h4, h5, h6) {
+  color: var(--heige-text) !important;
+}
+
+.cb-assistant-message .cb-credit-usage-text,
+.cb-assistant-message .cb-message-time-tip,
+.cb-assistant-message button,
+.cb-assistant-message button :is(svg, span) {
+  color: ${textMix(72)} !important;
+}
+
+/* 发言人名字在蒙版外面，颜色同样写死 rgb(0,0,0)，而且它任何时候都直接压在主题
+   背景图上、没有底可垫，所以换成主题色之后还要补一圈同底色光晕才拉得开对比 */
+.avatar-container .name {
+  color: var(--heige-text) !important;
+  text-shadow:
+    0 0 8px ${surfaceMix(92)},
+    0 0 18px ${surfaceMix(74)};
+}
+
 /* 首页大标题压在人物脸上，靠一圈同底色光晕拉开对比，别指望背景够干净 */
 .wb-home-header__title {
   color: var(--heige-text) !important;

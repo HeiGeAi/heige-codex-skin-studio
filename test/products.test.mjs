@@ -212,6 +212,39 @@ test("WorkBuddy 皮肤只挂稳定选择器，一个构建哈希类名都不许�
   }
 });
 
+test("AI 回复垫了蒙版就必须一起接管正文和底部文字，只垫底会做出黑字压深色蒙版", () => {
+  const css = buildWorkBuddySkinCss({ theme: THEME, heroDataUrl: HERO });
+  // 蒙版本身挂阅读增强开关，跟 Codex 侧的 [data-response-annotation-conversation] 同一套机制
+  assert.match(
+    css,
+    /:root\[data-heige-readability="on"\] \.cb-assistant-message \{[^}]*background:/,
+    "回复蒙版必须挂在阅读增强开关下",
+  );
+  // 正文的 rgb(0,0,0) 和底部那排图标、消耗计数、时间的 rgba(0,0,0,.7) 都写死在各自节点上，
+  // 不继承外层容器。漏掉任何一条，深色主题下就是黑字压深色蒙版，比不垫更糊
+  for (const hook of [
+    ".cb-assistant-message .cb-markdown",
+    ".cb-assistant-message .cb-credit-usage-text",
+    ".cb-assistant-message .cb-message-time-tip",
+    ".cb-assistant-message button",
+    // 发言人名字在蒙版外面，任何时候都直接压在背景图上
+    ".avatar-container .name",
+  ]) {
+    assert.ok(css.includes(hook), `缺少稳定挂钩：${hook}`);
+  }
+  // 这几条颜色接管不挂开关：颜色写死是 WorkBuddy 自己的毛病，关掉蒙版一样要治
+  assert.match(css, /^\.cb-assistant-message \.cb-markdown,$/m, "正文颜色接管不该挂在开关下");
+  assert.match(css, /\.avatar-container \.name \{[^}]*text-shadow:/, "名字没有底可垫，必须留光晕");
+  for (const [label, pattern] of [
+    ["正文", /^\.cb-assistant-message \.cb-markdown,[\s\S]*?\}/m],
+    ["名字", /^\.avatar-container \.name \{[\s\S]*?\}/m],
+  ]) {
+    const rule = css.match(pattern);
+    assert.ok(rule, `找不到${label}的颜色接管规则`);
+    assert.ok(rule[0].includes("var(--heige-text)"), `${label}必须取主题色而不是写死颜色`);
+  }
+});
+
 test("WorkBuddy 皮肤拒绝非本地图片，防止皮肤把外链塞进宿主页面", () => {
   assert.throws(
     () => buildWorkBuddySkinCss({ theme: THEME, heroDataUrl: "https://example.com/a.png" }),
