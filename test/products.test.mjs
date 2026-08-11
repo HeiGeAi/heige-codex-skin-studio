@@ -15,6 +15,7 @@ import {
 } from "../src/products.mjs";
 import { resolveStudioPaths } from "../src/constants.mjs";
 import { buildWorkBuddySkinCss } from "../src/skin-css-workbuddy.mjs";
+import { classifyWorkBuddyTarget } from "../src/target-classifier.mjs";
 
 const HERO = "data:image/png;base64,aGVybw==";
 
@@ -242,6 +243,73 @@ test("AI 回复垫了蒙版就必须一起接管正文和底部文字，只垫�
     const rule = css.match(pattern);
     assert.ok(rule, `找不到${label}的颜色接管规则`);
     assert.ok(rule[0].includes("var(--heige-text)"), `${label}必须取主题色而不是写死颜色`);
+  }
+});
+
+test("浮层一律实底：半透明只给对话区，菜单和弹层透光就会跟底下正文叠字", () => {
+  const css = buildWorkBuddySkinCss({ theme: THEME, heroDataUrl: HERO });
+
+  // 实底令牌本身不能掺 transparent，掺了等于没治
+  const solid = css.match(/^\s*--heige-solid:.*$/m);
+  assert.ok(solid, "缺少浮层专用的实底令牌 --heige-solid");
+  assert.match(solid[0], /var\(--heige-surface\)/, "实底令牌必须直接取主题底色");
+  assert.doesNotMatch(solid[0], /color-mix|transparent/, "实底令牌不许掺透明");
+
+  // 读令牌的那批浮层：模态、弹出层、下拉、悬浮卡全要指向实底，不许再落回半透明的 veil
+  for (const token of [
+    "--cb-vscode-dropdown-background",
+    "--cb-bg-elevated",
+    "--cb-bg-overlay",
+    "--cb-hover-card-bg-color",
+    "--cb-dialog-bg",
+    "--cb-popover-bg",
+    "--wb-bg-modal",
+    "--wb-bg-popover",
+    "--wb-bg-elevated",
+  ]) {
+    const line = css.match(new RegExp(`^\\s*${token}:.*$`, "m"));
+    assert.ok(line, `缺少浮层令牌 ${token}`);
+    assert.match(line[0], /var\(--heige-solid\)/, `${token} 必须实底`);
+  }
+
+  // 什么令牌都不读的那批浮层：只能按稳定类名钉实底
+  for (const hook of [".settings-modal", ".user-menu-popover", ".wb-popover", ".wb-dropdown", ".wb-modal"]) {
+    assert.ok(css.includes(`${hook},`) || css.includes(`${hook} {`), `浮层名单缺少 ${hook}`);
+  }
+
+  // BEM 子面板兜底：连字符和双下划线两种写法都得在，只写一种会漏掉添加模型框
+  for (const suffix of ["-modal-overlay", "__modal-overlay", "-editor-overlay", "__editor-overlay", "__overlay"]) {
+    assert.ok(css.includes(`[class$="${suffix}"] > *`), `兜底选择器缺少 ${suffix}`);
+  }
+
+  // 遮罩自己必须留半透明黑纱，被兜底规则连坐会让整个界面全黑
+  assert.doesNotMatch(
+    css,
+    /^\[class\$="[^"]*overlay"\] \{/m,
+    "遮罩本体不许被垫实底",
+  );
+
+  // 强调色按钮的字色不能跟着编辑区底色一起透明，否则实心按钮上一个字都看不见
+  const primary = css.match(/^\.wb-button--primary,[\s\S]*?\}/m);
+  assert.ok(primary, "缺少强调色按钮的字色接管");
+  assert.match(primary[0], /var\(--heige-on-accent\)/, "强调色上的字必须走 --heige-on-accent");
+});
+
+test("WorkBuddy 主窗口识别放行 hash 路由，但仍按解码后的 pathname 认身份", () => {
+  const main = "file:///Applications/WorkBuddy.app/Contents/Resources/app.asar/renderer/index.html";
+  // 打开设置弹层就会把地址变成 index.html#，连 # 都拒会让皮肤在正常使用中途认不出主窗口
+  for (const url of [main, `${main}#`, `${main}#/settings/models`]) {
+    assert.equal(classifyWorkBuddyTarget({ type: "page", url }), "main", `应认出：${url}`);
+  }
+  // 放行 fragment 不等于放行伪造：身份只看 pathname，fragment 影响不到它
+  for (const url of [
+    `file:///tmp/evil.html#${main.slice("file://".length)}`,
+    `file:///tmp/evil.html#/WorkBuddy.app/Contents/Resources/app.asar/renderer/index.html`,
+    `${main}?a=1`,
+    "file:///Applications/WorkBuddy.app/Contents/Resources/app.asar/renderer/%2e%2e/index.html",
+    "file:///Applications/Evil.app/Contents/Resources/app.asar/renderer/index.html",
+  ]) {
+    assert.equal(classifyWorkBuddyTarget({ type: "page", url }), "unknown", `应挡掉：${url}`);
   }
 });
 

@@ -67,7 +67,10 @@ body {
   --heige-on-accent: var(--heige-surface);
   --heige-veil: ${surfaceMix(88)};
   --heige-veil-soft: ${surfaceMix(70)};
-  --heige-veil-strong: ${surfaceMix(96)};
+  /* 浮层专用，完全不透明。设置弹层、对话框、下拉、右键菜单一旦透光，
+     底下的对话正文就印上来跟浮层文字叠在一起，没法读。
+     半透明只留给对话区自己，浮层一律实底 */
+  --heige-solid: var(--heige-surface);
   --heige-line: ${accentMix(32)};
   --heige-line-soft: ${accentMix(18)};
 
@@ -88,7 +91,7 @@ body {
   --cb-vscode-button-secondaryForeground: var(--heige-text) !important;
   --cb-vscode-button-secondaryHoverBackground: ${accentMix(20)} !important;
   --cb-vscode-input-background: ${surfaceMix(78)} !important;
-  --cb-vscode-dropdown-background: var(--heige-veil-strong) !important;
+  --cb-vscode-dropdown-background: var(--heige-solid) !important;
   --cb-vscode-panel-border: var(--heige-line) !important;
   --cb-vscode-widget-border: var(--heige-line) !important;
   --cb-vscode-widget-shadow: ${accentMix(16)} !important;
@@ -141,14 +144,14 @@ body {
   --cb-bg-surface-hover: ${accentMix(14)} !important;
   --cb-bg-surface-active: ${accentMix(20)} !important;
   --cb-bg-card: var(--heige-veil) !important;
-  --cb-bg-elevated: var(--heige-veil-strong) !important;
-  --cb-bg-overlay: var(--heige-veil-strong) !important;
+  --cb-bg-elevated: var(--heige-solid) !important;
+  --cb-bg-overlay: var(--heige-solid) !important;
   --cb-bg-color-container: var(--heige-veil-soft) !important;
   --cb-card-background: var(--heige-veil) !important;
-  --cb-hover-card-bg-color: var(--heige-veil-strong) !important;
+  --cb-hover-card-bg-color: var(--heige-solid) !important;
   --cb-panel-bg-primary: var(--heige-veil) !important;
   --cb-panel-bg-secondary: var(--heige-veil-soft) !important;
-  --cb-overlay-background: var(--heige-veil-strong) !important;
+  --cb-overlay-background: var(--heige-solid) !important;
   --cb-hover-bg: ${accentMix(12)} !important;
   --cb-hover-bg-fc: ${accentMix(12)} !important;
 
@@ -172,20 +175,20 @@ body {
   --cb-list-focusBackground: ${accentMix(22)} !important;
 
   /* 浮层：可读性优先，底色比常规表面更实 */
-  --cb-popover-background: var(--heige-veil-strong) !important;
-  --cb-popover-background-fc: var(--heige-veil-strong) !important;
-  --cb-popover-bg: var(--heige-veil-strong) !important;
-  --cb-popover-bg-fc: var(--heige-veil-strong) !important;
-  --cb-popover-bg-color: var(--heige-veil-strong) !important;
-  --cb-popover-bg-color-fc: var(--heige-veil-strong) !important;
+  --cb-popover-background: var(--heige-solid) !important;
+  --cb-popover-background-fc: var(--heige-solid) !important;
+  --cb-popover-bg: var(--heige-solid) !important;
+  --cb-popover-bg-fc: var(--heige-solid) !important;
+  --cb-popover-bg-color: var(--heige-solid) !important;
+  --cb-popover-bg-color-fc: var(--heige-solid) !important;
   --cb-popover-active-background: ${accentMix(20)} !important;
   --cb-popover-border: var(--heige-line) !important;
   --cb-popover-border-fc: var(--heige-line) !important;
   --cb-popover-divider: var(--heige-line-soft) !important;
   --cb-popover-divider-fc: var(--heige-line-soft) !important;
   --cb-popover-secondary: ${textMix(70)} !important;
-  --cb-dialog-bg: var(--heige-veil-strong) !important;
-  --cb-dialog-content-bg: var(--heige-veil-strong) !important;
+  --cb-dialog-bg: var(--heige-solid) !important;
+  --cb-dialog-content-bg: var(--heige-solid) !important;
   --cb-dialog-title-color: var(--heige-text) !important;
   --cb-dialog-hint-color: ${textMix(64)} !important;
   --cb-dialog-close-color: ${textMix(70)} !important;
@@ -275,12 +278,12 @@ body {
   --wb-bg-tertiary: var(--heige-veil-soft) !important;
   --wb-bg-inset-strong: var(--heige-veil-soft) !important;
   --wb-bg-card: var(--heige-veil) !important;
-  --wb-bg-card-strong: var(--heige-veil-strong) !important;
+  --wb-bg-card-strong: var(--heige-solid) !important;
   --wb-bg-card-hover: ${accentMix(14)} !important;
-  --wb-bg-elevated: var(--heige-veil-strong) !important;
-  --wb-bg-modal: var(--heige-veil-strong) !important;
-  --wb-bg-popover: var(--heige-veil-strong) !important;
-  --wb-bg-popover-picker: var(--heige-veil-strong) !important;
+  --wb-bg-elevated: var(--heige-solid) !important;
+  --wb-bg-modal: var(--heige-solid) !important;
+  --wb-bg-popover: var(--heige-solid) !important;
+  --wb-bg-popover-picker: var(--heige-solid) !important;
   --wb-bg-scrim-light: ${surfaceMix(80)} !important;
   --wb-bg-hover: ${accentMix(12)} !important;
   --wb-bg-hover-light: ${accentMix(12)} !important;
@@ -412,6 +415,89 @@ body {
   background: ${surfaceMix(90)} !important;
   border-right: 1px solid var(--heige-line) !important;
   backdrop-filter: none !important;
+}
+
+/* 浮层自己不画底，靠的是页面底色本来是纯白。皮肤把页面底改成透明好让主题图透出来，
+   这些浮层就跟着一起透了：设置弹层背后的对话正文直接印在设置文字上，两层字叠着没法读。
+   上面那批 --wb-bg-modal / --cb-popover-bg 令牌已经改成实底，覆盖的是「读令牌」的那批浮层；
+   这里补的是「什么底都不读」的那批，只能按稳定类名把实底显式钉上去。
+   遮罩层（*-overlay、*-mask）不在这份名单里：它本来就该是半透明的黑纱，
+   改成不透明整个界面会全黑。真机核对自 WorkBuddy 5.3.11 */
+.settings-modal,
+.settings-modal__nav,
+.user-menu-popover,
+.account-panel,
+.wb-modal,
+.wb-drawer,
+.wb-popover,
+.wb-shadow-popover,
+.wb-dropdown,
+.wb-kb-dialog,
+.wb-todo-menu,
+.cb-dialog,
+.cb-popover,
+.cb-dropdown,
+.cb-context-menu,
+.cb-add-marketplace-modal,
+.cb-plugin-detail-dropdown,
+.context-menu,
+.dropdown-menu,
+.base-menu,
+.memory-modal,
+.connector-detail-modal,
+.connector-auth-modal,
+.connector-device-code-modal,
+.bind-channel-modal,
+.share-task-dialog,
+.skill-scan-result-dialog,
+.skill-card-menu,
+.task-transfer-popover,
+.task-list-popover,
+.sidebar-next-overview-popover,
+.my-files-context-menu,
+.my-files-filter-menu,
+.notification-ctx-menu,
+.notification-action-menu,
+.welcome-screen-menu,
+.project-connectors-drawer {
+  background: var(--heige-solid) !important;
+  /* 常驻表面覆盖动态背景，禁用背景采样以避免滚动和流式输出逐帧重合成 */
+  backdrop-filter: none !important;
+}
+
+/* 上面那份名单是逐个真机核过的。名单之外还有一大类「面板自带的小对话框」，
+   比如模型设置里的添加模型框 .models-settings-panel__editor，挨个列既列不全，
+   又容易被 .menu、.modal、.delete 这种同名普通元素误伤。
+   这里按 WorkBuddy 自己的命名规律兜底：模态遮罩统一叫 *-modal-overlay、*__overlay、
+   *-editor-overlay、*-dialog-overlay、*-confirm-overlay，遮罩的直接子节点就是那块面板。
+   用 [class$=] 收尾匹配而不是 [class*=] 包含匹配，是为了避开 *-loading-overlay、
+   *-stencil-overlay、*-startup-overlay 这些同样带 overlay 但不是模态遮罩的元素，
+   它们的子节点是转圈图标和图片裁剪框，垫上实底反而糊。
+   连字符和 BEM 双下划线两种写法都要列：添加模型框的遮罩叫 panel__editor-overlay，
+   只写 -editor-overlay 收尾匹配会漏掉它。
+   遮罩自己一律不动，保持半透明黑纱。真机核对自 WorkBuddy 5.3.11 */
+[class$="__overlay"] > *,
+[class$="-modal-overlay"] > *,
+[class$="__modal-overlay"] > *,
+[class$="-dialog-overlay"] > *,
+[class$="__dialog-overlay"] > *,
+[class$="-editor-overlay"] > *,
+[class$="__editor-overlay"] > *,
+[class$="-confirm-overlay"] > *,
+[class$="__confirm-overlay"] > * {
+  background: var(--heige-solid) !important;
+  backdrop-filter: none !important;
+}
+
+/* 添加模型框的保存按钮把「编辑区底色」当自己的文字色使（WorkBuddy 自己的写法：
+   color: var(--cb-vscode-editor-background)）。皮肤把编辑区底改成透明好让主题图透出来，
+   这个按钮的字就跟着透明了，实心强调色上一个字都看不见。
+   强调色上的文字本来就该走 --heige-on-accent，这里按稳定的 wb-button--primary 钉回去。
+   浮层没垫实底之前这个按钮是跟整块面板一起透着的，看不出来，垫实之后才暴露。
+   真机核对自 WorkBuddy 5.3.11：全量样式表里这么写的只有这一个按钮和它的 hover 态 */
+.wb-button--primary,
+.wb-button--primary :is(span, svg) {
+  color: var(--heige-on-accent) !important;
 }
 
 /* 侧栏这几处文字在 WorkBuddy 里是写死的 rgba(0,0,0,.9)/.5，不读任何 --cb-* 令牌。

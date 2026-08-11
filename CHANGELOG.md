@@ -1,5 +1,16 @@
 # 更新日志
 
+## 5.5.2 - 2026-08-11
+
+### 修复
+
+- WorkBuddy 的设置弹层、下拉、右键菜单和各种对话框不再透光。这些浮层自己不画底色，靠的是宿主页面本来是纯白；皮肤为了让主题图透出来把页面底改成透明，它们就跟着一起透了，设置界面背后的对话正文直接印在设置文字上，两层字叠着没法读。半透明现在只留给对话区自己。
+- 修法分两层。读令牌的那批浮层（`--wb-bg-modal`、`--wb-bg-popover`、`--cb-dialog-bg`、`--cb-popover-b*`、`--cb-bg-elevated` 等十九处）统一指向新增的实底令牌 `--heige-solid`，它直接取主题底色、不掺任何透明度。什么令牌都不读的那批，按稳定类名显式钉实底，名单三十八项，逐个真机核过。
+- 面板自带的小对话框再补一层兜底：按 WorkBuddy 自己的命名规律匹配 `*-modal-overlay`、`*__overlay`、`*-editor-overlay`、`*-dialog-overlay`、`*-confirm-overlay` 这几类模态遮罩，给遮罩的直接子节点垫实底。连字符和 BEM 双下划线两种写法都列了：添加模型框的遮罩叫 `models-settings-panel__editor-overlay`，只写连字符那种会漏掉它。用收尾匹配而不是包含匹配，是为了避开 `*-loading-overlay`、`*-stencil-overlay`、`*-startup-overlay` 这些同样带 overlay 但不是模态遮罩的元素——它们的子节点是转圈图标和图片裁剪框，垫实底反而糊。遮罩本体一律不动，保持半透明黑纱，垫实了整个界面会全黑。
+- 顺带治好添加模型框的保存按钮：WorkBuddy 把「编辑区底色」当这个按钮的文字色使（`color: var(--cb-vscode-editor-background)`），皮肤把编辑区底改成透明之后，实心强调色上一个字都看不见。改成走 `--heige-on-accent`。浮层没垫实底之前整块面板都是透的，这个毛病看不出来，垫实了才暴露。
+- 修好 WorkBuddy 主窗口识别拒绝 hash 路由的问题：WorkBuddy 用 hash 路由，光是打开一次设置弹层就会把地址变成 `index.html#`，而识别逻辑此前连 `#` 都拒，于是皮肤在正常使用中途突然认不出主窗口，`apply` / `status` / `restore` 全部报「未发现经过严格识别的主窗口 renderer」。现在 fragment 不参与身份判断，身份仍然只看解码后的 pathname，`file:///tmp/evil.html#/WorkBuddy.app/…/index.html` 这类构造照样被后缀检查挡掉。Codex 侧的识别逻辑没动。
+- 真机核对自 WorkBuddy 5.3.11，深色（genshin-night）与浅色（miku-488137）两套主题各验一遍：设置弹层、设置左侧导航、用户菜单、添加模型对话框、默认权限下拉、会话列表更多菜单全部实底可读，对话区保持半透明。
+
 ## 5.5.1 - 2026-08-11
 
 ### 修复
