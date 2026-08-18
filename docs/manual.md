@@ -102,9 +102,9 @@ open "$HOME/Applications/HeiGe 皮肤启动器.app"
 
 ## Windows（待实机验收）
 
-Windows 入口位于 `scripts\windows`。安装只写当前用户目录，并创建「HeiGe Codex Skin Studio\HeiGe 皮肤启动器」开始菜单快捷方式；`apply.bat` 和兼容名 `enable-skin.bat` 都只作用于当前会话，`pause.bat`、`resume.bat` 与 `restore.bat` 分别暂停、恢复和彻底还原；`close-codex.bat` 只安全完整退出已归属的 Codex/GPT 桌面进程并保持关闭，不改常驻、不自动 apply、不自动重启。若要下次启动仍恢复皮肤，必须在已恢复的 Codex 中手动打开顶部常驻开关；常驻开启后，用户正常重启 Codex（不带调试端口）时，当前用户计划任务中的后台控制器会把它安全退出并以 CDP 重新拉起再注入皮肤。系统 Node 必须为 Node.js 22 或更新版本。
+Windows 入口位于 `scripts\windows`。安装只写当前用户目录，并创建「HeiGe Codex Skin Studio\HeiGe 皮肤启动器」开始菜单快捷方式；`apply.bat` 和兼容名 `enable-skin.bat` 都只作用于当前会话，`pause.bat`、`resume.bat` 与 `restore.bat` 分别暂停、恢复和彻底还原；`close-codex.bat` 只安全完整退出已归属的 Codex/GPT 桌面进程并保持关闭，不改常驻、不自动 apply、不自动重启。商店版若出现 `abort-loopback-isolated`（调试端口已带参数但本工具连不上），运行一次 `enable-loopback.bat` 添加 CheckNetIsolation 回环豁免后再重试 apply；该入口会申请一次管理员权限，apply 本身不会每次弹 UAC。若要下次启动仍恢复皮肤，必须在已恢复的 Codex 中手动打开顶部常驻开关；常驻开启后，用户正常重启 Codex（不带调试端口）时，当前用户计划任务中的后台控制器会把它安全退出并以 CDP 重新拉起再注入皮肤。系统 Node 必须为 Node.js 22 或更新版本。
 
-常驻开启成功的标准：开关数秒内变为「已开启」、`%APPDATA%\HeiGeCodexSkinStudio\state.json` 中 `persistenceEnabled` 为 `true`，且任务计划程序里存在 HeiGe 控制器任务。若开关立刻报错或仍为关闭，查看同目录 `injector.log` 中的 `BACKGROUND_START_FAILED` / `LOCK_MALFORMED`；不要长时间停在「正在等待后台确认」。Microsoft Store 版若无法打开调试端口 9341（`abort-incompatible`），常驻重启接管无法完成，需用独立安装版或先走 `close-codex` 后再用启动器恢复。
+常驻开启成功的标准：开关数秒内变为「已开启」、`%APPDATA%\HeiGeCodexSkinStudio\state.json` 中 `persistenceEnabled` 为 `true`，且任务计划程序里存在 HeiGe 控制器任务。若开关立刻报错或仍为关闭，查看同目录 `injector.log` 中的 `BACKGROUND_START_FAILED` / `LOCK_MALFORMED`；不要长时间停在「正在等待后台确认」。Microsoft Store 版若无法打开调试端口 9341，先按失败 class 处理：`abort-loopback-isolated` 走 `enable-loopback.bat`；`abort-args-dropped` 表示激活未写入调试参数；`abort-incompatible` 才是版本可能禁用了调试端口，需用独立安装版或先走 `close-codex` 后再用启动器恢复。
 
 彻底卸载请双击稳定安装目录内的 `scripts\windows\uninstall.bat`，或从 PowerShell 运行：
 
@@ -114,7 +114,7 @@ Windows 入口位于 `scripts\windows`。安装只写当前用户目录，并创
 
 卸载器会先尽力关闭常驻和当前会话皮肤，再注销当前用户计划任务、移除开始菜单快捷方式、结束残留控制器进程，并删除 `%APPDATA%\HeiGeCodexSkinStudio` 与 `$HOME\.codex\heige-codex-skin-studio`。从稳定安装目录内启动时，安装树会在卸载窗口退出后延迟删除。若已手动删除稳定安装目录，可从源码仓库运行 `scripts\windows\uninstall.bat`，它仍会清理计划任务、开始菜单和 AppData 残留。计划任务指向的安装树只缺少 `src\cli.mjs` 时，控制器也会自行注销并正常退出，避免每次登录重复报错。
 
-传统安装与任务计划程序行为由 Windows PowerShell 5.1、PowerShell 7、32 位解析和隔离的 GUID 任务测试覆盖。Microsoft Store/MSIX 的包发现与激活代码已实现，但真实 Store 应用能否完整接收 CDP 参数仍标记为真机待验证，不能把自动化结果冒充真机结论。
+传统安装与任务计划程序行为由 Windows PowerShell 5.1、PowerShell 7、32 位解析和隔离的 GUID 任务测试覆盖。Microsoft Store/MSIX 的包发现、系统激活、回环隔离诊断与一次性 `enable-loopback` 已实现，但真实 Store 应用豁免后能否完成注入仍标记为真机待验证，不能把自动化结果冒充真机结论。
 
 ## WorkBuddy（腾讯 CodeBuddy 桌面端）
 
