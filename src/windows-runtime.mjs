@@ -518,3 +518,35 @@ export function classifyWindowsPreflightSnapshot(input, { port, requirePort = tr
 }
 
 export const windowsRuntimePowerShellScript = WINDOWS_RUNTIME_SCRIPT;
+
+export async function queryWindowsLoopbackExempt({
+  packageFamilyName,
+  execFileImpl = execFile,
+  env = process.env,
+} = {}) {
+  if (
+    typeof packageFamilyName !== "string" ||
+    packageFamilyName.length === 0 ||
+    packageFamilyName.length > 256 ||
+    /[\0\r\n]/.test(packageFamilyName)
+  ) {
+    return null;
+  }
+  const systemRoot = env.SystemRoot;
+  if (typeof systemRoot !== "string" || !win32.isAbsolute(systemRoot)) {
+    return null;
+  }
+  const exe = win32.join(systemRoot, "System32", "CheckNetIsolation.exe");
+  try {
+    const { stdout, stderr = "" } = await execFileImpl(exe, ["LoopbackExempt", "-s"], {
+      env: isolatedWindowsPowerShellEnvironment(env),
+      timeout: 10_000,
+      maxBuffer: 256 * 1024,
+      windowsHide: true,
+    });
+    const text = `${String(stdout)}\n${String(stderr)}`;
+    return text.toLowerCase().includes(packageFamilyName.toLowerCase());
+  } catch {
+    return null;
+  }
+}

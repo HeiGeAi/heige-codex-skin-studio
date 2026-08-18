@@ -1151,7 +1151,8 @@ export function createSkinController(input) {
       // Codex CSP 会拦 renderer→本机 HTTP，菜单删除/发布只能靠 CDP。
       // 即使 session 尚未完全对齐（apply 后 keepUntilProcessExit / 身份过渡），
       // 只要进程与端口可用，也必须先抽干 controlRequest，否则会一直等到超时。
-      if (before.transition !== null || before.process === null) return null;
+      // 常驻握手的 transition journal 不得挡住主题/用户主题 CDP；只推迟 set-persistence。
+      if (before.process === null) return null;
 
       await assertPortOwner(before.process, {
         reuseCurrentProcessSnapshot: true,
@@ -1161,7 +1162,7 @@ export function createSkinController(input) {
         expected: {
           themeId: before.state.selectedThemeId,
           mode: expectedMode,
-          persistenceEnabled: true,
+          persistenceEnabled: before.state.persistenceEnabled,
           revision: before.state.revision,
         },
         process: before.process,
@@ -1170,15 +1171,20 @@ export function createSkinController(input) {
       if (typeof processRendererRequest === "function") {
         const request = pendingRendererControlRequest(observedHealth);
         if (request !== null) {
-          sawControlRequest = true;
-          const handled = await processRendererRequest(request);
-          if (handled !== null) {
-            return isRecord(handled)
-              ? { ...handled, interactive: true }
-              : handled;
+          const blockPersistence = before.transition !== null &&
+            request.action === "set-persistence";
+          if (!blockPersistence) {
+            sawControlRequest = true;
+            const handled = await processRendererRequest(request);
+            if (handled !== null) {
+              return isRecord(handled)
+                ? { ...handled, interactive: true }
+                : handled;
+            }
           }
         }
       }
+      if (before.transition !== null) return null;
       if (!sessionMatches) return null;
       const stableSession = before.state.persistenceEnabled === true
         ? before.session.keepUntilProcessExit === false
@@ -1960,6 +1966,7 @@ export function createSkinController(input) {
     tick,
     setPersistence: setPersistencePublic,
     setThemeSelection: setThemeSelectionPublic,
+    pendingTransition: () => deps.readTransition(),
     pause,
     resume,
     restore,

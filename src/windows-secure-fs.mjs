@@ -119,9 +119,13 @@ foreach ($entry in $operations) {
       }
       $sidText = [string]$currentSid.Value
       $grant = if ($isDirectory) { '*{0}:(OI)(CI)F' -f $sidText } else { '*{0}:F' -f $sidText }
-      $output = & $icacls $TargetPath /inheritance:r /setowner $sidText /grant:r $grant 2>&1
+      $grantOutput = & $icacls $TargetPath /inheritance:r /grant:r $grant 2>&1
       if ($LASTEXITCODE -ne 0) {
-        throw ("Set-Acl failed and icacls fallback failed: {0}; icacls: {1}" -f $detail, (($output | ForEach-Object { [string]$_ }) -join ' '))
+        throw ("Set-Acl failed and icacls grant failed: {0}; icacls: {1}" -f $detail, (($grantOutput | ForEach-Object { [string]$_ }) -join ' '))
+      }
+      $ownerOutput = & $icacls $TargetPath /setowner ('*{0}' -f $sidText) 2>&1
+      if ($LASTEXITCODE -ne 0) {
+        throw ("Set-Acl failed and icacls setowner failed: {0}; icacls: {1}" -f $detail, (($ownerOutput | ForEach-Object { [string]$_ }) -join ' '))
       }
     }
   }

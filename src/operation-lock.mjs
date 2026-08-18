@@ -2459,6 +2459,39 @@ function sameWindowsClaim(left, right) {
   );
 }
 
+function windowsAclFailureCode(cause) {
+  const message = String(cause?.message ?? cause ?? "");
+  if (/untrusted identity|not owned by the current user/i.test(message)) {
+    return "LOCK_ACL_UNTRUSTED";
+  }
+  return "LOCK_PERMISSIONS";
+}
+
+function isRecoverableHeiGeStateRootName(name) {
+  if (typeof name !== "string" || name.length === 0 || /[\0\r\n]/.test(name)) return false;
+  if (name === "state.json" || name === "session.json" || name === "transition.json" || name === "injector.log") {
+    return true;
+  }
+  if (name === "operation.lock" || name.startsWith(".operation-lock") || name.startsWith("operation.lock")) {
+    return true;
+  }
+  return false;
+}
+
+async function canProtectExistingWindowsStateRoot(stateRoot) {
+  let entries;
+  try {
+    entries = await readdir(stateRoot, { withFileTypes: true });
+  } catch {
+    return false;
+  }
+  for (const entry of entries) {
+    if (entry.isSymbolicLink()) return false;
+    if (!isRecoverableHeiGeStateRootName(entry.name)) return false;
+  }
+  return true;
+}
+
 async function prepareWindowsStateRoot(stateRoot, security) {
   await verifyRealDirectoryAncestors(dirname(stateRoot));
   let created = false;
@@ -2483,7 +2516,29 @@ async function prepareWindowsStateRoot(stateRoot, security) {
       { action: "verify-directory", path: stateRoot },
     ]);
   } catch (cause) {
-    throw lockError("LOCK_PERMISSIONS", `Windows state root ACL is not private: ${stateRoot}`, cause);
+    const code = windowsAclFailureCode(cause);
+    if (!created && code === "LOCK_ACL_UNTRUSTED" && await canProtectExistingWindowsStateRoot(stateRoot)) {
+      try {
+        await windowsSecurityBatch(security, [
+          { action: "protect-directory", path: stateRoot },
+          { action: "verify-directory", path: stateRoot },
+        ]);
+        return;
+      } catch (protectCause) {
+        throw lockError(
+          "LOCK_ACL_UNTRUSTED",
+          `Windows state root ACL cannot be healed safely: ${stateRoot}`,
+          protectCause,
+        );
+      }
+    }
+    throw lockError(
+      code,
+      code === "LOCK_ACL_UNTRUSTED"
+        ? `Windows state root ACL cannot be migrated safely: ${stateRoot}`
+        : `Windows state root ACL is not private: ${stateRoot}`,
+      cause,
+    );
   }
 }
 

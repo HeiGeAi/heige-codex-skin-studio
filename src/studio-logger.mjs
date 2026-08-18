@@ -113,6 +113,22 @@ function sanitizedMessage(value, redact, maxLength) {
   return redact(message).replace(/[\r\n\t]+/g, " ").slice(0, maxLength);
 }
 
+function errorLogMessage(value, redact, maxLength) {
+  const parts = [];
+  const visit = (node, depth) => {
+    if (node == null || depth > 5 || parts.length >= 6) return;
+    const piece = sanitizedMessage(node, redact, Math.min(320, maxLength));
+    if (piece.length > 0 && !parts.includes(piece)) parts.push(piece);
+    visit(readOnce(node, "cause"), depth + 1);
+    const nested = readOnce(node, "errors");
+    if (Array.isArray(nested)) {
+      for (const inner of nested.slice(0, 4)) visit(inner, depth + 1);
+    }
+  };
+  visit(value, 0);
+  return parts.join(" | ").slice(0, maxLength);
+}
+
 function timestamp(now) {
   const value = now();
   const date = value instanceof Date ? value : new Date(value);
@@ -187,7 +203,9 @@ export function createStudioLogger({
           level,
           event,
           code,
-          message: sanitizedMessage(value, redact, messageLimit),
+          message: level === "error"
+            ? errorLogMessage(value, redact, messageLimit)
+            : sanitizedMessage(value, redact, messageLimit),
         };
         let line = `${JSON.stringify(entry)}\n`;
         if (Buffer.byteLength(line) > maxBytes) {

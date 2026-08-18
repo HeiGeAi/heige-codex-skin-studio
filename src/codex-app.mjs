@@ -278,6 +278,9 @@ export async function runtimeDiagnostics({
 export function classifyInjection(diag, { product = undefined } = {}) {
   const profile = productProfile(product);
   if (diag.portOpen) return "ok：端口开放，可直接注入";
+  if (diag.loopbackIsolated) {
+    return "loopback-isolated：商店版已带调试参数，但 AppContainer 回环隔离阻止本工具连入，请运行 scripts\\windows\\enable-loopback.bat 后重试";
+  }
   if (diag.processRunning && diag.processHasDebugFlag) {
     return "flag-present-port-closed：进程已带调试参数但端口未开放，当前版本可能禁用了调试端口，请附本 JSON 开 Issue";
   }

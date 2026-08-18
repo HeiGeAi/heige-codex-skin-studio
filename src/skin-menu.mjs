@@ -2139,8 +2139,8 @@ export function buildSkinMenuScript({
       hideAlert();
       paintPersistence();
       const abortController = childController();
-      // 开启常驻含计划任务注册与握手（默认 10s）；3s 会误超时并排队 CDP，掩盖 BACKGROUND_START_FAILED。
-      const timeoutId = later(() => abortController.abort(), 15000);
+      // 开启常驻含计划任务注册与握手（Windows 35s）；15s 会在握手完成前 abort，排队 CDP 并误杀会话控制器。
+      const timeoutId = later(() => abortController.abort(), 45000);
       try {
         const response = await fetch(data.control.endpoint, {
           method: "POST",

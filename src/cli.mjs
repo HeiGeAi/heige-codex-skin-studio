@@ -95,6 +95,7 @@ import {
 import { DEFAULT_PRODUCT_ID, isProductId, PRODUCT_IDS, productProfile } from "./products.mjs";
 import {
   classifyWindowsPreflightSnapshot,
+  queryWindowsLoopbackExempt,
   queryWindowsRuntimeSnapshot,
   validateWindowsRuntimeSnapshot,
 } from "./windows-runtime.mjs";
@@ -1894,16 +1895,15 @@ export async function runControllerProcess(controller, {
     }
   }
   const handoffEphemeral = async (current) => {
-    let handedOff;
-    try {
-      handedOff = await controller.setPersistence({
-        expectedRevision: current.revision,
-        enabled: true,
-      });
-      await new Promise((resolve) => setImmediate(resolve));
-    } finally {
-      await controller.stop();
+    const handedOff = await controller.setPersistence({
+      expectedRevision: current.revision,
+      enabled: true,
+    });
+    if (handedOff?.persistenceEnabled !== true) {
+      throw new Error("ephemeral handoff did not confirm background persistence");
     }
+    await new Promise((resolve) => setImmediate(resolve));
+    await controller.stop();
     return {
       action: "handoff",
       mode: current.mode,
@@ -1911,9 +1911,27 @@ export async function runControllerProcess(controller, {
       revision: handedOff.revision,
     };
   };
-  if (ephemeralRuntime && result?.persistenceEnabled === true) {
-    return handoffEphemeral(result);
-  }
+  const pendingEnableJournal = async () => {
+    if (typeof controller.pendingTransition !== "function") return false;
+    try {
+      return await controller.pendingTransition() !== null;
+    } catch {
+      return false;
+    }
+  };
+  const tryHandoffEphemeral = async (current) => {
+    if (!ephemeralRuntime || current?.persistenceEnabled !== true) return null;
+    if (current.action === "error" || current.action === "unregister") return null;
+    if (await pendingEnableJournal()) return null;
+    try {
+      return await handoffEphemeral(current);
+    } catch {
+      // 常驻后台没起来时，会话控制器必须留下，否则主题中心 HTTP/CDP 都会空转超时。
+      return null;
+    }
+  };
+  const handedOffAtStart = await tryHandoffEphemeral(result);
+  if (handedOffAtStart !== null) return handedOffAtStart;
   if (once || result.action === "unregister" || result.action === "error") {
     await controller.stop();
     return result;
@@ -1926,9 +1944,8 @@ export async function runControllerProcess(controller, {
       await controller.stop();
       return result;
     }
-    if (ephemeralRuntime && result.persistenceEnabled === true) {
-      return handoffEphemeral(result);
-    }
+    const handedOff = await tryHandoffEphemeral(result);
+    if (handedOff !== null) return handedOff;
   }
 }
 
@@ -1974,6 +1991,44 @@ export async function waitForAppliedSkin({
   throw new Error("ephemeral controller 未确认皮肤已应用");
 }
 
+async function spawnWindowsSessionController({ nodePath, args }) {
+  const powershell = windowsPowerShellPath();
+  const identityToken = typeof process.env.HEIGE_WINDOWS_APP_IDENTITY === "string"
+    ? process.env.HEIGE_WINDOWS_APP_IDENTITY
+    : "";
+  const { stdout } = await execFile(powershell, [
+    "-NoProfile",
+    "-NonInteractive",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File",
+    join(repositoryRoot, "scripts", "windows", "start-session-controller.ps1"),
+    "-FilePath",
+    nodePath,
+    "-ArgumentsJson",
+    JSON.stringify(args),
+  ], {
+    env: {
+      ...isolatedWindowsPowerShellEnvironment(),
+      ...(identityToken ? { HEIGE_WINDOWS_APP_IDENTITY: identityToken } : {}),
+    },
+    timeout: 30_000,
+    windowsHide: true,
+  });
+  const text = String(stdout).trim();
+  if (text.length === 0) throw new Error("Windows session controller 未返回 PID");
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (cause) {
+    throw new Error("Windows session controller 返回了无效 JSON", { cause });
+  }
+  if (!Number.isSafeInteger(parsed?.Pid) || parsed.Pid <= 0) {
+    throw new Error("Windows session controller PID 无效");
+  }
+  return parsed;
+}
+
 async function productionRegisterEphemeral({ deps, paths, port, preflight, themeId }) {
   await ensureProductionState({
     paths,
@@ -1987,7 +2042,7 @@ async function productionRegisterEphemeral({ deps, paths, port, preflight, theme
   // 没有控制通道的宿主：注完就退。常驻着反而会跟用户抢——用户在主题中心点了新主题，
   // 页面里换好了，但没有回程通道告诉 controller，下一次健康巡检就把它按 state 里的旧主题改回去。
   const oneShot = !profile.supportsControlChannel;
-  const child = spawn(process.execPath, [
+  const controllerArgs = [
     fileURLToPath(import.meta.url),
     "controller",
     "--ephemeral",
@@ -1995,8 +2050,28 @@ async function productionRegisterEphemeral({ deps, paths, port, preflight, theme
     String(port),
     ...(profile.id === DEFAULT_PRODUCT_ID ? [] : ["--app", profile.id]),
     ...(oneShot ? ["--once"] : []),
-  ], { detached: true, stdio: "ignore" });
-  child.unref();
+  ];
+  if (process.platform === "win32") {
+    try {
+      await spawnWindowsSessionController({
+        nodePath: process.execPath,
+        args: controllerArgs,
+      });
+    } catch {
+      const child = spawn(process.execPath, controllerArgs, {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+      });
+      child.unref();
+    }
+  } else {
+    const child = spawn(process.execPath, controllerArgs, {
+      detached: true,
+      stdio: "ignore",
+    });
+    child.unref();
+  }
   await waitForAppliedSkin({ deps, port, themeId });
   return { mode: "active" };
 }
@@ -2770,7 +2845,7 @@ export async function runCli(argv, overrides = {}) {
   }
   const selectedControllerPlatform = command === "controller"
     ? controllerPlatform(args.platform)
-    : process.platform;
+    : (overrides.platform ?? process.platform);
   const installAuthorization = command === "controller"
     ? null
     : parseMacosInstallAuthorization(process.env.HEIGE_MACOS_INSTALL_AUTHORIZATION);
@@ -2815,8 +2890,9 @@ export async function runCli(argv, overrides = {}) {
         ? "Windows 生命周期请使用 scripts/windows/apply.ps1 或 scripts/windows/apply.bat、" +
           "scripts/windows/enable-skin.ps1 或 scripts/windows/enable-skin.bat、" +
           "scripts/windows/pause.ps1、scripts/windows/resume.ps1、" +
-          "scripts/windows/restore.ps1 或 scripts/windows/restore.bat，以及 " +
-          "scripts/windows/close-codex.ps1 或 scripts/windows/close-codex.bat；完整卸载请使用 " +
+          "scripts/windows/restore.ps1 或 scripts/windows/restore.bat，" +
+          "scripts/windows/close-codex.ps1 或 scripts/windows/close-codex.bat，以及 " +
+          "scripts/windows/enable-loopback.ps1 或 scripts/windows/enable-loopback.bat；完整卸载请使用 " +
           "scripts/windows/uninstall.ps1 或 scripts/windows/uninstall.bat"
         : "macOS 生命周期请优先使用 scripts 下对应的 .command 稳定入口",
       commands: [
@@ -3024,12 +3100,49 @@ export async function runCli(argv, overrides = {}) {
           port: selectedPort,
           requirePort: true,
         });
+      const processRunning = (offline?.process ?? exact?.process ?? null) !== null;
+      const usingRuntimeFixture = deps.env?.HEIGE_TEST_WINDOWS_RUNTIME_FIXTURE !== undefined
+        || process.env.HEIGE_TEST_WINDOWS_RUNTIME_FIXTURE !== undefined;
+      let processHasDebugFlag = exact !== null;
+      let portOpen = exact !== null;
+      let portBrowser = null;
+      let appVersion = null;
+      if (!usingRuntimeFixture || typeof deps.runtimeDiagnostics === "function") {
+        const runtimeDiag = await (deps.runtimeDiagnostics ?? runtimeDiagnostics)({
+          platform: "win32",
+          port: selectedPort,
+          product: productId,
+          env: deps.env,
+          exec: deps.exec,
+          fetchImpl: deps.fetchImpl,
+        });
+        processHasDebugFlag = runtimeDiag.processHasDebugFlag;
+        portOpen = runtimeDiag.portOpen;
+        portBrowser = runtimeDiag.portBrowser;
+        appVersion = runtimeDiag.appVersion;
+      }
+      const store = snapshot.app.kind === "StoreAumid" || snapshot.app.kind === "StoreAlias";
+      let loopbackExempt = null;
+      if (store && typeof snapshot.app.aumid === "string") {
+        const bang = snapshot.app.aumid.lastIndexOf("!");
+        const packageFamilyName = bang > 0 ? snapshot.app.aumid.slice(0, bang) : snapshot.app.aumid;
+        loopbackExempt = await (deps.queryWindowsLoopbackExempt ?? queryWindowsLoopbackExempt)({
+          packageFamilyName,
+          env: deps.env ?? process.env,
+        });
+      }
+      const loopbackIsolated = Boolean(
+        store && processRunning && processHasDebugFlag && !portOpen && loopbackExempt !== true,
+      );
       const runtime = {
-        appVersion: null,
-        processRunning: (offline?.process ?? exact?.process ?? null) !== null,
-        processHasDebugFlag: exact !== null,
-        portOpen: exact !== null,
-        portBrowser: null,
+        appVersion,
+        processRunning,
+        processHasDebugFlag,
+        portOpen,
+        portBrowser,
+        loopbackExempt,
+        loopbackIsolated,
+        listenerCount: snapshot.listeners.length,
       };
       return {
         platform: "win32",
