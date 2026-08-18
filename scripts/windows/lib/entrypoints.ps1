@@ -460,6 +460,7 @@ function Test-HeiGeBootstrapRetryableError {
     if ($text -match 'ephemeral controller 未确认皮肤已应用') { return $true }
     if ($text -match '未响应窗口关闭|改为结束已归属主进程') { return $true }
     if ($text -match '调试参数未生效|可能被残留的旧实例接管') { return $true }
+    if ($text -match 'LOCK_ACL_UNTRUSTED') { return $false }
     if ($text -match 'LOCK_PERMISSIONS') { return $true }
     return $false
 }
@@ -476,13 +477,39 @@ function Resolve-HeiGeBootstrapAbortClass {
         ""
     }
 
+    if ($diagnosis -match '^loopback-isolated' -or
+        $text -match 'AppContainer 回环隔离') {
+        return [pscustomobject][ordered]@{
+            Class = "abort-loopback-isolated"
+            Retryable = $false
+            Title = "商店版调试端口被回环隔离"
+            Guidance = "当前 Microsoft Store/MSIX 会话已带调试参数，但本工具无法连入 127.0.0.1 调试端口（AppContainer 回环隔离）。请先运行 scripts\windows\enable-loopback.bat（会申请一次管理员权限），完成后再重试 apply；不必每次申请。Codex 可保持运行。不要复制 WindowsApps，也不要对商店包改 ACL。"
+        }
+    }
     if ($diagnosis -match '^flag-present-port-closed' -or
         $text -match '已带调试参数启动，但端口.*未开放|可能禁用了本机调试端口') {
         return [pscustomobject][ordered]@{
             Class = "abort-incompatible"
             Retryable = $false
             Title = "Codex 调试端口不可用"
-            Guidance = "当前 Codex 已带调试参数但本机调试端口未开放（常见于部分 Microsoft Store/MSIX 会话）。可先完整退出 Codex：运行 scripts\windows\close-codex.bat（保持关闭），再决定是否允许重启或改装官方独立版（非商店版）后重试；若必须使用商店版，请附 doctor 输出与 Codex 版本号开 GitHub Issue。"
+            Guidance = "当前 Codex 已带调试参数但本机调试端口未开放。可先完整退出 Codex：运行 scripts\windows\close-codex.bat（保持关闭）。商店版请先运行 scripts\windows\enable-loopback.bat 后再重试；仍失败再改装官方独立版（非商店版）。若必须使用商店版，请附 doctor 输出与 Codex 版本号开 GitHub Issue。"
+        }
+    }
+    if ($diagnosis -match '^args-dropped' -or
+        $text -match '未把调试参数写入主进程命令行|无法从已验证的商店包路径启动') {
+        return [pscustomobject][ordered]@{
+            Class = "abort-args-dropped"
+            Retryable = $false
+            Title = "商店版未接收调试参数"
+            Guidance = "系统激活未把 --remote-debugging-port 写入 Codex 主进程。请彻底退出 Codex 后重试 apply；若仍失败，改装官方独立版，或附 doctor 输出开 GitHub Issue。不要复制 WindowsApps 目录。"
+        }
+    }
+    if ($text -match 'LOCK_ACL_UNTRUSTED|状态根 ACL 无法|legacy private path grants write') {
+        return [pscustomobject][ordered]@{
+            Class = "abort-acl"
+            Retryable = $false
+            Title = "状态目录 ACL 无法收紧"
+            Guidance = "当前用户的 HeiGe 状态目录不是仅本人可写，且不能安全自动迁移。请关闭所有 HeiGe 相关窗口后删除 %APPDATA%\HeiGeCodexSkinStudio（会丢失本机主题偏好），再重新运行安装/apply。不要对 WindowsApps 改 ACL。"
         }
     }
     if ($text -match '内置 Administrator|禁止该账户启动商店版') {
@@ -718,7 +745,10 @@ function Invoke-HeiGeBootstrapAndApply {
             throw (Format-HeiGeBootstrapFailure -Abort $abort -ErrorObject $_)
         }
         $doctorAbort = Resolve-HeiGeBootstrapAbortClass -Doctor $doctor -ErrorObject $null
-        if ($doctorAbort.Class -ceq "abort-incompatible") {
+        if ($doctorAbort.Class -ceq "abort-incompatible" -or
+            $doctorAbort.Class -ceq "abort-loopback-isolated" -or
+            $doctorAbort.Class -ceq "abort-args-dropped" -or
+            $doctorAbort.Class -ceq "abort-acl") {
             throw (Format-HeiGeBootstrapFailure -Abort $doctorAbort -ErrorObject ([string]$doctor.diagnosis))
         }
         Write-Host ("自检结果：{0}" -f [string]$doctor.diagnosis)
@@ -1003,6 +1033,77 @@ function Get-HeiGePersistenceEnabledHint {
         return $null
     }
     return $null
+}
+
+function Test-HeiGeCurrentUserElevated {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+    return [bool]$principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Invoke-HeiGeEnableLoopbackFlow {
+    param(
+        [switch]$Add,
+        [scriptblock]$AppProvider,
+        [scriptblock]$ElevatedProvider,
+        [scriptblock]$StatusProvider,
+        [scriptblock]$AddProvider
+    )
+    $app = if ($AppProvider) { & $AppProvider } else { Resolve-CodexApp }
+    if (-not (Test-HeiGeStoreAppKind -AppInfo $app)) {
+        throw "当前 Codex 不是 Microsoft Store/MSIX 安装，无需回环豁免。"
+    }
+    $pfn = Get-HeiGePackageFamilyName -AppInfo $app
+    if ([string]::IsNullOrWhiteSpace($pfn)) {
+        throw "当前商店版 Codex 缺少 Package Family Name。"
+    }
+    $exempt = Test-HeiGeLoopbackExempt -PackageFamilyName $pfn -StatusProvider $StatusProvider
+    if (-not $Add.IsPresent) {
+        return [pscustomobject][ordered]@{
+            PackageFamilyName = $pfn
+            Exempt = ($exempt -eq $true)
+            Changed = $false
+        }
+    }
+    $elevated = if ($ElevatedProvider) { [bool](& $ElevatedProvider) } else { Test-HeiGeCurrentUserElevated }
+    if (-not $elevated) {
+        throw "添加回环豁免需要一次管理员权限。请双击 scripts\windows\enable-loopback.bat，或在提升的命令行运行 enable-loopback.ps1 -Add。"
+    }
+    if ($exempt -eq $true) {
+        return [pscustomobject][ordered]@{
+            PackageFamilyName = $pfn
+            Exempt = $true
+            Changed = $false
+        }
+    }
+    if ($AddProvider) {
+        & $AddProvider $pfn | Out-Null
+    } else {
+        $exe = Join-Path $env:SystemRoot "System32\CheckNetIsolation.exe"
+        if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
+            throw "找不到 CheckNetIsolation.exe，无法添加回环豁免。"
+        }
+        $previousErrorAction = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            $output = & $exe LoopbackExempt -a -n=$pfn 2>&1
+            $code = [int]$LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previousErrorAction
+        }
+        if ($code -ne 0) {
+            throw "CheckNetIsolation 添加豁免失败（退出码 $code）：$($output -join ' ')"
+        }
+    }
+    $after = Test-HeiGeLoopbackExempt -PackageFamilyName $pfn -StatusProvider $StatusProvider
+    if ($after -ne $true) {
+        throw "已请求添加回环豁免，但 CheckNetIsolation 列表仍未包含 $pfn。"
+    }
+    return [pscustomobject][ordered]@{
+        PackageFamilyName = $pfn
+        Exempt = $true
+        Changed = $true
+    }
 }
 
 function Invoke-HeiGeCloseCodexFlow {

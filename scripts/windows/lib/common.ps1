@@ -820,9 +820,13 @@ function Set-HeiGePrivatePathAcl {
         } else {
             "*${UserSid}:F"
         }
-        $output = & $icacls $Path /inheritance:r /grant:r $grant 2>&1
+        $grantOutput = & $icacls $Path /inheritance:r /grant:r $grant 2>&1
         if ($LASTEXITCODE -ne 0) {
-            throw "状态目录 ACL 保护失败（Set-Acl 与 icacls 均失败）：$Path；Set-Acl：$detail；icacls：$($output -join ' ')"
+            throw "状态目录 ACL 保护失败（Set-Acl 与 icacls 均失败）：$Path；Set-Acl：$detail；icacls：$($grantOutput -join ' ')"
+        }
+        $ownerOutput = & $icacls $Path /setowner "*${UserSid}" 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            throw "状态目录 ACL 保护失败（icacls /setowner 失败）：$Path；Set-Acl：$detail；icacls：$($ownerOutput -join ' ')"
         }
         return [pscustomobject][ordered]@{ Method = "icacls"; Path = $Path }
     }
@@ -1350,6 +1354,269 @@ Codex 仍在运行，无法自动正常退出（可能最小化到了托盘，�
 "@
 }
 
+function Test-HeiGeStoreAppKind {
+    param($AppInfo)
+    if ($null -eq $AppInfo) { return $false }
+    $kind = [string]$AppInfo.Kind
+    return ($kind -ceq "StoreAumid") -or ($kind -ceq "StoreAlias")
+}
+
+function Get-HeiGePackageFamilyName {
+    param($AppInfo)
+    $aumid = [string]$AppInfo.Aumid
+    if ($aumid -match '^(.+)!.+$') { return [string]$Matches[1] }
+    return $null
+}
+
+function Get-HeiGeCdpTcpListeners {
+    param(
+        [Parameter(Mandatory = $true)][ValidateRange(1, 65535)][int]$Port,
+        [scriptblock]$ConnectionProvider
+    )
+    $connections = @()
+    if ($ConnectionProvider) {
+        $connections = @(& $ConnectionProvider $Port)
+    } else {
+        try {
+            Import-Module NetTCPIP -ErrorAction SilentlyContinue | Out-Null
+            $connections = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop)
+        } catch {
+            foreach ($line in @(netstat -ano -p tcp 2>$null)) {
+                if ($line -notmatch '^\s*TCP\s+(\S+):(\d+)\s+\S+\s+LISTENING\s+(\d+)\s*$') { continue }
+                if ([int]$Matches[2] -ne [int]$Port) { continue }
+                $connections += [pscustomobject]@{
+                    OwningProcess = [int]$Matches[3]
+                    LocalAddress = [string]$Matches[1]
+                    LocalPort = [int]$Port
+                }
+            }
+        }
+    }
+    $listeners = @()
+    foreach ($connection in @($connections)) {
+        $processId = $null
+        if ($connection.PSObject.Properties.Name -contains "OwningProcess") {
+            $processId = $connection.OwningProcess
+        }
+        $address = "127.0.0.1"
+        if ($connection.PSObject.Properties.Name -contains "LocalAddress" -and $connection.LocalAddress) {
+            $address = [string]$connection.LocalAddress
+        }
+        $listeners += [pscustomobject][ordered]@{
+            OwningProcess = [int]$processId
+            LocalAddress = $address
+            LocalPort = [int]$Port
+        }
+    }
+    return @($listeners)
+}
+
+function Test-HeiGeLoopbackExempt {
+    param(
+        [AllowNull()][string]$PackageFamilyName,
+        [scriptblock]$StatusProvider
+    )
+    if ([string]::IsNullOrWhiteSpace($PackageFamilyName)) { return $null }
+    $text = ""
+    if ($StatusProvider) {
+        $text = [string](& $StatusProvider $PackageFamilyName)
+    } else {
+        $exe = Join-Path $env:SystemRoot "System32\CheckNetIsolation.exe"
+        if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { return $null }
+        $previousErrorAction = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            $text = (( & $exe LoopbackExempt -s 2>&1 | ForEach-Object { [string]$_ } ) -join "`n")
+        } finally {
+            $ErrorActionPreference = $previousErrorAction
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($text)) { return $false }
+    return [bool]($text -match [regex]::Escape($PackageFamilyName))
+}
+
+function Get-HeiGeVerifiedStoreExecutable {
+    param(
+        [Parameter(Mandatory = $true)]$AppInfo,
+        $Package,
+        [scriptblock]$ApplicationProvider,
+        [scriptblock]$TestPathProvider
+    )
+    if (-not (Test-HeiGeStoreAppKind -AppInfo $AppInfo)) {
+        throw "已验证包内可执行文件回退只适用于 Windows Store 安装。"
+    }
+    if (-not $AppInfo.InstallPath -or -not $AppInfo.PackageFullName -or -not $AppInfo.Aumid) {
+        throw "已绑定 Store 包缺少不可变身份，拒绝包内可执行文件回退。"
+    }
+    $application = $null
+    if ($ApplicationProvider) {
+        $values = @(& $ApplicationProvider $AppInfo)
+        if ($values.Count -ne 1 -or $null -eq $values[0]) {
+            throw "已绑定 Store AUMID 的不可变应用入口已消失或不唯一。"
+        }
+        $application = $values[0]
+    } else {
+        $currentPackage = $Package
+        if (-not $currentPackage) {
+            $packages = @(Get-CodexStorePackages | Where-Object {
+                [string]$_.PackageFullName -ceq [string]$AppInfo.PackageFullName
+            })
+            if ($packages.Count -ne 1) {
+                throw "已绑定 Store 包的不可变身份已消失或不唯一。"
+            }
+            $currentPackage = $packages[0]
+        }
+        $application = Select-CodexPackageApplication -Package $currentPackage -ProcessPath $null
+    }
+    $relative = [string]$application.Executable
+    if ([string]::IsNullOrWhiteSpace($relative) -or [System.IO.Path]::IsPathRooted($relative)) {
+        throw "Windows Store 可执行入口必须是包内相对路径。"
+    }
+    $segments = @($relative -split '[\\/]' | Where-Object { $_ })
+    if ($segments.Count -eq 0 -or ($segments -contains "..") -or ($segments -contains ".")) {
+        throw "Windows Store 可执行入口包含路径穿越。"
+    }
+    $leaf = $segments[-1]
+    if ($leaf -notmatch '^(ChatGPT|Codex)\.exe$') {
+        throw "Windows Store 可执行入口不是可归属的 Codex 主程序：$leaf"
+    }
+    $candidate = Get-HeiGeFullPath -Path (Join-Path ([string]$AppInfo.InstallPath) ($segments -join [IO.Path]::DirectorySeparatorChar))
+    if (-not (Test-HeiGePathWithin -Root ([string]$AppInfo.InstallPath) -Path $candidate)) {
+        throw "Windows Store 可执行入口不在已绑定安装根内。"
+    }
+    $exists = if ($TestPathProvider) {
+        [bool](& $TestPathProvider $candidate)
+    } else {
+        Test-Path -LiteralPath $candidate -PathType Leaf
+    }
+    if (-not $exists) {
+        throw "Windows Store 包内可执行文件不存在：$candidate"
+    }
+    return $candidate
+}
+
+function Get-HeiGeDebugFlaggedCodexProcesses {
+    param(
+        [Parameter(Mandatory = $true)]$AppInfo,
+        [scriptblock]$ProcessProvider
+    )
+    $records = @()
+    if ($ProcessProvider) {
+        $records = @(& $ProcessProvider)
+    } else {
+        $records = @(Get-CimInstance Win32_Process -Filter "Name='ChatGPT.exe' or Name='Codex.exe'" -ErrorAction SilentlyContinue)
+    }
+    $flagged = @()
+    foreach ($record in $records) {
+        $commandLine = [string]$record.CommandLine
+        if ($commandLine -notmatch "remote-debugging-port") { continue }
+        $path = [string]$record.ExecutablePath
+        if ([string]::IsNullOrWhiteSpace($path)) { continue }
+        if (Test-HeiGeCodexInternalBackendPath -Path $path) { continue }
+        $owner = [pscustomobject]@{
+            Id = [int]$record.ProcessId
+            Path = $path
+            ProcessName = [string]$record.Name
+        }
+        if (-not (Test-CdpOwnerMatchesApp -Owner $owner -App $AppInfo)) { continue }
+        $flagged += $owner
+    }
+    return @($flagged)
+}
+
+function Get-HeiGeCdpLaunchDiagnosis {
+    param(
+        [Parameter(Mandatory = $true)][ValidateRange(1024, 65535)][int]$Port,
+        [Parameter(Mandatory = $true)]$AppInfo,
+        [scriptblock]$EndpointProvider,
+        [scriptblock]$OwnerProvider,
+        [scriptblock]$ConnectionProvider,
+        [scriptblock]$ProcessProvider,
+        [scriptblock]$LoopbackStatusProvider
+    )
+    $httpReady = $false
+    if ($EndpointProvider) {
+        $httpReady = [bool](& $EndpointProvider $Port)
+    } else {
+        $httpReady = [bool](Test-CdpEndpoint -Port $Port)
+    }
+    $owned = $false
+    if ($httpReady) {
+        try {
+            if ($OwnerProvider) {
+                & $OwnerProvider $Port $AppInfo | Out-Null
+            } else {
+                Get-CdpOwner -Port $Port -App $AppInfo | Out-Null
+            }
+            $owned = $true
+        } catch {
+            $owned = $false
+        }
+    }
+    $listeners = @(Get-HeiGeCdpTcpListeners -Port $Port -ConnectionProvider $ConnectionProvider)
+    $flagged = @(Get-HeiGeDebugFlaggedCodexProcesses -AppInfo $AppInfo -ProcessProvider $ProcessProvider)
+    $packageFamilyName = Get-HeiGePackageFamilyName -AppInfo $AppInfo
+    $exempt = $null
+    if (Test-HeiGeStoreAppKind -AppInfo $AppInfo) {
+        $exempt = Test-HeiGeLoopbackExempt -PackageFamilyName $packageFamilyName `
+            -StatusProvider $LoopbackStatusProvider
+    }
+    return [pscustomobject][ordered]@{
+        HttpReady = ($httpReady -and $owned)
+        HasDebugFlag = ($flagged.Count -gt 0)
+        Listeners = $listeners
+        FlaggedProcesses = $flagged
+        LoopbackExempt = $exempt
+        PackageFamilyName = $packageFamilyName
+        Port = $Port
+    }
+}
+
+function Format-HeiGeCdpLaunchFailure {
+    param(
+        [Parameter(Mandatory = $true)]$Diagnosis,
+        [Parameter(Mandatory = $true)]$AppInfo,
+        [Parameter(Mandatory = $true)][int]$Port
+    )
+    $store = Test-HeiGeStoreAppKind -AppInfo $AppInfo
+    $http = [bool]$Diagnosis.HttpReady
+    $flag = [bool]$Diagnosis.HasDebugFlag
+    $rawListeners = $Diagnosis.Listeners
+    $listenerCount = if ($null -eq $rawListeners) { 0 } else { @($rawListeners).Count }
+    $exempt = $Diagnosis.LoopbackExempt
+    if ($http) { return $null }
+    if ($store -and $flag -and ($exempt -ne $true)) {
+        return @"
+商店版调试端口因 AppContainer 回环隔离无法从本工具连入（端口 $Port）。
+请先运行 scripts\windows\enable-loopback.bat（会申请一次管理员权限），完成后再重试 apply；不必每次申请。
+Codex 可保持运行。不要复制 WindowsApps 目录，也不要对商店包改 ACL。
+"@
+    }
+    if ($store -and -not $flag) {
+        return @"
+商店版激活未把调试参数写入主进程命令行（端口 $Port）。
+请彻底退出 Codex 后重试；若包内可执行文件回退仍失败，请改装官方独立版，或附 doctor 输出开 Issue。
+"@
+    }
+    if ($flag -and ($listenerCount -eq 0 -or $exempt -eq $true)) {
+        if ($listenerCount -gt 0 -and $exempt -eq $true) {
+            return @"
+Codex 已带调试参数启动，且商店包已有回环豁免，但端口 $Port 的 HTTP 调试接口仍不可达。
+当前 Codex 版本可能禁用了本机调试端口，或调试端口未绑定到 127.0.0.1。
+建议：改装官方独立版（非 Microsoft Store）客户端后重试；若必须使用商店版，请附 doctor 输出与 Codex 版本号到 https://github.com/HeiGeAi/heige-codex-skin-studio/issues 反馈。
+"@
+        }
+        return @"
+Codex 已带调试参数启动，但端口 $Port 未开放，且本机未见该端口监听：当前 Codex 版本可能禁用了本机调试端口。
+建议：改装官方独立版（非 Microsoft Store）客户端后重试；若必须使用商店版，请先运行 scripts\windows\enable-loopback.bat，仍失败则附 doctor 输出与 Codex 版本号到 https://github.com/HeiGeAi/heige-codex-skin-studio/issues 反馈。
+"@
+    }
+    return @"
+调试参数未生效：可能被残留的旧实例接管，或商店版激活没把参数传进应用。
+请彻底退出 Codex（任务管理器确认无 ChatGPT/Codex 进程）后重试；商店版反复失败请改装官方独立版，或开 Issue 附报错原文。
+"@
+}
+
 function Start-CodexNative {
     param(
         [Parameter(Mandatory = $true)]$AppInfo,
@@ -1378,61 +1645,141 @@ function Start-CodexWithCdp {
         $AppInfo,
         [scriptblock]$SleepProvider,
         [scriptblock]$MainRendererProvider,
-        [scriptblock]$ShowWindowProvider
+        [scriptblock]$ShowWindowProvider,
+        [scriptblock]$EndpointProvider,
+        [scriptblock]$OwnerProvider,
+        [scriptblock]$ConnectionProvider,
+        [scriptblock]$ProcessProvider,
+        [scriptblock]$LoopbackStatusProvider,
+        [scriptblock]$ActivationProvider,
+        [scriptblock]$StartProvider,
+        [scriptblock]$ApplicationProvider,
+        [scriptblock]$TestPathProvider,
+        [scriptblock]$RunningProvider,
+        [scriptblock]$StopProvider,
+        [int]$WaitAttempts = 0
     )
     $ProgressPreference = "SilentlyContinue"
+    if (-not $SleepProvider) {
+        $SleepProvider = { param($Milliseconds) Start-Sleep -Milliseconds $Milliseconds }
+    }
     if (-not $AppInfo) { $AppInfo = Resolve-CodexApp }
-    $app = if ($AppInfo.Kind -eq "StoreAumid") { "aumid:$($AppInfo.Aumid)" } else { $AppInfo.ExecutablePath }
+    $cdpArguments = "--remote-debugging-address=127.0.0.1 --remote-debugging-port=$Port"
     $finish = {
         Wait-HeiGeCodexMainRenderer -Port $Port -AppInfo $AppInfo `
             -SleepProvider $SleepProvider `
             -MainRendererProvider $MainRendererProvider `
             -ShowWindowProvider $ShowWindowProvider | Out-Null
     }
-    if (Test-CdpEndpoint -Port $Port) {
-        Get-CdpOwner -Port $Port -App $AppInfo | Out-Null
+    $probe = {
+        Get-HeiGeCdpLaunchDiagnosis -Port $Port -AppInfo $AppInfo `
+            -EndpointProvider $EndpointProvider `
+            -OwnerProvider $OwnerProvider `
+            -ConnectionProvider $ConnectionProvider `
+            -ProcessProvider $ProcessProvider `
+            -LoopbackStatusProvider $LoopbackStatusProvider
+    }
+    $ready = & $probe
+    if ($ready.HttpReady) {
         Write-Host ("调试端口 {0} 已就绪。" -f $Port)
         & $finish
         return
     }
-    $running = @(Get-RunningCodex -AppInfo $AppInfo)
+    $running = if ($RunningProvider) {
+        @(& $RunningProvider $AppInfo)
+    } else {
+        @(Get-RunningCodex -AppInfo $AppInfo)
+    }
     if ($running) {
         Write-Host "正在正常退出 Codex，以调试端口重新打开……"
-        Stop-CodexNormally -AppInfo $AppInfo | Out-Null
+        if ($StopProvider) {
+            & $StopProvider $AppInfo | Out-Null
+        } else {
+            Stop-CodexNormally -AppInfo $AppInfo | Out-Null
+        }
     }
 
-    $isStore = $app -like "aumid:*"
-    $launchAttempts = if ($isStore) { 2 } else { 1 }
-    for ($launch = 1; $launch -le $launchAttempts; $launch++) {
+    $isStoreAumid = $AppInfo.Kind -eq "StoreAumid"
+    $methodQueue = New-Object System.Collections.Generic.Queue[string]
+    if ($isStoreAumid) {
+        $methodQueue.Enqueue("aumid")
+    } else {
+        $methodQueue.Enqueue("process")
+    }
+    $waitAttempts = if ($WaitAttempts -gt 0) {
+        $WaitAttempts
+    } elseif ($isStoreAumid) {
+        180
+    } else {
+        80
+    }
+    $triedStoreExe = $false
+    while ($methodQueue.Count -gt 0) {
+        $method = [string]$methodQueue.Dequeue()
         try {
-            if ($isStore) {
+            if ($method -eq "aumid") {
                 Write-Host "商店版没有执行别名，改用系统激活接口带参启动……"
                 Write-Host "正在激活 Codex（无需按键，请稍候）……"
-                $activatedPid = Start-CodexViaActivation -Aumid $app.Substring(6) `
-                    -Arguments "--remote-debugging-address=127.0.0.1 --remote-debugging-port=$Port"
+                $activatedPid = if ($ActivationProvider) {
+                    & $ActivationProvider $AppInfo.Aumid $cdpArguments
+                } else {
+                    Start-CodexViaActivation -Aumid $AppInfo.Aumid -Arguments $cdpArguments
+                }
                 Write-Host ("已发出激活请求（PID {0}），等待调试端口 {1} 开放……" -f $activatedPid, $Port)
+            } elseif ($method -eq "store-exe") {
+                $storeExe = Get-HeiGeVerifiedStoreExecutable -AppInfo $AppInfo `
+                    -ApplicationProvider $ApplicationProvider `
+                    -TestPathProvider $TestPathProvider
+                Write-Host "系统激活未带上调试参数，改用已验证的商店包内可执行文件带参启动……"
+                if ($StartProvider) {
+                    & $StartProvider $storeExe @(
+                        "--remote-debugging-address=127.0.0.1",
+                        "--remote-debugging-port=$Port"
+                    ) | Out-Null
+                } else {
+                    Start-Process -FilePath $storeExe -ArgumentList @(
+                        "--remote-debugging-address=127.0.0.1",
+                        "--remote-debugging-port=$Port"
+                    )
+                }
+                Write-Host ("已启动已验证包内 Codex，等待调试端口 {0} 开放……" -f $Port)
             } else {
-                Start-Process -FilePath $app -ArgumentList @(
-                    "--remote-debugging-address=127.0.0.1",
-                    "--remote-debugging-port=$Port"
-                )
+                $launchPath = $AppInfo.ExecutablePath
+                if ($StartProvider) {
+                    & $StartProvider $launchPath @(
+                        "--remote-debugging-address=127.0.0.1",
+                        "--remote-debugging-port=$Port"
+                    ) | Out-Null
+                } else {
+                    Start-Process -FilePath $launchPath -ArgumentList @(
+                        "--remote-debugging-address=127.0.0.1",
+                        "--remote-debugging-port=$Port"
+                    )
+                }
                 Write-Host ("已启动 Codex，等待调试端口 {0} 开放……" -f $Port)
             }
         } catch {
+            $detail = [string]$_.Exception.Message
+            if ($method -eq "store-exe" -and $detail -match 'Access is denied|Access Denied|拒绝访问|0x80070005') {
+                throw @"
+无法从已验证的商店包路径启动 Codex（Access Denied）。
+WindowsApps 下的直接执行常被系统拒绝，这不是可绕过的权限问题。
+请运行 scripts\windows\enable-loopback.bat 后重试 apply，或改装官方独立版。
+"@
+            }
             throw @"
-启动 Codex 失败：$app
-系统报错：$($_.Exception.Message)
+启动 Codex 失败：$($AppInfo.Kind)
+系统报错：$detail
 常见原因与解法：
 1. 正在用内置 Administrator 账户：系统默认禁止该账户启动商店版应用，请换普通用户账户运行。
 2. 安装位置特殊：命令行执行 setx HEIGE_CODEX_APP "完整exe路径"，关掉窗口重开再试。
-3. 商店版反复失败：改装官方独立版（非商店版）客户端最稳。
+3. 商店版反复失败：先运行 scripts\windows\enable-loopback.bat；仍失败再改装官方独立版。
 本脚本不需要管理员权限，用普通权限的命令行运行即可。
 "@
         }
-        $waitAttempts = 80
         for ($i = 0; $i -lt $waitAttempts; $i++) {
-            if (Test-CdpEndpoint -Port $Port) {
-                Get-CdpOwner -Port $Port -App $AppInfo | Out-Null
+            $current = & $probe
+            if ($current.HttpReady) {
                 Write-Host ("调试端口 {0} 已就绪。" -f $Port)
                 & $finish
                 return
@@ -1441,29 +1788,30 @@ function Start-CodexWithCdp {
                 Write-Host ("仍在等待调试端口 {0}… {1}/{2}（约 {3} 秒）" -f `
                     $Port, ($i + 1), $waitAttempts, [int](($i + 1) * 0.25))
             }
-            Start-Sleep -Milliseconds 250
+            & $SleepProvider 250 | Out-Null
         }
 
-        $flagged = @(Get-CimInstance Win32_Process -Filter "Name='ChatGPT.exe' or Name='Codex.exe'" -ErrorAction SilentlyContinue |
-            Where-Object {
-                $_.CommandLine -match "remote-debugging-port" -and
-                -not (Test-HeiGeCodexInternalBackendPath -Path ([string]$_.ExecutablePath))
-            })
-        if ($flagged.Count -gt 0) {
-            throw @"
-Codex 已带调试参数启动，但端口 $Port 未开放：当前 Codex 版本或本机 MSIX 会话可能禁用了本机调试端口。
-建议：改装官方独立版（非 Microsoft Store）客户端后重试；若必须使用商店版，请附 doctor 输出与 Codex 版本号到 https://github.com/HeiGeAi/heige-codex-skin-studio/issues 反馈。
-"@
+        $diagnosis = & $probe
+        if ($diagnosis.HttpReady) {
+            Write-Host ("调试端口 {0} 已就绪。" -f $Port)
+            & $finish
+            return
         }
-        if ($launch -lt $launchAttempts) {
-            Write-Host "商店版激活未带上调试参数，正在再次退出并重试……"
-            Stop-CodexNormally -AppInfo $AppInfo | Out-Null
+        if ($isStoreAumid -and $diagnosis.HasDebugFlag -and ($diagnosis.LoopbackExempt -ne $true)) {
+            throw (Format-HeiGeCdpLaunchFailure -Diagnosis $diagnosis -AppInfo $AppInfo -Port $Port)
+        }
+        if ($isStoreAumid -and -not $diagnosis.HasDebugFlag -and $method -eq "aumid" -and -not $triedStoreExe) {
+            Write-Host "商店版激活未把调试参数写入主进程命令行，正在退出并以已验证包内可执行文件回退……"
+            if ($StopProvider) {
+                & $StopProvider $AppInfo | Out-Null
+            } else {
+                Stop-CodexNormally -AppInfo $AppInfo | Out-Null
+            }
+            $triedStoreExe = $true
+            $methodQueue.Enqueue("store-exe")
             continue
         }
-        throw @"
-调试参数未生效：可能被残留的旧实例接管，或商店版激活没把参数传进应用。
-请彻底退出 Codex（任务管理器确认无 ChatGPT/Codex 进程）后重试；商店版反复失败请改装官方独立版，或开 Issue 附报错原文。
-"@
+        throw (Format-HeiGeCdpLaunchFailure -Diagnosis $diagnosis -AppInfo $AppInfo -Port $Port)
     }
 }
 
@@ -1565,5 +1913,161 @@ function Invoke-HeiGeRestartCodexIntoCdp {
         Restarted = $true
         CdpMode = $true
         Port = $Port
+    }
+}
+
+function Start-HeiGeBreakawayNodeProcess {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [Parameter(Mandatory = $true)][string[]]$ArgumentList
+    )
+    $resolved = [System.IO.Path]::GetFullPath($FilePath)
+    if (-not (Test-Path -LiteralPath $resolved -PathType Leaf)) {
+        throw "Breakaway 可执行文件不存在：$resolved"
+    }
+    if (
+        $ArgumentList.Count -lt 3 -or
+        [string]$ArgumentList[1] -cne "controller" -or
+        [string]$ArgumentList[2] -cne "--ephemeral"
+    ) {
+        throw "session controller 参数必须是 cli.mjs controller --ephemeral …"
+    }
+    foreach ($item in @($resolved) + @($ArgumentList)) {
+        if ([string]$item -match '[\r\n"]') {
+            throw "session controller 参数包含不允许的字符"
+        }
+    }
+    $quoted = @('"' + $resolved + '"')
+    foreach ($item in $ArgumentList) { $quoted += '"' + [string]$item + '"' }
+    $commandLine = $quoted -join " "
+
+    if (-not ("HeiGe.BreakawayProcess" -as [type])) {
+        Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+
+namespace HeiGe {
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct BreakawayStartupInfo {
+        public int cb;
+        public string lpReserved;
+        public string lpDesktop;
+        public string lpTitle;
+        public int dwX;
+        public int dwY;
+        public int dwXSize;
+        public int dwYSize;
+        public int dwXCountChars;
+        public int dwYCountChars;
+        public int dwFillAttribute;
+        public int dwFlags;
+        public short wShowWindow;
+        public short cbReserved2;
+        public IntPtr lpReserved2;
+        public IntPtr hStdInput;
+        public IntPtr hStdOutput;
+        public IntPtr hStdError;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct BreakawayProcessInfo {
+        public IntPtr hProcess;
+        public IntPtr hThread;
+        public int dwProcessId;
+        public int dwThreadId;
+    }
+
+    public static class BreakawayProcess {
+        public const uint CreateNoWindow = 0x08000000;
+        public const uint CreateNewProcessGroup = 0x00000200;
+        public const uint CreateBreakawayFromJob = 0x01000000;
+        public const int StartFUseShowWindow = 1;
+
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        static extern bool CreateProcess(
+            string lpApplicationName,
+            StringBuilder lpCommandLine,
+            IntPtr lpProcessAttributes,
+            IntPtr lpThreadAttributes,
+            bool bInheritHandles,
+            uint dwCreationFlags,
+            IntPtr lpEnvironment,
+            string lpCurrentDirectory,
+            ref BreakawayStartupInfo lpStartupInfo,
+            out BreakawayProcessInfo lpProcessInformation);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool CloseHandle(IntPtr hObject);
+
+        public static bool Launch(string applicationName, string commandLine, bool breakaway, out int pid, out int win32Error) {
+            var si = new BreakawayStartupInfo();
+            si.cb = Marshal.SizeOf(typeof(BreakawayStartupInfo));
+            si.dwFlags = StartFUseShowWindow;
+            si.wShowWindow = 0;
+            BreakawayProcessInfo pi;
+            uint flags = CreateNoWindow | CreateNewProcessGroup;
+            if (breakaway) flags |= CreateBreakawayFromJob;
+            var command = new StringBuilder(commandLine);
+            if (!CreateProcess(applicationName, command, IntPtr.Zero, IntPtr.Zero, false, flags, IntPtr.Zero, null, ref si, out pi)) {
+                pid = 0;
+                win32Error = Marshal.GetLastWin32Error();
+                return false;
+            }
+            pid = pi.dwProcessId;
+            win32Error = 0;
+            if (pi.hThread != IntPtr.Zero) CloseHandle(pi.hThread);
+            if (pi.hProcess != IntPtr.Zero) CloseHandle(pi.hProcess);
+            return pid > 0;
+        }
+    }
+}
+"@
+    }
+
+    [int]$pidValue = 0
+    [int]$win32Error = 0
+    $method = "breakaway"
+    $ok = [HeiGe.BreakawayProcess]::Launch($resolved, $commandLine, $true, [ref]$pidValue, [ref]$win32Error)
+    if (-not $ok) {
+        $method = "new-process-group"
+        $ok = [HeiGe.BreakawayProcess]::Launch($resolved, $commandLine, $false, [ref]$pidValue, [ref]$win32Error)
+    }
+    if ($ok -and $pidValue -gt 0) {
+        return [pscustomobject][ordered]@{
+            Pid = [int]$pidValue
+            Method = $method
+        }
+    }
+
+    $taskName = "HeiGeSession-" + [guid]::NewGuid().ToString("N").Substring(0, 12)
+    $argumentText = (@($ArgumentList | ForEach-Object { '"' + $_ + '"' })) -join " "
+    $action = New-ScheduledTaskAction -Execute $resolved -Argument $argumentText
+    $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
+        -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew
+    Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal `
+        -Settings $settings | Out-Null
+    try {
+        Start-ScheduledTask -TaskName $taskName
+        $deadline = [datetime]::UtcNow.AddSeconds(8)
+        do {
+            $match = @(Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue |
+                Where-Object {
+                    [string]$_.CommandLine -like "*controller*" -and
+                    [string]$_.CommandLine -like "*--ephemeral*"
+                } |
+                Select-Object -First 1)
+            if ($match.Count -eq 1 -and [int]$match[0].ProcessId -gt 0) {
+                return [pscustomobject][ordered]@{
+                    Pid = [int]$match[0].ProcessId
+                    Method = "scheduled-task"
+                }
+            }
+            Start-Sleep -Milliseconds 200
+        } while ([datetime]::UtcNow -lt $deadline)
+        throw "session controller scheduled task started but process was not observed"
+    } finally {
+        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
     }
 }
