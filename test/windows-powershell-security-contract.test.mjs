@@ -24,6 +24,19 @@ test("Windows PowerShell carries one immutable app identity through entrypoint t
   assert.match(scheduledTask, /ConvertFrom-HeiGeCodexAppIdentityToken/);
 });
 
+test("Windows icacls fallback sets owner with a starred SID in a separate invocation", async () => {
+  const [common, secureFs] = await Promise.all([
+    source("scripts/windows/lib/common.ps1"),
+    source("src/windows-secure-fs.mjs"),
+  ]);
+  assert.match(common, /\/inheritance:r \/grant:r \$grant/);
+  assert.match(common, /\/setowner "\*\$\{UserSid\}"/);
+  assert.equal(common.includes("/inheritance:r /setowner"), false);
+  assert.match(secureFs, /\/inheritance:r \/grant:r \$grant/);
+  assert.match(secureFs, /\/setowner \('\*\{0\}' -f \$sidText\)/);
+  assert.equal(secureFs.includes("/inheritance:r /setowner"), false);
+});
+
 test("Windows bound resolver is token-directed and the runtime rejects foreign app processes", async () => {
   const [common, runtime] = await Promise.all([
     source("scripts/windows/lib/common.ps1"),
@@ -36,10 +49,14 @@ test("Windows bound resolver is token-directed and the runtime rejects foreign a
   assert.match(runtime, /foreign Windows Codex process/i);
 });
 
-test("Windows PowerShell process mode traverses every owned node and rejects cycles", async () => {
-  const entrypoints = await source("scripts/windows/lib/entrypoints.ps1");
-  assert.match(entrypoints, /ownership cycle|归属环|进程图.*环/i);
-  assert.match(entrypoints, /orphan component|孤立.*组件|进程图.*孤立/i);
-  assert.match(entrypoints, /不属于已绑定|foreign.*identity/i);
-  assert.match(entrypoints, /visited/i);
+test("Windows session controller breakaway starter only launches ephemeral controller argv", async () => {
+  const [common, starter] = await Promise.all([
+    source("scripts/windows/lib/common.ps1"),
+    source("scripts/windows/start-session-controller.ps1"),
+  ]);
+  assert.match(common, /function Start-HeiGeBreakawayNodeProcess/);
+  assert.match(common, /CREATE_BREAKAWAY_FROM_JOB|CreateBreakawayFromJob/);
+  assert.match(common, /HeiGeSession-/);
+  assert.match(starter, /Start-HeiGeBreakawayNodeProcess/);
+  assert.match(starter, /ArgumentsJson/);
 });

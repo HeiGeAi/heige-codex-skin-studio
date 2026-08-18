@@ -681,6 +681,59 @@ test("Windows operation lease safely migrates a current-user-owned legacy state 
   assert.equal(await lease.assertOwned(), true);
 });
 
+test("Windows operation lease protects a current-user HeiGe state root that still has untrusted inherited ACLs", async (t) => {
+  const { root } = await fixture(t);
+  const stateRoot = join(root, "legacy-untrusted-state");
+  const lockPath = join(stateRoot, "operation.lock");
+  await mkdir(stateRoot);
+  await writeFile(join(stateRoot, "state.json"), "{}\n");
+  const securityEvents = [];
+  const lease = await acquireOperationLock(acquisitionOptions(lockPath, {
+    platform: "win32",
+    stateRoot,
+    windowsSecurity: {
+      async protectDirectory(path) { securityEvents.push(["protect-directory", path]); },
+      async protectFile(path) { securityEvents.push(["protect-file", path]); },
+      async migrateDirectory(path) {
+        securityEvents.push(["migrate-directory", path]);
+        throw new Error("legacy private path grants write access to an untrusted identity");
+      },
+      async migrateFile(path) { securityEvents.push(["migrate-file", path]); },
+      async verifyDirectory(path) { securityEvents.push(["verify-directory", path]); },
+      async verifyFile(path) { securityEvents.push(["verify-file", path]); },
+    },
+  }));
+  t.after(() => lease.release());
+  assert.equal(securityEvents[0][0], "migrate-directory");
+  assert.equal(securityEvents.some(([action]) => action === "protect-directory"), true);
+  assert.equal(await lease.assertOwned(), true);
+});
+
+test("Windows operation lease refuses to take over a state root that contains unknown files", async (t) => {
+  const { root } = await fixture(t);
+  const stateRoot = join(root, "foreign-untrusted-state");
+  const lockPath = join(stateRoot, "operation.lock");
+  await mkdir(stateRoot);
+  await writeFile(join(stateRoot, "notes.txt"), "not heige\n");
+  await assert.rejects(
+    acquireOperationLock(acquisitionOptions(lockPath, {
+      platform: "win32",
+      stateRoot,
+      windowsSecurity: {
+        async protectDirectory() { throw new Error("must not protect a foreign state root"); },
+        async protectFile() {},
+        async migrateDirectory() {
+          throw new Error("legacy private path grants write access to an untrusted identity");
+        },
+        async migrateFile() {},
+        async verifyDirectory() {},
+        async verifyFile() {},
+      },
+    })),
+    (error) => error.code === "LOCK_ACL_UNTRUSTED",
+  );
+});
+
 test("Windows operation lease has one concurrent winner and recovers a proven-dead owner", async (t) => {
   const { root } = await fixture(t);
   const stateRoot = join(root, "windows-state");

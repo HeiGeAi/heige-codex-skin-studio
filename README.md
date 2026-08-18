@@ -55,7 +55,7 @@ Windows 11 版本现已发布：[查看最新 Release](https://github.com/HeiGeA
 - 隐藏按钮：顶部主题入口可选择「隐藏此按钮」，收起为小圆点；点击即可恢复，状态会保存。
 - 随机主题：提供持久化的随机主题开关，随机选择主题并尽量避免连续重复。
 
-> Microsoft Store/MSIX 客户端仍需真机验证；若其阻止本机调试端口，自动接管无法完成。
+> Microsoft Store/MSIX 客户端仍需真机验证。商店版若报回环隔离，可先运行 `scripts\windows\enable-loopback.bat`（一次管理员权限）再重试 apply；自动接管在端口仍不可达时无法完成。
 
 ## WorkBuddy（腾讯 CodeBuddy 桌面端）
 
@@ -81,7 +81,7 @@ open "<仓库路径>/scripts/install.command"
 
 装完默认应用 Miku 预设。之后所有切换都在 Codex 顶部中间的 🎨 菜单里完成：12 套内置主题、原生界面、深浅外观联动，即点即换。应用皮肤时 Codex 会正常退出并以本机调试模式重新打开，当前任务先保存。
 
-Windows 用 `scripts\windows\install.bat` 安装；日常入口是 `scripts/windows/apply.ps1`、兼容名 `scripts/windows/enable-skin.bat`（只恢复当前会话）、`scripts/windows/pause.ps1`、`scripts/windows/resume.ps1`、`scripts/windows/restore.ps1` 和 `scripts/windows/close-codex.bat`（只安全完整退出 Codex/GPT 桌面端并保持关闭，不改常驻、不自动重启）。彻底移除时运行 `scripts\windows\uninstall.bat`：它会注销当前用户计划任务、移除开始菜单入口、清理 AppData 状态和稳定安装目录。即使稳定安装目录已被手动删除，也可从源码目录运行该卸载入口清理残留。Microsoft Store/MSIX 真机待验证，细节见[完整手册](docs/manual.md)。
+Windows 用 `scripts\windows\install.bat` 安装；日常入口是 `scripts/windows/apply.ps1`、兼容名 `scripts/windows/enable-skin.bat`（只恢复当前会话）、`scripts/windows/pause.ps1`、`scripts/windows/resume.ps1`、`scripts/windows/restore.ps1`、`scripts/windows/close-codex.bat`（只安全完整退出 Codex/GPT 桌面端并保持关闭，不改常驻、不自动重启）和 `scripts/windows/enable-loopback.bat`（商店版回环隔离时一次性提权豁免，不在每次 apply 时弹 UAC）。彻底移除时运行 `scripts\windows\uninstall.bat`：它会注销当前用户计划任务、移除开始菜单入口、清理 AppData 状态和稳定安装目录。即使稳定安装目录已被手动删除，也可从源码目录运行该卸载入口清理残留。Microsoft Store/MSIX 真机待验证，细节见[完整手册](docs/manual.md)。
 
 ## 用一张图做你自己的主题
 

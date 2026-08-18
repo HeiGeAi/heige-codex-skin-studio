@@ -52,7 +52,7 @@ macOS (requires an installed Codex Desktop):
 open "<repo-path>/scripts/install.command"
 ```
 
-Windows: run `scripts\windows\install.bat`, then use `scripts/windows/apply.ps1`, the session-only compatibility entry `scripts/windows/enable-skin.bat`, `scripts/windows/pause.ps1`, `scripts/windows/resume.ps1`, and `scripts/windows/restore.ps1`. Microsoft Store/MSIX activation is implemented but still pending live-machine validation.
+Windows: run `scripts\windows\install.bat`, then use `scripts/windows/apply.ps1`, the session-only compatibility entry `scripts/windows/enable-skin.bat`, `scripts/windows/pause.ps1`, `scripts/windows/resume.ps1`, `scripts/windows/restore.ps1`, and `scripts/windows/enable-loopback.bat` if a Store/MSIX session reports AppContainer loopback isolation. Microsoft Store/MSIX activation and loopback exemption are implemented but still pending live-machine validation.
 
 Applying a skin quits Codex normally and relaunches it with a local debug port, so save your work first. A system Node runtime must be Node.js 22 or newer.
 

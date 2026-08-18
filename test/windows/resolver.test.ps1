@@ -149,7 +149,13 @@ const app = decodeWindowsAppIdentityToken(process.argv[3]);
 process.stdout.write(JSON.stringify(app));
 '@
         [System.IO.File]::WriteAllText($nodeHelper, $nodeScript, [System.Text.UTF8Encoding]::new($false))
-        $json = & $nodePath $nodeHelper $runtimeModule $token 2>&1
+        $previousOutputEncoding = [Console]::OutputEncoding
+        try {
+            [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+            $json = & $nodePath $nodeHelper $runtimeModule $token 2>&1
+        } finally {
+            [Console]::OutputEncoding = $previousOutputEncoding
+        }
         if ($LASTEXITCODE -ne 0) {
             throw "Node rejected the canonical PowerShell identity token: $($json -join "`n")"
         }
@@ -510,6 +516,74 @@ process.stdout.write(JSON.stringify(app));
         $reverse = @($forward[1], $forward[0])
         Assert-Throws { Get-CdpOwner -Port 9341 -App $script:Win32App -ProcessProvider { param($Port) $forward } } "冲突路径记录"
         Assert-Throws { Get-CdpOwner -Port 9341 -App $script:Win32App -ProcessProvider { param($Port) $reverse } } "冲突路径记录"
+    }
+
+    Test-Case "Package family name comes from the AUMID" {
+        Assert-Equal "OpenAI.Codex_8wekyb3d8bbwe" (Get-HeiGePackageFamilyName -AppInfo $script:StoreApp)
+        Assert-Equal $null (Get-HeiGePackageFamilyName -AppInfo $script:Win32App)
+        Assert-True (Test-HeiGeStoreAppKind -AppInfo $script:StoreApp)
+        Assert-False (Test-HeiGeStoreAppKind -AppInfo $script:Win32App)
+    }
+
+    Test-Case "Loopback exempt detection matches the package family name" {
+        $pfn = Get-HeiGePackageFamilyName -AppInfo $script:StoreApp
+        Assert-True (Test-HeiGeLoopbackExempt -PackageFamilyName $pfn -StatusProvider {
+            param($Name)
+            "List Loopback Exempted AppContainers`nName: $Name"
+        })
+        Assert-False (Test-HeiGeLoopbackExempt -PackageFamilyName $pfn -StatusProvider {
+            param($Name)
+            "List Loopback Exempted AppContainers"
+        })
+        Assert-Equal $null (Test-HeiGeLoopbackExempt -PackageFamilyName $null)
+    }
+
+    Test-Case "Verified Store executable stays inside the bound package and rejects traversal" {
+        $exe = Get-HeiGeVerifiedStoreExecutable -AppInfo $script:StoreApp `
+            -ApplicationProvider { param($AppInfo) [pscustomobject]@{ Id = "App"; Executable = "app\Codex.exe" } } `
+            -TestPathProvider { param($Path) $Path -eq $script:CodexExe }
+        Assert-Equal $script:CodexExe $exe
+        Assert-Throws {
+            Get-HeiGeVerifiedStoreExecutable -AppInfo $script:StoreApp `
+                -ApplicationProvider { param($AppInfo) [pscustomobject]@{ Id = "App"; Executable = "..\..\Windows\System32\cmd.exe" } } `
+                -TestPathProvider { param($Path) $true }
+        } "路径穿越"
+        Assert-Throws {
+            Get-HeiGeVerifiedStoreExecutable -AppInfo $script:Win32App
+        } "只适用于 Windows Store"
+    }
+
+    Test-Case "CDP launch failure classifies Store loopback isolation separately from dropped args" {
+        $loopback = Format-HeiGeCdpLaunchFailure -AppInfo $script:StoreApp -Port 9341 -Diagnosis ([pscustomobject]@{
+            HttpReady = $false
+            HasDebugFlag = $true
+            Listeners = @([pscustomobject]@{ LocalAddress = "127.0.0.1"; LocalPort = 9341 })
+            LoopbackExempt = $false
+        })
+        Assert-Match "AppContainer 回环隔离" $loopback
+        $dropped = Format-HeiGeCdpLaunchFailure -AppInfo $script:StoreApp -Port 9341 -Diagnosis ([pscustomobject]@{
+            HttpReady = $false
+            HasDebugFlag = $false
+            Listeners = @()
+            LoopbackExempt = $false
+        })
+        Assert-Match "未把调试参数写入主进程命令行" $dropped
+        $incompatible = Format-HeiGeCdpLaunchFailure -AppInfo $script:Win32App -Port 9341 -Diagnosis ([pscustomobject]@{
+            HttpReady = $false
+            HasDebugFlag = $true
+            Listeners = @()
+            LoopbackExempt = $null
+        })
+        Assert-Match "本机未见该端口监听" $incompatible
+        $exemptedStillClosed = Format-HeiGeCdpLaunchFailure -AppInfo $script:StoreApp -Port 9341 -Diagnosis ([pscustomobject]@{
+            HttpReady = $false
+            HasDebugFlag = $true
+            Listeners = @([pscustomobject]@{ LocalAddress = "127.0.0.1"; LocalPort = 9341 })
+            LoopbackExempt = $true
+        })
+        Assert-Match "已有回环豁免" $exemptedStillClosed
+        Assert-Match "可能禁用了本机调试端口" $exemptedStillClosed
+        Assert-True ($exemptedStillClosed -notmatch "AppContainer 回环隔离")
     }
 } finally {
     $env:LOCALAPPDATA = $script:OriginalLocalAppData

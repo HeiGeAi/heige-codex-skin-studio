@@ -1098,6 +1098,43 @@ test("delete-user-theme is drained even when session theme lags the launcher sta
   assert.equal(result.interactive, true);
 });
 
+test("set-theme is drained even when an enable journal is still pending", async () => {
+  const selected = "genshin-night";
+  const fx = fixture({
+    validateThemeSelection: async (themeId) => themeId === selected || themeId === DEFAULT_THEME_ID,
+  });
+  const controller = createSkinController(fx.deps);
+  await controller.start();
+  await fx.deps.writeJournal({
+    schemaVersion: 1,
+    operation: "enable-persistence",
+    expectedRevision: 1,
+    process: clone(CURRENT_PROCESS),
+    desiredPersistenceEnabled: true,
+    nonce: "pending-enable-theme-drain",
+    stage: "session-committed",
+  });
+  fx.setHealth(rendererRequestHealth({
+    schemaVersion: 1,
+    requestId: "e".repeat(32),
+    action: "set-theme",
+    capability: CONTROL_TOKEN,
+    expectedRevision: 1,
+    themeId: selected,
+  }));
+
+  const result = await controller.tick();
+
+  assert.equal(fx.state.selectedThemeId, selected);
+  assert.deepEqual(fx.calls.themeDelivery, [{
+    requestId: "e".repeat(32),
+    themeId: selected,
+    revision: 2,
+    persistenceEnabled: true,
+  }]);
+  assert.equal(result.interactive, true);
+});
+
 test("serializes overlapping controller lease operations before theme selection", async () => {
   const selected = "genshin-night";
   const fx = fixture({

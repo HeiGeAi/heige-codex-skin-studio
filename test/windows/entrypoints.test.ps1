@@ -276,6 +276,160 @@ try {
         } "abort-incompatible"
     }
 
+    Test-Case "Bootstrap aborts Store loopback isolation without retrying apply" {
+        Assert-Throws {
+            Invoke-HeiGeApplyFlow -Root $script:InstallRoot -Theme "miku-488137" -Port 9341 `
+                -MaxApplyAttempts 2 `
+                -ContextProvider { New-TestEntrypointContext } `
+                -DoctorProvider {
+                    param($Context, $Port)
+                    [pscustomobject]@{
+                        diagnosis = "loopback-isolated：商店版已带调试参数，但 AppContainer 回环隔离阻止本工具连入"
+                    }
+                } `
+                -HygieneProvider { param($Context, $Port) } `
+                -CdpStatusProvider { param($Context, $Port) $false } `
+                -SleepProvider { param($Milliseconds) throw "should not retry loopback isolation" } `
+                -CliProvider { param($Context, $Arguments) throw "should not apply" }
+        } "abort-loopback-isolated"
+    }
+
+    Test-Case "Bootstrap aborts dropped Store CDP arguments without retrying apply" {
+        Assert-Throws {
+            Invoke-HeiGeApplyFlow -Root $script:InstallRoot -Theme "miku-488137" -Port 9341 `
+                -MaxApplyAttempts 2 `
+                -ContextProvider { New-TestEntrypointContext } `
+                -SkipDoctor `
+                -HygieneProvider { param($Context, $Port) } `
+                -CdpStatusProvider { param($Context, $Port) $false } `
+                -ProcessProvider { param($Context) @() } `
+                -StartCdpProvider {
+                    param($Context, $Port)
+                    throw "商店版激活未把调试参数写入主进程命令行（端口 9341）。"
+                } `
+                -SleepProvider { param($Milliseconds) throw "should not retry dropped args" } `
+                -CliProvider { param($Context, $Arguments) throw "should not apply" }
+        } "abort-args-dropped"
+    }
+
+    Test-Case "Store CDP launch falls back to the verified package executable after AUMID drops args" {
+        $storeApp = [pscustomobject]@{
+            Kind = "StoreAumid"
+            ExecutablePath = $null
+            InstallPath = "C:\Program Files\WindowsApps\OpenAI.Codex_1.0.0.0_x64__2p2nqsd0c76g0"
+            ProductName = "Codex"
+            PackageFullName = "OpenAI.Codex_1.0.0.0_x64__2p2nqsd0c76g0"
+            Aumid = "OpenAI.Codex_2p2nqsd0c76g0!App"
+        }
+        $storeExe = "C:\Program Files\WindowsApps\OpenAI.Codex_1.0.0.0_x64__2p2nqsd0c76g0\app\ChatGPT.exe"
+        $script:Events = @()
+        $script:Flagged = $false
+        $script:Http = $false
+        Start-CodexWithCdp -Port 9341 -AppInfo $storeApp -WaitAttempts 1 `
+            -SleepProvider { param($Milliseconds) } `
+            -RunningProvider { param($AppInfo) @() } `
+            -EndpointProvider { param($Port) [bool]$script:Http } `
+            -OwnerProvider { param($Port, $AppInfo) } `
+            -ConnectionProvider { param($Port) @() } `
+            -ProcessProvider {
+                if ($script:Flagged) {
+                    @(
+                        [pscustomobject]@{
+                            ProcessId = 42
+                            CommandLine = "$storeExe --remote-debugging-port=9341"
+                            ExecutablePath = $storeExe
+                            Name = "ChatGPT.exe"
+                        }
+                    )
+                } else {
+                    @()
+                }
+            } `
+            -LoopbackStatusProvider { param($Name) "Name: $Name" } `
+            -ActivationProvider {
+                param($Aumid, $Arguments)
+                $script:Events += "aumid:$Aumid"
+                Assert-Match "remote-debugging-port=9341" $Arguments
+                return 100
+            } `
+            -StopProvider { param($AppInfo) $script:Events += "stop" } `
+            -ApplicationProvider { param($AppInfo) [pscustomobject]@{ Id = "App"; Executable = "app\ChatGPT.exe" } } `
+            -TestPathProvider { param($Path) $Path -eq $storeExe } `
+            -StartProvider {
+                param($Path, $ArgumentList)
+                $script:Events += ("exe:" + $Path)
+                $script:Flagged = $true
+                $script:Http = $true
+            } `
+            -MainRendererProvider { param($Port) $true } `
+            -ShowWindowProvider { param($Info) $true } | Out-Null
+        Assert-True ($script:Events -contains "aumid:OpenAI.Codex_2p2nqsd0c76g0!App")
+        Assert-True ($script:Events -contains "stop")
+        Assert-True ($script:Events -contains ("exe:" + $storeExe))
+    }
+
+    Test-Case "Store CDP launch reports loopback isolation when flags are present and HTTP is closed" {
+        $storeApp = [pscustomobject]@{
+            Kind = "StoreAumid"
+            ExecutablePath = $null
+            InstallPath = "C:\Program Files\WindowsApps\OpenAI.Codex_1.0.0.0_x64__2p2nqsd0c76g0"
+            ProductName = "Codex"
+            PackageFullName = "OpenAI.Codex_1.0.0.0_x64__2p2nqsd0c76g0"
+            Aumid = "OpenAI.Codex_2p2nqsd0c76g0!App"
+        }
+        $storeExe = "C:\Program Files\WindowsApps\OpenAI.Codex_1.0.0.0_x64__2p2nqsd0c76g0\app\ChatGPT.exe"
+        Assert-Throws {
+            Start-CodexWithCdp -Port 9341 -AppInfo $storeApp -WaitAttempts 1 `
+                -SleepProvider { param($Milliseconds) } `
+                -RunningProvider { param($AppInfo) @() } `
+                -EndpointProvider { param($Port) $false } `
+                -ConnectionProvider {
+                    param($Port)
+                    @([pscustomobject]@{ OwningProcess = 42; LocalAddress = "127.0.0.1"; LocalPort = $Port })
+                } `
+                -ProcessProvider {
+                    @(
+                        [pscustomobject]@{
+                            ProcessId = 42
+                            CommandLine = "$storeExe --remote-debugging-port=9341"
+                            ExecutablePath = $storeExe
+                            Name = "ChatGPT.exe"
+                        }
+                    )
+                } `
+                -LoopbackStatusProvider { param($Name) "List Loopback Exempted AppContainers" } `
+                -ActivationProvider { param($Aumid, $Arguments) 77 } `
+                -StartProvider { param($Path, $ArgumentList) throw "should not start package exe when flags are present" } `
+                -MainRendererProvider { param($Port) $true }
+        } "AppContainer 回环隔离"
+    }
+
+    Test-Case "Loopback exemption add requires elevation and is idempotent when already present" {
+        $storeApp = [pscustomobject]@{
+            Kind = "StoreAumid"
+            ExecutablePath = $null
+            InstallPath = "C:\Program Files\WindowsApps\OpenAI.Codex_1.0.0.0_x64__2p2nqsd0c76g0"
+            ProductName = "Codex"
+            PackageFullName = "OpenAI.Codex_1.0.0.0_x64__2p2nqsd0c76g0"
+            Aumid = "OpenAI.Codex_2p2nqsd0c76g0!App"
+        }
+        Assert-Throws {
+            Invoke-HeiGeEnableLoopbackFlow -Add `
+                -AppProvider { $storeApp } `
+                -ElevatedProvider { $false } `
+                -StatusProvider { param($Name) "" }
+        } "管理员权限"
+        $script:Added = $false
+        $result = Invoke-HeiGeEnableLoopbackFlow -Add `
+            -AppProvider { $storeApp } `
+            -ElevatedProvider { $true } `
+            -StatusProvider { param($Name) "Name: $Name" } `
+            -AddProvider { param($Name) $script:Added = $true }
+        Assert-True $result.Exempt
+        Assert-False $result.Changed
+        Assert-False $script:Added
+    }
+
     Test-Case "Process mode ignores LOCALAPPDATA Codex bin backend under a Store app" {
         $backend = Join-Path $env:LOCALAPPDATA "OpenAI\Codex\bin\unit-test\codex.exe"
         if (-not $env:LOCALAPPDATA) { throw "LOCALAPPDATA required" }
@@ -1761,7 +1915,7 @@ try {
 
     Test-Case "BAT wrappers preserve the captured PowerShell failure code" {
         foreach ($name in @(
-            "apply.bat", "customize.bat", "close-codex.bat", "enable-skin.bat", "install.bat", "pause.bat", "resume.bat", "restore.bat", "uninstall.bat"
+            "apply.bat", "customize.bat", "close-codex.bat", "enable-loopback.bat", "enable-skin.bat", "install.bat", "pause.bat", "resume.bat", "restore.bat", "uninstall.bat"
         )) {
             $source = [System.IO.File]::ReadAllText(
                 (Join-Path $script:RepositoryRoot ("scripts\windows\" + $name))
@@ -1781,6 +1935,7 @@ try {
         Assert-Match '任务栏' $batExit
         Assert-Match 'HEIGE_PAUSE_HINT_STYLE' $batExit
         Assert-Match 'HEIGE_PAUSE_HINT_STYLE -eq "close"' $batExit
+        Assert-Match 'HEIGE_PAUSE_HINT_STYLE -eq "loopback"' $batExit
         $uninstallBat = [System.IO.File]::ReadAllText(
             (Join-Path $script:RepositoryRoot "scripts\windows\uninstall.bat")
         )
@@ -1789,11 +1944,17 @@ try {
             (Join-Path $script:RepositoryRoot "scripts\windows\close-codex.bat")
         )
         Assert-Match 'HEIGE_PAUSE_HINT_STYLE=close' $closeBat
+        $loopbackBat = [System.IO.File]::ReadAllText(
+            (Join-Path $script:RepositoryRoot "scripts\windows\enable-loopback.bat")
+        )
+        Assert-Match 'HEIGE_PAUSE_HINT_STYLE=loopback' $loopbackBat
+        Assert-Match 'RunAs' $loopbackBat
+        Assert-False ([regex]::IsMatch($loopbackBat, '[\u4e00-\u9fff]'))
     }
 
     Test-Case "PowerShell entrypoints retain BOM and BAT wrappers retain CRLF" {
         foreach ($name in @(
-            "apply.ps1", "close-codex.ps1", "customize.ps1", "enable-skin.ps1", "pause.ps1", "resume.ps1", "restore.ps1", "uninstall.ps1"
+            "apply.ps1", "close-codex.ps1", "customize.ps1", "enable-loopback.ps1", "enable-skin.ps1", "pause.ps1", "resume.ps1", "restore.ps1", "uninstall.ps1"
         )) {
             $bytes = [System.IO.File]::ReadAllBytes(
                 (Join-Path $script:RepositoryRoot ("scripts\windows\" + $name))
@@ -1801,7 +1962,7 @@ try {
             Assert-equal @(0xef, 0xbb, 0xbf) @($bytes[0], $bytes[1], $bytes[2])
         }
         foreach ($name in @(
-            "apply.bat", "close-codex.bat", "customize.bat", "enable-skin.bat", "install.bat", "pause.bat", "resume.bat", "restore.bat", "uninstall.bat"
+            "apply.bat", "close-codex.bat", "customize.bat", "enable-loopback.bat", "enable-skin.bat", "install.bat", "pause.bat", "resume.bat", "restore.bat", "uninstall.bat"
         )) {
             $text = [System.IO.File]::ReadAllText(
                 (Join-Path $script:RepositoryRoot ("scripts\windows\" + $name))
@@ -1878,6 +2039,7 @@ try {
         Assert-Match '`resume`[^\r\n]*同一[^\r\n]*进程' $skill
         Assert-Match '`restore`[^\r\n]*关闭常驻' $skill
         Assert-Match '`close-codex`[^\r\n]*保持关闭' $skill
+        Assert-Match '`enable-loopback`[^\r\n]*管理员权限' $skill
         Assert-Match '明确允许关闭' $skill
         Assert-Match '不要关闭 Codex' $skill
     }

@@ -446,10 +446,61 @@ test("Windows CLI help directs session lifecycle work to PowerShell or batch wra
   assert.match(help.lifecycleContract, /scripts\/windows\/apply\.ps1/);
   assert.match(help.lifecycleContract, /scripts\/windows\/enable-skin\.bat/);
   assert.match(help.lifecycleContract, /scripts\/windows\/restore\.ps1/);
-  assert.match(help.lifecycleContract, /scripts\/windows\/close-codex\.ps1/);
-  assert.match(help.lifecycleContract, /scripts\/windows\/close-codex\.bat/);
+  assert.match(help.lifecycleContract, /scripts\/windows\/enable-loopback\.ps1/);
+  assert.match(help.lifecycleContract, /scripts\/windows\/enable-loopback\.bat/);
   assert.match(help.lifecycleContract, /scripts\/windows\/uninstall\.ps1/);
   assert.match(help.lifecycleContract, /scripts\/windows\/uninstall\.bat/);
+});
+
+test("Windows doctor decouples debug flags from HTTP reachability and reports loopback isolation", async () => {
+  const storeRoot = "C:\\Program Files\\WindowsApps\\OpenAI.Codex_1.0.0.0_x64__abc";
+  const snapshot = validateWindowsRuntimeSnapshot({
+    schemaVersion: 1,
+    app: {
+      kind: "StoreAumid",
+      executablePath: null,
+      installPath: storeRoot,
+      productName: "Codex",
+      packageFullName: "OpenAI.Codex_1.0.0.0_x64__abc",
+      aumid: "OpenAI.Codex_abc!App",
+      launchTarget: "aumid:OpenAI.Codex_abc!App",
+    },
+    nodePath: "C:\\Program Files\\nodejs\\node.exe",
+    processes: [{
+      pid: 4242,
+      parentProcessId: 100,
+      executablePath: `${storeRoot}\\ChatGPT.exe`,
+      startedAt: "2026-07-17T08:00:00.0000000Z",
+    }],
+    listeners: [{
+      pid: 4242,
+      executablePath: `${storeRoot}\\ChatGPT.exe`,
+      startedAt: "2026-07-17T08:00:00.0000000Z",
+      processName: "chatgpt",
+      localAddress: "127.0.0.1",
+      localPort: 9341,
+    }],
+  });
+  const result = await runCli(["doctor", "--port", "9341"], {
+    platform: "win32",
+    queryWindowsRuntime: async () => snapshot,
+    runtimeDiagnostics: async () => ({
+      appVersion: "26.727.6591.0",
+      processRunning: true,
+      processHasDebugFlag: true,
+      portOpen: false,
+      portBrowser: null,
+    }),
+    queryWindowsLoopbackExempt: async ({ packageFamilyName }) => {
+      assert.equal(packageFamilyName, "OpenAI.Codex_abc");
+      return false;
+    },
+  });
+  assert.equal(result.processHasDebugFlag, true);
+  assert.equal(result.portOpen, false);
+  assert.equal(result.loopbackExempt, false);
+  assert.equal(result.loopbackIsolated, true);
+  assert.match(result.diagnosis, /^loopback-isolated/);
 });
 
 test("apply validates everything and registers only an ephemeral current-session controller", async () => {
@@ -2421,6 +2472,81 @@ test("ephemeral controller observes an externally enabled state, repairs backgro
     ["set", { expectedRevision: 9, enabled: true }],
     "stop",
   ]);
+});
+
+test("ephemeral does not hand off while an enable journal is still pending", async () => {
+  const events = [];
+  let ticks = 0;
+  const result = await runControllerProcess({
+    start: async () => ({
+      action: "idle",
+      mode: "active",
+      persistenceEnabled: false,
+      revision: 1,
+    }),
+    pendingTransition: async () => ({
+      operation: "enable-persistence",
+      stage: "session-committed",
+    }),
+    setPersistence: async (input) => {
+      events.push(["set", input]);
+      return { persistenceEnabled: true, revision: 2 };
+    },
+    tick: async () => {
+      ticks += 1;
+      if (ticks >= 2) {
+        return { action: "unregister", mode: "native", persistenceEnabled: false, revision: 1 };
+      }
+      return {
+        action: "idle",
+        mode: "active",
+        persistenceEnabled: true,
+        revision: 2,
+      };
+    },
+    stop: async () => events.push("stop"),
+  }, {
+    ephemeralRuntime: true,
+    paths: { stateRoot: "/private/state" },
+    wait: async () => {},
+  });
+  assert.equal(result.action, "unregister");
+  assert.deepEqual(events, ["stop"]);
+  assert.equal(ticks, 2);
+});
+
+test("ephemeral keeps the session controller when background handoff fails", async () => {
+  let ticks = 0;
+  const events = [];
+  const result = await runControllerProcess({
+    start: async () => ({
+      action: "inject",
+      mode: "active",
+      persistenceEnabled: true,
+      revision: 9,
+    }),
+    setPersistence: async () => {
+      events.push("set");
+      const error = new Error("后台控制器启动失败，常驻仍为关闭");
+      error.code = "BACKGROUND_START_FAILED";
+      throw error;
+    },
+    tick: async () => {
+      ticks += 1;
+      if (ticks >= 2) {
+        return { action: "unregister", mode: "native", persistenceEnabled: false, revision: 9 };
+      }
+      return { action: "idle", mode: "active", persistenceEnabled: false, revision: 9 };
+    },
+    stop: async () => events.push("stop"),
+  }, {
+    ephemeralRuntime: true,
+    paths: { stateRoot: "/private/state" },
+    wait: async () => {},
+  });
+  assert.equal(result.action, "unregister");
+  assert.deepEqual(events, ["set", "stop"]);
+  assert.equal(ticks, 2);
 });
 
 test("HTTP enable hands the live renderer endpoint to the exact background before the next ephemeral tick", async (t) => {

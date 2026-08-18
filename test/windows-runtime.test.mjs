@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   classifyWindowsPreflightSnapshot,
   decodeWindowsAppIdentityToken,
+  queryWindowsLoopbackExempt,
   queryWindowsRuntimeSnapshot,
 } from "../src/windows-runtime.mjs";
 import {
@@ -442,4 +443,28 @@ test("Windows StoreAumid closed snapshots remain valid with null executablePath"
   const result = classifyWindowsPreflightSnapshot(store, { port: 9341, requirePort: false });
   assert.equal(result.appPath, "aumid:OpenAI.Codex_abc!App");
   assert.equal(result.process, null);
+});
+
+test("Windows loopback exemption lookup matches the package family name", async () => {
+  const calls = [];
+  const exempt = await queryWindowsLoopbackExempt({
+    packageFamilyName: "OpenAI.Codex_abc",
+    env: { SystemRoot: "C:\\Windows" },
+    execFileImpl: async (file, args) => {
+      calls.push({ file, args });
+      return { stdout: "Name: OpenAI.Codex_abc\nSID: S-1-15-2-1\n", stderr: "" };
+    },
+  });
+  assert.equal(exempt, true);
+  assert.equal(calls[0].file, "C:\\Windows\\System32\\CheckNetIsolation.exe");
+  assert.deepEqual(calls[0].args, ["LoopbackExempt", "-s"]);
+  assert.equal(await queryWindowsLoopbackExempt({
+    packageFamilyName: "OpenAI.Codex_abc",
+    env: { SystemRoot: "C:\\Windows" },
+    execFileImpl: async () => ({ stdout: "List Loopback Exempted AppContainers\n", stderr: "" }),
+  }), false);
+  assert.equal(await queryWindowsLoopbackExempt({
+    packageFamilyName: "",
+    env: { SystemRoot: "C:\\Windows" },
+  }), null);
 });

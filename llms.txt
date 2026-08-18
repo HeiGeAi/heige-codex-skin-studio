@@ -10,7 +10,7 @@
 - `apply` 与兼容名 `enable-skin` 都只恢复当前会话；`pause`、`resume`、`restore` 与只读 `status`、`doctor` 语义分离。
 - `enable-persist.command` 是弃用的非零退出入口，不是常驻开关的替代入口。
 - 顶部「自定义图片」菜单新上传会写入本机用户主题库，成为正式用户主题并记入启动器。只有旧版 `custom-upload` 是 renderer 本地兼容槽；新上传不再以该快捷槽作为权威存储。
-- Windows 生命周期操作使用 `scripts/windows` 下对应的 `.ps1` 或 `.bat`；直接 Node CLI 不负责 Windows Store/MSIX 激活或进程重启。
+- Windows 生命周期操作使用 `scripts/windows` 下对应的 `.ps1` 或 `.bat`；直接 Node CLI 不负责 Windows Store/MSIX 激活或进程重启。商店版回环隔离使用一次性 `scripts/windows/enable-loopback.bat`，不在每次 apply 时申请管理员权限。
 - macOS 有自动化与日期化真机证据；Windows 有 Windows PowerShell 5.1、PowerShell 7、32 位解析和隔离任务自动化，Microsoft Store/MSIX 真机待验证。
 - 使用系统 Node 时要求 Node.js 22 或更新版本。生产安装不含 npm 运行时依赖；开发依赖仅用于测试与确定性打包。
 - CDP 即使绑定 `127.0.0.1` 仍无认证，本机同权限进程属于威胁边界。未来 Codex Desktop 变化仍可能要求兼容适配。

@@ -339,6 +339,10 @@ test("runtime diagnostics reads version, process flag, and port state", async ()
 test("runtime diagnostics classifies the three failure shapes", async () => {
   const base = { appVersion: null, portOpen: false, portBrowser: null };
   assert.match(
+    classifyInjection({ ...base, processRunning: true, processHasDebugFlag: true, loopbackIsolated: true }),
+    /^loopback-isolated/,
+  );
+  assert.match(
     classifyInjection({ ...base, processRunning: true, processHasDebugFlag: true }),
     /^flag-present-port-closed/,
   );

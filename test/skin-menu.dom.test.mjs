@@ -695,7 +695,7 @@ test("a compensated enable failure syncs revision without painting on", async (t
   assert.equal(page.switch.getAttribute("aria-checked"), "true");
 });
 
-test("persistence HTTP abort uses 15s and CDP fallback expires at 20s", async (t) => {
+test("persistence HTTP abort uses 45s and CDP fallback expires at 20s", async (t) => {
   const timeouts = [];
   const page = await menuWindow({
     persistenceEnabled: false,
@@ -709,7 +709,7 @@ test("persistence HTTP abort uses 15s and CDP fallback expires at 20s", async (t
     return originalSetTimeout(callback, milliseconds, ...args);
   };
   await page.enablePersistence();
-  assert.equal(timeouts.includes(15_000), true, "persistence fetch abort must be 15s");
+  assert.equal(timeouts.includes(45_000), true, "persistence fetch abort must be 45s");
   assert.equal(timeouts.includes(20_000), true, "persistence CDP fallback must expire at 20s");
   assert.notEqual(page.window.__heigeCodexSkinRuntime.status().controlRequest, null);
 });

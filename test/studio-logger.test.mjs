@@ -50,6 +50,7 @@ test("writes bounded JSONL and redacts token home sensitive values and stack", a
   const error = new Error(`token=${token} path=${home}/private key=secret-api-key`);
   error.code = "CONTROLLER_FAILURE";
   error.stack = `STACK ${token} ${home} process.env API_KEY=secret-api-key`;
+  error.cause = new Error("scheduled task Register failed");
 
   assert.equal(await logger.error("controller_failure", error), true);
   const text = await readFile(logPath, "utf8");
@@ -60,11 +61,14 @@ test("writes bounded JSONL and redacts token home sensitive values and stack", a
   assert.equal(entry.event, "controller_failure");
   assert.equal(entry.code, "CONTROLLER_FAILURE");
   assert.match(entry.message, /~\/private/);
+  assert.match(entry.message, /scheduled task Register failed/);
   assert.doesNotMatch(text, new RegExp(token));
   assert.doesNotMatch(text, /\/Users\/example/);
   assert.doesNotMatch(text, /secret-api-key|STACK|process\.env|API_KEY/);
-  assert.equal((await lstat(logPath)).mode & 0o777, 0o600);
-  assert.equal((await lstat(dirname(logPath))).mode & 0o777, 0o700);
+  if (process.platform !== "win32") {
+    assert.equal((await lstat(logPath)).mode & 0o777, 0o600);
+    assert.equal((await lstat(dirname(logPath))).mode & 0o777, 0o700);
+  }
 });
 
 test("rotates before the configured bound and retains only the requested backups", async (t) => {

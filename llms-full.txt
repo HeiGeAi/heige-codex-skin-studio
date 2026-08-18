@@ -10,7 +10,7 @@
 - `apply` 与兼容名 `enable-skin` 都只恢复当前会话；`pause`、`resume`、`restore` 与只读 `status`、`doctor` 语义分离。
 - `enable-persist.command` 是弃用的非零退出入口，不是常驻开关的替代入口。
 - 顶部「自定义图片」菜单新上传会写入本机用户主题库，成为正式用户主题并记入启动器。只有旧版 `custom-upload` 是 renderer 本地兼容槽；新上传不再以该快捷槽作为权威存储。
-- Windows 生命周期操作使用 `scripts/windows` 下对应的 `.ps1` 或 `.bat`；直接 Node CLI 不负责 Windows Store/MSIX 激活或进程重启。
+- Windows 生命周期操作使用 `scripts/windows` 下对应的 `.ps1` 或 `.bat`；直接 Node CLI 不负责 Windows Store/MSIX 激活或进程重启。商店版回环隔离使用一次性 `scripts/windows/enable-loopback.bat`，不在每次 apply 时申请管理员权限。
 - macOS 有自动化与日期化真机证据；Windows 有 Windows PowerShell 5.1、PowerShell 7、32 位解析和隔离任务自动化，Microsoft Store/MSIX 真机待验证。
 - 使用系统 Node 时要求 Node.js 22 或更新版本。生产安装不含 npm 运行时依赖；开发依赖仅用于测试与确定性打包。
 - CDP 即使绑定 `127.0.0.1` 仍无认证，本机同权限进程属于威胁边界。未来 Codex Desktop 变化仍可能要求兼容适配。
@@ -87,7 +87,7 @@ Windows 11 版本现已发布：[查看最新 Release](https://github.com/HeiGeA
 - 隐藏按钮：顶部主题入口可选择「隐藏此按钮」，收起为小圆点；点击即可恢复，状态会保存。
 - 随机主题：提供持久化的随机主题开关，随机选择主题并尽量避免连续重复。
 
-> Microsoft Store/MSIX 客户端仍需真机验证；若其阻止本机调试端口，自动接管无法完成。
+> Microsoft Store/MSIX 客户端仍需真机验证。商店版若报回环隔离，可先运行 `scripts\windows\enable-loopback.bat`（一次管理员权限）再重试 apply；自动接管在端口仍不可达时无法完成。
 
 ## WorkBuddy（腾讯 CodeBuddy 桌面端）
 
@@ -113,7 +113,7 @@ open "<仓库路径>/scripts/install.command"
 
 装完默认应用 Miku 预设。之后所有切换都在 Codex 顶部中间的 🎨 菜单里完成：12 套内置主题、原生界面、深浅外观联动，即点即换。应用皮肤时 Codex 会正常退出并以本机调试模式重新打开，当前任务先保存。
 
-Windows 用 `scripts\windows\install.bat` 安装；日常入口是 `scripts/windows/apply.ps1`、兼容名 `scripts/windows/enable-skin.bat`（只恢复当前会话）、`scripts/windows/pause.ps1`、`scripts/windows/resume.ps1`、`scripts/windows/restore.ps1` 和 `scripts/windows/close-codex.bat`（只安全完整退出 Codex/GPT 桌面端并保持关闭，不改常驻、不自动重启）。彻底移除时运行 `scripts\windows\uninstall.bat`：它会注销当前用户计划任务、移除开始菜单入口、清理 AppData 状态和稳定安装目录。即使稳定安装目录已被手动删除，也可从源码目录运行该卸载入口清理残留。Microsoft Store/MSIX 真机待验证，细节见[完整手册](docs/manual.md)。
+Windows 用 `scripts\windows\install.bat` 安装；日常入口是 `scripts/windows/apply.ps1`、兼容名 `scripts/windows/enable-skin.bat`（只恢复当前会话）、`scripts/windows/pause.ps1`、`scripts/windows/resume.ps1`、`scripts/windows/restore.ps1`、`scripts/windows/close-codex.bat`（只安全完整退出 Codex/GPT 桌面端并保持关闭，不改常驻、不自动重启）和 `scripts/windows/enable-loopback.bat`（商店版回环隔离时一次性提权豁免，不在每次 apply 时弹 UAC）。彻底移除时运行 `scripts\windows\uninstall.bat`：它会注销当前用户计划任务、移除开始菜单入口、清理 AppData 状态和稳定安装目录。即使稳定安装目录已被手动删除，也可从源码目录运行该卸载入口清理残留。Microsoft Store/MSIX 真机待验证，细节见[完整手册](docs/manual.md)。
 
 ## 用一张图做你自己的主题
 

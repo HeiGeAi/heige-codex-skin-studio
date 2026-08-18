@@ -1,5 +1,25 @@
 # 更新日志
 
+## 5.5.3 - 2026-08-19
+
+### 修复
+
+- 修复 Windows Store/MSIX 把「调试参数已在命令行、端口却连不上」一律收成 `abort-incompatible` 的问题：现在先区分 AppContainer 回环隔离、激活丢参、以及真正没有监听的版本不兼容。商店版等待窗口加长到约 45 秒；AUMID 丢参时回退到已绑定包声明的可执行文件，`WindowsApps` Access Denied 则 fail-closed。
+- Windows `doctor` 不再把「有精确监听」当成「命令行已带调试参数」：flag 与 HTTP 可达性解耦，商店包会附带 `loopbackExempt` / `loopbackIsolated`。
+- 状态根 ACL：PowerShell `icacls` 回退改为先 `/grant` 再 `/setowner *SID`（本机 `icacls` 不允许把 `/setowner` 和 `/grant` 写在同一条命令里，SID 也必须带 `*` 前缀）；仅含本工具文件且继承了不可信写权限的目录允许改为 protect，而不是把永久 ACL 失败当成瞬时 `LOCK_PERMISSIONS` 重试。未知文件的目录报 `LOCK_ACL_UNTRUSTED`。
+
+### 新功能
+
+- 新增 `scripts/windows/enable-loopback.ps1` / `enable-loopback.bat`：给当前商店版 Codex 添加一次 CheckNetIsolation 回环豁免。只在用户明确同意时提权，apply 不会每次弹 UAC。
+
+### 已知边界
+
+- 商店版端到端注入仍待真机 netstat / `/json/version` 证据；本文不把自动化测试冒充 Store 真机结论。
+
+### 测试
+
+- 新增回环隔离、丢参回退、doctor 解耦、状态根 ACL 重建与 `enable-loopback` 编码/提权契约断言。
+
 ## 5.5.2 - 2026-08-11
 
 ### 修复
