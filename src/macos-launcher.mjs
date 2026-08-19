@@ -38,6 +38,7 @@ const MAX_ICON_BYTES = 8 * 1024 * 1024;
 const TRANSACTION_FILE = ".heige-codex-skin-launcher-transaction.json";
 const PREPARATION_FILE = ".heige-codex-skin-launcher-prepare.json";
 const LOCK_DIRECTORY = ".heige-codex-skin-launcher-install.lock";
+const LAUNCH_SERVICES_REGISTER = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PARTICIPANT_KEYS = [
   "afterExecutableSha256",
@@ -569,6 +570,16 @@ async function validateAttributedBundle(appPath, expected = null) {
       { cause },
     );
   }
+}
+
+export async function registerMacosLauncher(appPath, { execFileImpl = execFile } = {}) {
+  appPath = assertAbsolutePath(appPath, "appPath");
+  if (typeof execFileImpl !== "function") throw new TypeError("execFileImpl must be a function");
+  await validateAttributedBundle(appPath);
+  await execFileImpl(LAUNCH_SERVICES_REGISTER, ["-f", appPath], {
+    maxBuffer: 1024 * 1024,
+  });
+  return appPath;
 }
 
 async function stageBundle(stagePath, expected, hooks = {}) {
@@ -1489,10 +1500,17 @@ export async function rollbackMacosLauncher(value) {
   return { ...participant, rolledBack: true };
 }
 
-export async function finalizeMacosLauncher(value) {
+export async function finalizeMacosLauncher(
+  value,
+  { registerLauncher = registerMacosLauncher } = {},
+) {
   const participant = assertLauncherParticipant(value);
+  if (typeof registerLauncher !== "function") {
+    throw new TypeError("registerLauncher must be a function");
+  }
   await validateParticipantContext(participant);
   const paths = await validateParticipantAfterBundle(participant, participant.appPath);
+  await registerLauncher(participant.appPath);
   if (await pathInfo(participant.stagePath)) {
     await removeParticipantAfterBundle(participant, participant.stagePath);
   }

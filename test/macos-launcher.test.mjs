@@ -15,6 +15,7 @@ import {
   MACOS_LAUNCHER_SCHEMA_VERSION,
   prepareMacosLauncher,
   publishMacosLauncher,
+  registerMacosLauncher,
   renderMacosLauncherExecutable,
   renderMacosLauncherPlist,
   rollbackMacosLauncher,
@@ -184,6 +185,70 @@ test("launcher participant rollback removes a newly published app when no app ex
 
   await assert.rejects(lstat(participant.appPath), /ENOENT/);
   await assert.rejects(lstat(participant.stagePath), /ENOENT/);
+});
+
+test("launcher staging reads release inputs from source while binding the app to the stable target", async (t) => {
+  const { root, home } = await fixture(t);
+  const sourceRoot = join(root, "5.5.4 发布源码");
+  const targetRoot = join(home, ".codex", "heige-codex-skin-studio-target");
+  await populateRuntime(sourceRoot);
+
+  const participant = await prepareMacosLauncher({
+    home,
+    installRoot: targetRoot,
+    validationRoot: sourceRoot,
+  });
+  const stagedExecutable = await readFile(
+    join(participant.stagePath, "Contents", "MacOS", "HeiGe Skin Launcher"),
+    "utf8",
+  );
+
+  assert.equal(participant.installRoot, targetRoot);
+  assert.equal(participant.afterVersion, "5.5.4");
+  assert.equal(
+    stagedExecutable,
+    renderMacosLauncherExecutable(join(targetRoot, "scripts", "launch-skin.command"), "5.5.4"),
+  );
+  assert.doesNotMatch(stagedExecutable, new RegExp(sourceRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  await rollbackMacosLauncher(participant);
+});
+
+test("registers only an exact attributed launcher bundle with LaunchServices", async (t) => {
+  const { home, installRoot } = await fixture(t);
+  const result = await installMacosLauncher({ home, installRoot });
+  const calls = [];
+
+  const registered = await registerMacosLauncher(result.appPath, {
+    execFileImpl: async (...args) => { calls.push(args); },
+  });
+
+  assert.equal(registered, result.appPath);
+  assert.deepEqual(calls, [[
+    "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
+    ["-f", result.appPath],
+    { maxBuffer: 1024 * 1024 },
+  ]]);
+});
+
+test("launcher finalization keeps its durable intent until LaunchServices registration succeeds", async (t) => {
+  const { home, installRoot } = await fixture(t);
+  const participant = await prepareMacosLauncher({ home, installRoot });
+  await publishMacosLauncher(participant);
+
+  await assert.rejects(
+    finalizeMacosLauncher(participant, {
+      registerLauncher: async () => { throw new Error("SIMULATED_LAUNCHSERVICES_FAILURE"); },
+    }),
+    /SIMULATED_LAUNCHSERVICES_FAILURE/,
+  );
+  assert.equal((await lstat(participant.intentPath)).isFile(), true);
+
+  const registered = [];
+  await finalizeMacosLauncher(participant, {
+    registerLauncher: async (appPath) => { registered.push(appPath); },
+  });
+  assert.deepEqual(registered, [participant.appPath]);
+  await assert.rejects(lstat(participant.intentPath), /ENOENT/);
 });
 
 test("launcher participant can be reconstructed after a publisher process is SIGKILLed", async (t) => {

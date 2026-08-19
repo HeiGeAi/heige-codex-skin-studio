@@ -29,3 +29,33 @@ test("skill package explicitly allowlists every runtime source module", async ()
 
   assert.deepEqual(sourceEntries, expected);
 });
+
+test("skill package carries the macOS launcher icon and recursive launcher scripts", async () => {
+  const manifest = JSON.parse(await readFile(manifestUrl, "utf8"));
+
+  assert.deepEqual(
+    manifest.entries.find(({ source }) => source === "assets/launcher"),
+    {
+      source: "assets/launcher",
+      destination: "payload/assets/launcher",
+      recursive: true,
+      exclude: [],
+    },
+  );
+  assert.deepEqual(
+    manifest.entries.find(({ source }) => source === "scripts"),
+    {
+      source: "scripts",
+      destination: "payload/scripts",
+      recursive: true,
+      exclude: [
+        "check-asset-provenance.mjs",
+        "package-skill.command",
+        "package-skill.mjs",
+        "skill-package-manifest.json",
+        "sync-llms.mjs",
+        "update-release-hash.mjs",
+      ],
+    },
+  );
+});

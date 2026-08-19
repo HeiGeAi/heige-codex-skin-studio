@@ -116,6 +116,12 @@
       "exclude": []
     },
     {
+      "source": "src/macos-launcher-recovery.mjs",
+      "destination": "payload/src/macos-launcher-recovery.mjs",
+      "recursive": false,
+      "exclude": []
+    },
+    {
       "source": "src/macos-launcher.mjs",
       "destination": "payload/src/macos-launcher.mjs",
       "recursive": false,
@@ -233,6 +239,12 @@
       "source": "src/windows-secure-fs.mjs",
       "destination": "payload/src/windows-secure-fs.mjs",
       "recursive": false,
+      "exclude": []
+    },
+    {
+      "source": "assets/launcher",
+      "destination": "payload/assets/launcher",
+      "recursive": true,
       "exclude": []
     },
     {
