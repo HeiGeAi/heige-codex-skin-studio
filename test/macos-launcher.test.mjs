@@ -162,7 +162,7 @@ test("serializable launcher participant retains the old bundle until outer final
     installRoot: nextInstallRoot,
   })));
   await publishMacosLauncher(committed);
-  await finalizeMacosLauncher(committed);
+  await finalizeMacosLauncher(committed, { registerLauncher: async () => {} });
   assert.match(await readFile(original.executablePath, "utf8"), /studio-next/);
   await assert.rejects(lstat(committed.backupPath), /ENOENT/);
 });
