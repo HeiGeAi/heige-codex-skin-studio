@@ -25,7 +25,7 @@
 | 开发依赖 | `happy-dom` 与 `yazl` 均锁定精确版本，只用于测试与确定性打包 |
 | 自动化验证 | Node、macOS、Windows、安装包与文档门禁，不在文档中写死易过期的测试数量 |
 | 协议 | 代码 MIT，角色素材权利归各自权利人 |
-| 最近更新 | 2026-08-11 |
+| 最近更新 | 2026-08-20 |
 
 ## 版本与更新检查
 
@@ -39,7 +39,7 @@ macOS 安装需要已安装的 Codex Desktop。下载本仓库后：
 open "<仓库路径>/scripts/install.command"
 ```
 
-安装脚本会把工具放到 `~/.codex/heige-codex-skin-studio`，并默认应用 Miku 预设。应用皮肤时 Codex 会被正常退出并以本机调试模式重新打开，当前任务请先保存。
+安装脚本会把工具放到 `~/.codex/heige-codex-skin-studio`，在 `$HOME/Applications` 创建或升级带 Miku 图标的「HeiGe 皮肤启动器」，并把 APP 注册到 macOS LaunchServices。默认安装流程会应用 Miku 预设。应用皮肤时 Codex 可能被正常退出并以本机调试模式重新打开，当前任务请先保存。
 
 之后的日常切换都在 Codex 顶部中间的 🎨 菜单里完成。想用自己的图片做皮肤：
 
@@ -74,7 +74,7 @@ open "$HOME/.codex/heige-codex-skin-studio/scripts/restore.command"
 ```
 
 `apply.command` 只应用本次会话，不会暗中打开下次启动常驻。
-安装生成的本地「HeiGe 皮肤启动器」调用的就是这个入口：它会恢复 `lastNonNativeThemeId` 记录的最近非原生主题，但保持常驻选择不变。
+安装生成的本地「HeiGe 皮肤启动器」使用专用 `launch-skin.command` 和内部 `launcher-apply` 路由。它先校验启动器版本与稳定运行树一致，再恢复 `lastNonNativeThemeId` 记录的最近非原生主题；没有有效历史时回退到 `miku-488137`。这个路径保持原有常驻选择不变。
 
 Codex 长时间运行后偶发合成器卡死：整窗帧率骤降到约 10 帧，输入和滚动全局迟滞，连新开的空白窗口也一样，与皮肤无关，只有冷重启能恢复。健康会话下 `apply.command` 是幂等的，不会重启进程，此时用 `--restart` 先彻底退出 Codex 再拉起注入：
 
@@ -92,13 +92,19 @@ Codex 长时间运行后偶发合成器卡死：整窗帧率骤降到约 10 帧�
 "$HOME/.codex/heige-codex-skin-studio/scripts/lib/run-cli.zsh" set-persistence false --port 9341
 ```
 
-关闭后若想只在当前会话再次拉起最近的皮肤，可打开安装时生成的本地应用：
+关闭后若想只在当前会话再次拉起最近的皮肤，或在电脑重启、Codex 更新、原生启动导致皮肤不在时恢复，可打开安装时生成的本地应用：
 
 ```bash
 open "$HOME/Applications/HeiGe 皮肤启动器.app"
 ```
 
-这个本地应用只调用稳定的 `apply.command`，不会下载代码、请求管理员权限或将 `persistenceEnabled` 改为 `true`。「启用 HeiGe 皮肤」表示恢复当前会话。`enable-skin.command` 是只恢复当前会话的兼容名，常驻选择保持不变。`enable-persist.command` 是弃用的非零退出入口，不再执行任何启用动作。
+这个本地应用只指向稳定安装目录，不指向下载目录或开发仓库。点击后按现场状态执行最小动作：Codex 未运行时直接以 `127.0.0.1:9341` 的 CDP 模式启动；Codex 已受控且端口健康时幂等注入；Codex 以原生模式运行时先正常退出，再以 CDP 模式拉起并注入。它不会下载代码、请求管理员权限、创建新的登录项或将 `persistenceEnabled` 改为 `true`。
+
+每次 macOS 安装都会生成或升级 Schema 3 Bundle，其中包含 Miku `AppIcon.icns`、当前版本号、稳定入口和本地 ad hoc 完整性签名。提交安装前会严格校验 Bundle 内容、签名并注册 LaunchServices。ad hoc 签名用于发现本地 Bundle 被改动，不等于 Apple Developer ID 签名或 Apple 公证。
+
+启动器只在底层明确报告 `LOCK_CHAIN_CORRUPT` 时尝试一次静态状态根恢复。恢复前必须同时证明没有已加载的 HeiGe LaunchAgent、没有相关 controller 或 lifecycle helper、锁声明 PID 已失效、CDP 端口无外来监听，并且 `state.json` 与用户主题都通过严格校验。满足条件时，旧状态根会整体原子移动为带时间戳的备份，新目录只恢复通过校验的状态与用户主题，然后只重试一次。普通锁竞争、权限错误、陌生文件、活动进程或第二次失败都会明确停止，不会循环修复。
+
+失败时 APP 会显示 macOS 原生提示。详细诊断写入 `$HOME/Library/Application Support/HeiGeCodexSkinStudio/launcher.log`，文件权限受限并自动轮转。「启用 HeiGe 皮肤」仍只表示恢复当前会话。`enable-skin.command` 是 session-only 兼容名，常驻选择保持不变；`enable-persist.command` 是弃用的非零退出入口，不再执行任何启用动作。
 
 ## Windows（待实机验收）
 

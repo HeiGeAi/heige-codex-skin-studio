@@ -8,11 +8,13 @@
 - Windows PowerShell：运行 `scripts\install.ps1 -SkipApply`。
 - Windows 图形入口：双击 `scripts\install.bat`。
 
-安装后，macOS 使用 `$HOME/.codex/heige-codex-skin-studio`，Windows 使用 `$HOME\.codex\heige-codex-skin-studio`。
+安装后，macOS 使用 `$HOME/.codex/heige-codex-skin-studio`，并创建或升级 `$HOME/Applications/HeiGe 皮肤启动器.app`；Windows 使用 `$HOME\.codex\heige-codex-skin-studio`。
 
 ## 用户可控的常驻
 
-顶部菜单「皮肤常驻」开关是唯一受支持的开启常驻入口。关闭后本次继续使用；下次启动恢复原生界面。macOS 本地应用「HeiGe 皮肤启动器」只调用 `apply.command`，恢复当前会话的最近非原生主题，不会自动打开常驻。需要下次启动继续使用时，先用「HeiGe 皮肤启动器」恢复当前会话，再在顶部菜单显式打开常驻开关。
+顶部菜单「皮肤常驻」开关是唯一受支持的开启常驻入口。关闭后本次继续使用；下次启动恢复原生界面。macOS 本地应用「HeiGe 皮肤启动器」使用专用 `launch-skin.command` 与内部 `launcher-apply`，可在电脑重启、Codex 更新或原生启动后启动或受控重启官方 Codex，并恢复当前会话的最近非原生主题。它不会自动打开常驻。需要下次启动继续使用时，先用「HeiGe 皮肤启动器」恢复当前会话，再在顶部菜单显式打开常驻开关。
+
+macOS 每次安装都会生成或升级带 Miku 图标的 Schema 3 APP，做本地 ad hoc 完整性签名并注册 LaunchServices。该签名不是 Apple Developer ID 或公证。启动器只对明确的静态 `LOCK_CHAIN_CORRUPT` 在安全门通过后整体备份旧状态根、严格恢复状态与用户主题，并只重试一次；其他锁错误保持失败关闭。运行失败会显示原生提示并写入受限、轮转的 `launcher.log`。
 
 `apply` 只改变当前会话，不改变常驻选择。`enable-skin` 是 session-only `apply` 的兼容名，只恢复当前会话。`enable-persist.command` 是弃用的非零退出入口。启用与完整恢复可能让 Codex 正常重启，执行前要先告知用户。`status` 严格只读，不应启动、退出、重启或注入 Codex。
 

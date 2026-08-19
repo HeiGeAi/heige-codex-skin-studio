@@ -79,7 +79,13 @@ Windows 11 版本现已发布：[查看最新 Release](https://github.com/HeiGeA
 open "<仓库路径>/scripts/install.command"
 ```
 
-装完默认应用 Miku 预设。之后所有切换都在 Codex 顶部中间的 🎨 菜单里完成：12 套内置主题、原生界面、深浅外观联动，即点即换。应用皮肤时 Codex 会正常退出并以本机调试模式重新打开，当前任务先保存。
+装完默认应用 Miku 预设，并在 `$HOME/Applications` 创建或升级带 Miku 图标的「HeiGe 皮肤启动器」。电脑重启、Codex 更新或原生启动后皮肤不在时，直接点击这个 APP。它会启动或受控重启官方 Codex Desktop，以本机回环 CDP 恢复最近一次非原生主题。之后所有切换都在 Codex 顶部中间的 🎨 菜单里完成：12 套内置主题、原生界面、深浅外观联动，即点即换。涉及重启时 Codex 会正常退出后重新打开，当前任务先保存。
+
+```bash
+open "$HOME/Applications/HeiGe 皮肤启动器.app"
+```
+
+启动器只恢复当前会话，不会擅自打开「皮肤常驻」、创建新的登录项、联网下载代码或请求管理员权限。运行失败会显示 macOS 原生提示，详细记录写入本机权限受限且自动轮转的 `launcher.log`。
 
 Windows 用 `scripts\windows\install.bat` 安装；日常入口是 `scripts/windows/apply.ps1`、兼容名 `scripts/windows/enable-skin.bat`（只恢复当前会话）、`scripts/windows/pause.ps1`、`scripts/windows/resume.ps1`、`scripts/windows/restore.ps1`、`scripts/windows/close-codex.bat`（只安全完整退出 Codex/GPT 桌面端并保持关闭，不改常驻、不自动重启）和 `scripts/windows/enable-loopback.bat`（商店版回环隔离时一次性提权豁免，不在每次 apply 时弹 UAC）。彻底移除时运行 `scripts\windows\uninstall.bat`：它会注销当前用户计划任务、移除开始菜单入口、清理 AppData 状态和稳定安装目录。即使稳定安装目录已被手动删除，也可从源码目录运行该卸载入口清理残留。Microsoft Store/MSIX 真机待验证，细节见[完整手册](docs/manual.md)。
 
@@ -126,8 +132,9 @@ Windows 用 `scripts\windows\install.bat` 安装；日常入口是 `scripts/wind
 - 注入走本机回环 CDP（`127.0.0.1:9341`），不修改 `app.asar`、应用二进制或签名资源；未来 Codex Desktop 改变启动参数或界面结构时，本项目仍可能需要适配。
 - 常驻由你决定：顶部菜单「皮肤常驻」开关是唯一受支持的开启常驻入口，关闭时会先确认，并提示「关闭后本次继续使用；下次启动恢复原生界面」。
 - 阅读增强默认开启：最终回复和过程回复都使用 90％ 主题自适应半透明底色，并保留对称留白保护文字可读性；可在主题中心随时关闭，不使用大面积实时模糊、阴影、观察器、滚动监听或后台请求。
-- 想让皮肤重启后一直在：先打开「HeiGe 皮肤启动器」恢复当前会话，再到顶部菜单打开开关进入常驻。开启成功时开关应在数秒内变绿，且状态与计划任务/LaunchAgent 已写入；失败会立刻提示，不会长时间停在「正在等待后台确认」。常驻开启后，正常重启 Codex 也会由后台控制器接管并恢复皮肤（Windows 与 macOS 均支持；Store 若屏蔽调试端口则无法接管）。
-- 「HeiGe 皮肤启动器」和兼容名 `enable-skin.command` 都只恢复当前会话；`enable-persist.command` 是弃用的非零退出入口，不再执行任何启用动作。
+- 想让皮肤重启后一直在：先打开「HeiGe 皮肤启动器」恢复当前会话，再到顶部菜单打开开关进入常驻。开启成功时开关应在数秒内变绿，且状态与计划任务或 LaunchAgent 已写入；失败会立刻提示，不会长时间停在「正在等待后台确认」。常驻开启后，正常重启 Codex 也会由后台控制器接管并恢复皮肤（Windows 与 macOS 均支持；Store 若屏蔽调试端口则无法接管）。
+- macOS 每次安装都会生成或升级 Schema 3「HeiGe 皮肤启动器」。APP 内的 Miku 图标和入口均纳入本地 ad hoc 完整性签名，并注册到 LaunchServices。ad hoc 签名用于发现本地篡改，不等于 Apple Developer ID 签名或公证，也不承诺绕过未来系统安全策略。
+- 「HeiGe 皮肤启动器」走专用 `launch-skin.command` 和内部 `launcher-apply` 路由，优先恢复最近一次非原生主题，只有没有历史选择时才使用 `miku-488137`。它与兼容名 `enable-skin.command` 都只恢复当前会话；`enable-persist.command` 是弃用的非零退出入口，不再执行任何启用动作。
 - 整窗突然变卡（帧率骤降、输入滚动全局迟滞）：跑 `scripts/apply.command --restart` 先彻底退出 Codex 再拉起注入；健康会话下直接重跑 apply 是幂等的，不会重启进程。
 - 支持范围：macOS 有日期化真机验证；Windows 走跨 PowerShell 自动化，Microsoft Store/MSIX 真机待验证；使用系统 Node 时要求 Node.js 22 或更新版本。
 - 安全边界：CDP 即使只绑定本机回环也无认证，本机同权限进程在威胁边界内，完整说明见 [SECURITY.md](SECURITY.md)；素材来源逐文件登记在 [ASSET_PROVENANCE.md](ASSET_PROVENANCE.md)。
