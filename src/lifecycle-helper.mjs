@@ -15,6 +15,7 @@ import {
   sameProcessIdentity,
 } from "./codex-app.mjs";
 import { DEFAULT_PRODUCT_ID, productCdpLaunchSpec, profileForAppPath } from "./products.mjs";
+import { createStudioLogger } from "./studio-logger.mjs";
 
 // 生命周期动作文件里不存产品字段，一律从 appPath 反推，避免动落盘 schema
 function hostProfile(appPath) {
@@ -843,6 +844,18 @@ export async function runLifecycleActionFile(actionPath, deps = {}) {
       ? error
       : markLifecycleFailure(error, "LIFECYCLE_FAILED", false);
     const failure = safeLifecycleFailure(lifecycleError);
+    if (action.afterLaunch?.command === "launcher-apply") {
+      try {
+        const logLauncherError = deps.logLauncherError ?? createStudioLogger({
+          path: join(dirname(actionPath), "launcher.log"),
+          maxBytes: 256 * 1024,
+          backups: 2,
+        }).error.bind(null, "launcher.lifecycle");
+        await logLauncherError(lifecycleError);
+      } catch {
+        // 日志失败不能覆盖生命周期原始失败或阻断安全结果回执。
+      }
+    }
     try {
       await writeLifecycleResult(actionPath, action, {
         outcome: "failed",

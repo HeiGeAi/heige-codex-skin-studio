@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { chmod, mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
@@ -562,6 +562,45 @@ test("a launcher continuation carries its exact Bundle version into the trusted 
     port: 9341,
     themeId: "miku-488137",
   });
+});
+
+test("an asynchronous launcher lifecycle failure is recorded in the bounded launcher log", async (t) => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "heige-launcher-lifecycle-log-")));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const path = join(root, "action.json");
+  const processIdentity = {
+    pid: 4242,
+    executablePath: "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
+    startedAt: "Fri Jul 17 12:00:00 2026",
+  };
+  await writeLifecycleActionFile(path, {
+    process: processIdentity,
+    appPath: "/Applications/ChatGPT.app",
+    launchMode: "cdp",
+    port: 9341,
+    afterLaunch: {
+      command: "launcher-apply",
+      launcherVersion: "5.5.4",
+      cliPath: "/trusted/src/cli.mjs",
+      nodePath: "/trusted/node",
+      port: 9341,
+      themeId: "miku-488137",
+    },
+  });
+
+  await assert.rejects(runLifecycleActionFile(path, {
+    readProcessIdentity: async () => processIdentity,
+    requestQuit: async () => {},
+    wait: async () => {},
+    maxWaitAttempts: 1,
+  }), /未正常退出/);
+
+  const logPath = join(root, "launcher.log");
+  const entry = JSON.parse((await readFile(logPath, "utf8")).trim());
+  assert.equal(entry.level, "error");
+  assert.equal(entry.event, "launcher.lifecycle");
+  assert.match(entry.message, /未正常退出/);
+  assert.equal((await stat(logPath)).mode & 0o777, 0o600);
 });
 
 test("a detached lifecycle action rejects the removed persistence-enable continuation", async () => {
