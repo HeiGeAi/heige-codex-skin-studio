@@ -210,8 +210,12 @@ test("archive is a strict runtime allowlist with fixed metadata", async (t) => {
     "heige-codex-skin-studio/payload/src/cli.mjs",
     "heige-codex-skin-studio/payload/src/update-check.mjs",
     "heige-codex-skin-studio/payload/src/lifecycle-helper.mjs",
+    "heige-codex-skin-studio/payload/src/macos-launcher-recovery.mjs",
     "heige-codex-skin-studio/payload/src/macos-launcher.mjs",
     "heige-codex-skin-studio/payload/src/theme-center-style.mjs",
+    "heige-codex-skin-studio/payload/assets/launcher/AppIcon.icns",
+    "heige-codex-skin-studio/payload/assets/launcher/miku-launcher-icon.png",
+    "heige-codex-skin-studio/payload/scripts/launch-skin.command",
     "heige-codex-skin-studio/payload/scripts/enable-skin.command",
     "heige-codex-skin-studio/payload/scripts/resume.command",
     "heige-codex-skin-studio/payload/scripts/windows/install.bat",
@@ -269,6 +273,17 @@ test("archive is a strict runtime allowlist with fixed metadata", async (t) => {
   assert.match(packagedLauncher, /--restart/);
   assert.doesNotMatch(packagedLauncher, /\$\{1:-miku-488137\}/);
 
+  const packagedFinderLauncher = await readZipText(
+    archive,
+    "heige-codex-skin-studio/payload/scripts/launch-skin.command",
+  );
+  assert.equal(
+    packagedFinderLauncher,
+    await readFile(join(repoRoot, "scripts/launch-skin.command"), "utf8"),
+    "the reusable skill must carry the Finder launcher entrypoint byte-for-byte",
+  );
+  assert.match(packagedFinderLauncher, /launcher-apply[\s\S]*--launcher-version "\$VERSION"/);
+
   const packagedMacosLauncher = await readZipText(
     archive,
     "heige-codex-skin-studio/payload/src/macos-launcher.mjs",
@@ -278,14 +293,14 @@ test("archive is a strict runtime allowlist with fixed metadata", async (t) => {
     await readFile(join(repoRoot, "src/macos-launcher.mjs"), "utf8"),
     "the reusable skill must carry the audited macOS launcher byte-for-byte",
   );
-  assert.match(packagedMacosLauncher, /MACOS_LAUNCHER_SCHEMA_VERSION = 2/);
-  assert.match(packagedMacosLauncher, /const entrypoint = join\(scripts, "apply\.command"\);/);
+  assert.match(packagedMacosLauncher, /MACOS_LAUNCHER_SCHEMA_VERSION = 3/);
+  assert.match(packagedMacosLauncher, /const entrypoint = join\(scripts, "launch-skin\.command"\);/);
 
   const packagedSkill = await readZipText(
     archive,
     "heige-codex-skin-studio/SKILL.md",
   );
-  assert.match(packagedSkill, /只会调用 `apply\.command`/);
+  assert.match(packagedSkill, /专用 `launch-skin\.command` 与内部 `launcher-apply`/);
   assert.match(packagedSkill, /保持 `persistenceEnabled=false`/);
 });
 
