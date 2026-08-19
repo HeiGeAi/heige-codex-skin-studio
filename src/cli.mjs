@@ -55,6 +55,7 @@ import {
   unregisterControllerAgent,
   wakeControllerAgent,
 } from "./macos-launch-agent.mjs";
+import { ensureLauncherOperationLock as ensureMacosLauncherOperationLock } from "./macos-launcher-recovery.mjs";
 import {
   macosInstallJournalPath,
   readMacosInstallJournal,
@@ -2687,6 +2688,11 @@ function defaults(overrides, {
   const boundToProduct = (fn) => (input) => fn({ ...input, product: profile.id });
   const bundledThemesRoot = join(repositoryRoot, "themes");
   const roots = [bundledThemesRoot, paths.userThemesRoot];
+  const launcherLogger = createStudioLogger({
+    path: join(paths.stateRoot, "launcher.log"),
+    maxBytes: 256 * 1024,
+    backups: 2,
+  });
   const queryWindowsRuntime = overrides.queryWindowsRuntime ?? ((input) =>
     queryWindowsRuntimeSnapshot({
       ...input,
@@ -2723,6 +2729,15 @@ function defaults(overrides, {
     }),
     queryWindowsRuntime,
     chooseThemeInputs: productionChooseThemeInputs,
+    ensureLauncherOperationLock: (input) => ensureMacosLauncherOperationLock({
+      ...input,
+      paths,
+    }),
+    logLauncherError: (error) => launcherLogger.error("launcher.apply", error),
+    logLauncherRecovery: (result) => launcherLogger.warn(
+      "launcher.lock-recovered",
+      `backup=${result.backupPath ?? "unknown"} themes=${result.restoredThemes ?? 0}`,
+    ),
   };
   const merged = { ...base, ...overrides };
   merged.roots = [merged.bundledThemesRoot, merged.userThemesRoot];
@@ -2985,29 +3000,39 @@ export async function runCli(argv, overrides = {}) {
     });
   }
   if (command === "launcher-apply") {
-    if (selectedControllerPlatform !== "darwin" || productId !== DEFAULT_PRODUCT_ID) {
-      throw new Error("launcher-apply 只支持 macOS 官方 Codex Desktop");
+    try {
+      if (selectedControllerPlatform !== "darwin" || productId !== DEFAULT_PRODUCT_ID) {
+        throw new Error("launcher-apply 只支持 macOS 官方 Codex Desktop");
+      }
+      if (typeof args["launcher-version"] !== "string") {
+        throw new Error("launcher-apply 缺少 --launcher-version");
+      }
+      const currentVersion = await deps.readCurrentPackageVersion();
+      if (args["launcher-version"] !== currentVersion) {
+        throw new Error(
+          `启动器版本 ${args["launcher-version"]} 与稳定运行时 ${currentVersion} 不匹配，请重新运行安装器`,
+        );
+      }
+      const port = portFrom(args.port, profile.defaultCdpPort);
+      const lockHealth = await deps.ensureLauncherOperationLock({ port });
+      if (lockHealth?.recovered === true) {
+        await deps.logLauncherRecovery(lockHealth).catch(() => false);
+      }
+      const stored = args.theme === undefined ? await deps.readState() : null;
+      const themeId = args.theme ?? stored?.lastNonNativeThemeId ?? DEFAULT_THEME_ID;
+      return await applySelectedTheme({
+        deps,
+        roots,
+        command,
+        port,
+        preferStored: true,
+        themeId,
+        launcherVersion: currentVersion,
+      });
+    } catch (error) {
+      await deps.logLauncherError(error).catch(() => false);
+      throw error;
     }
-    if (typeof args["launcher-version"] !== "string") {
-      throw new Error("launcher-apply 缺少 --launcher-version");
-    }
-    const currentVersion = await deps.readCurrentPackageVersion();
-    if (args["launcher-version"] !== currentVersion) {
-      throw new Error(
-        `启动器版本 ${args["launcher-version"]} 与稳定运行时 ${currentVersion} 不匹配，请重新运行安装器`,
-      );
-    }
-    const stored = args.theme === undefined ? await deps.readState() : null;
-    const themeId = args.theme ?? stored?.lastNonNativeThemeId ?? DEFAULT_THEME_ID;
-    return applySelectedTheme({
-      deps,
-      roots,
-      command,
-      port: portFrom(args.port, profile.defaultCdpPort),
-      preferStored: true,
-      themeId,
-      launcherVersion: currentVersion,
-    });
   }
   if (command === "enable-skin") {
     const stored = args.theme === undefined ? await deps.readState() : null;

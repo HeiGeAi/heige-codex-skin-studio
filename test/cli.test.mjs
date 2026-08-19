@@ -71,6 +71,8 @@ function lifecycleDeps(overrides = {}) {
     controller: [],
     createController: [],
     detached: [],
+    launcherLock: [],
+    launcherLogs: [],
     offlineDisable: [],
     migrate: [],
     preflight: [],
@@ -123,6 +125,14 @@ function lifecycleDeps(overrides = {}) {
     restartDetached: async (input) => {
       calls.detached.push(structuredClone(input));
       return { queued: true };
+    },
+    ensureLauncherOperationLock: async (input) => {
+      calls.launcherLock.push(structuredClone(input));
+      return { recovered: false };
+    },
+    logLauncherError: async (error) => {
+      calls.launcherLogs.push({ code: error?.code ?? null, message: error?.message ?? String(error) });
+      return true;
     },
     offlineDisablePersistence: async (input) => {
       calls.offlineDisable.push(structuredClone(input));
@@ -578,12 +588,15 @@ test("launcher-apply binds the Bundle version, restores lastNonNative, and stays
 
   assert.deepEqual(result, { mode: "active", persistenceEnabled: false });
   assert.equal(fx.calls.registerEphemeral.at(-1).themeId, lastThemeId);
+  assert.deepEqual(fx.calls.launcherLock, [{ port: 9341 }]);
   assert.equal(fx.calls.controller.length, 0);
   assert.equal(fx.state.persistenceEnabled, false);
   await assert.rejects(
     runCli(["launcher-apply", "--launcher-version", "5.5.3"], fx.deps),
     /版本.*不匹配|重新运行安装器/,
   );
+  assert.equal(fx.calls.launcherLogs.length, 1);
+  assert.match(fx.calls.launcherLogs[0].message, /5\.5\.3.*5\.5\.4/);
 });
 
 test("launcher-apply preserves its command identity across a native Codex restart", async () => {
@@ -621,6 +634,7 @@ test("launcher-apply preserves its command identity across a native Codex restar
     launcherVersion: "5.5.4",
     themeId: "miku-488137",
   });
+  assert.deepEqual(fx.calls.launcherLock, [{ port: 9341 }]);
 });
 
 test("launcher restores the last theme after a native restart and CLI cannot re-enable persistence", async () => {
