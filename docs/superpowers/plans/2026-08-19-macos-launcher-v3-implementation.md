@@ -337,10 +337,13 @@ VERSION="${1:-}"
 PORT="${HEIGE_CODEX_SKIN_PORT:-9341}"
 ERROR_FILE="$(/usr/bin/mktemp -t heige-skin-launcher)"
 trap '/bin/rm -f -- "$ERROR_FILE"' EXIT
-if "$ROOT/scripts/lib/run-cli.zsh" launcher-apply --launcher-version "$VERSION" --port "$PORT" 2>"$ERROR_FILE"; then
+set +e
+"$ROOT/scripts/lib/run-cli.zsh" launcher-apply --launcher-version "$VERSION" --port "$PORT" 2>"$ERROR_FILE"
+STATUS=$?
+set -e
+if (( STATUS == 0 )); then
   exit 0
 fi
-STATUS=$?
 MESSAGE="$(<"$ERROR_FILE")"
 MESSAGE="${MESSAGE//[[:cntrl:]]/ }"
 MESSAGE="${MESSAGE[1,1200]}"
