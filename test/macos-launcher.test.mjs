@@ -12,6 +12,7 @@ import {
   acquireMacosLauncherInstallLock,
   finalizeMacosLauncher,
   installMacosLauncher,
+  MACOS_LAUNCHER_SCHEMA_VERSION,
   prepareMacosLauncher,
   publishMacosLauncher,
   renderMacosLauncherExecutable,
@@ -21,17 +22,34 @@ import {
 
 const execFileAsync = promisify(execFile);
 const launcherModuleUrl = new URL("../src/macos-launcher.mjs", import.meta.url).href;
+const launcherIconUrl = new URL("../assets/launcher/AppIcon.icns", import.meta.url);
+
+async function populateRuntime(installRoot, version = "5.5.4") {
+  const entrypoint = join(installRoot, "scripts", "apply.command");
+  const launcherEntrypoint = join(installRoot, "scripts", "launch-skin.command");
+  await Promise.all([
+    mkdir(join(installRoot, "scripts"), { recursive: true }),
+    mkdir(join(installRoot, "assets", "launcher"), { recursive: true }),
+  ]);
+  await writeFile(entrypoint, "#!/bin/zsh\nexit 0\n", { mode: 0o755 });
+  await chmod(entrypoint, 0o755);
+  await writeFile(launcherEntrypoint, "#!/bin/zsh\nexit 0\n", { mode: 0o755 });
+  await chmod(launcherEntrypoint, 0o755);
+  await writeFile(join(installRoot, "package.json"), `${JSON.stringify({ version })}\n`);
+  await writeFile(
+    join(installRoot, "assets", "launcher", "AppIcon.icns"),
+    await readFile(launcherIconUrl),
+  );
+  return { entrypoint, launcherEntrypoint };
+}
 
 async function fixture(t, suffix = "用户 空格") {
   const root = await mkdtemp(join(tmpdir(), `heige-launcher-${suffix}-`));
   t.after(() => rm(root, { recursive: true, force: true }));
   const home = join(root, "家 目录");
   const installRoot = join(home, ".codex", "heige-codex-skin-studio");
-  const entrypoint = join(installRoot, "scripts", "apply.command");
-  await mkdir(join(installRoot, "scripts"), { recursive: true });
-  await writeFile(entrypoint, "#!/bin/zsh\nexit 0\n", { mode: 0o755 });
-  await chmod(entrypoint, 0o755);
-  return { root, home, installRoot, entrypoint };
+  const { entrypoint, launcherEntrypoint } = await populateRuntime(installRoot);
+  return { root, home, installRoot, entrypoint, launcherEntrypoint };
 }
 
 async function waitForPath(child, path, stderr) {
@@ -48,18 +66,31 @@ async function waitForPath(child, path, stderr) {
 }
 
 test("creates a Finder-visible local app that calls only the current-session apply entrypoint", async (t) => {
-  const { home, installRoot, entrypoint } = await fixture(t);
+  const { home, installRoot, launcherEntrypoint } = await fixture(t);
   const result = await installMacosLauncher({ home, installRoot });
+  assert.equal(MACOS_LAUNCHER_SCHEMA_VERSION, 3);
   assert.equal(result.appPath, join(home, "Applications", "HeiGe 皮肤启动器.app"));
   assert.equal(result.executablePath, join(result.appPath, "Contents", "MacOS", "HeiGe Skin Launcher"));
   const executable = await readFile(result.executablePath, "utf8");
   const plist = await readFile(join(result.appPath, "Contents", "Info.plist"), "utf8");
-  assert.match(executable, /^#!\/bin\/zsh\n# HeiGe generated launcher schema 2\nset -euo pipefail\nexec /);
-  assert.match(executable, new RegExp(entrypoint.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(executable, /^#!\/bin\/zsh\n# HeiGe generated launcher schema 3\nset -euo pipefail\nexec /);
+  assert.match(executable, new RegExp(launcherEntrypoint.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.doesNotMatch(executable, /enable-skin\.command/);
   assert.doesNotMatch(executable, /curl|osascript|sudo|\$HOME|\$\{/);
   assert.match(plist, /com\.heige\.codex-skin-launcher/);
   assert.match(plist, /HeiGe 皮肤启动器/);
+  assert.match(plist, /<key>CFBundleIconFile<\/key>\s*<string>AppIcon\.icns<\/string>/);
+  assert.match(plist, /<key>CFBundleShortVersionString<\/key>\s*<string>5\.5\.4<\/string>/);
+  assert.match(plist, /<key>LSMinimumSystemVersion<\/key>\s*<string>13\.0<\/string>/);
+  assert.deepEqual(
+    await readFile(join(result.appPath, "Contents", "Resources", "AppIcon.icns")),
+    await readFile(launcherIconUrl),
+  );
+  assert.deepEqual(
+    (await readdir(join(result.appPath, "Contents", "_CodeSignature"))).sort(),
+    ["CodeDirectory", "CodeRequirements", "CodeResources", "CodeSignature"].sort(),
+  );
+  await execFileAsync("/usr/bin/codesign", ["--verify", "--deep", "--strict", "--", result.appPath]);
   assert.equal((await stat(result.executablePath)).mode & 0o777, 0o755);
   assert.equal((await stat(join(result.appPath, "Contents", "Info.plist"))).mode & 0o777, 0o644);
 });
@@ -110,10 +141,7 @@ test("serializable launcher participant retains the old bundle until outer final
   const original = await installMacosLauncher({ home, installRoot });
   const originalExecutable = await readFile(original.executablePath);
   const nextInstallRoot = join(home, ".codex", "heige-codex-skin-studio-next");
-  const nextEntrypoint = join(nextInstallRoot, "scripts", "apply.command");
-  await mkdir(join(nextInstallRoot, "scripts"), { recursive: true });
-  await writeFile(nextEntrypoint, "#!/bin/zsh\nexit 0\n", { mode: 0o755 });
-  await chmod(nextEntrypoint, 0o755);
+  await populateRuntime(nextInstallRoot);
 
   const participant = JSON.parse(JSON.stringify(await prepareMacosLauncher({
     home,
@@ -141,6 +169,14 @@ test("serializable launcher participant retains the old bundle until outer final
 test("launcher participant rollback removes a newly published app when no app existed before", async (t) => {
   const { home, installRoot } = await fixture(t);
   const participant = JSON.parse(JSON.stringify(await prepareMacosLauncher({ home, installRoot })));
+  assert.equal(participant.schemaVersion, 2);
+  assert.equal(participant.afterVersion, "5.5.4");
+  for (const field of [
+    "afterExecutableSha256",
+    "afterIconSha256",
+    "afterPlistSha256",
+    "afterSignatureSha256",
+  ]) assert.match(participant[field], /^[a-f0-9]{64}$/);
 
   await publishMacosLauncher(participant);
   assert.equal((await lstat(participant.appPath)).isDirectory(), true);
@@ -155,10 +191,7 @@ test("launcher participant can be reconstructed after a publisher process is SIG
   const original = await installMacosLauncher({ home, installRoot });
   const originalExecutable = await readFile(original.executablePath);
   const nextInstallRoot = join(home, ".codex", "cross-process-next");
-  const nextEntrypoint = join(nextInstallRoot, "scripts", "apply.command");
-  await mkdir(join(nextInstallRoot, "scripts"), { recursive: true });
-  await writeFile(nextEntrypoint, "#!/bin/zsh\nexit 0\n", { mode: 0o755 });
-  await chmod(nextEntrypoint, 0o755);
+  await populateRuntime(nextInstallRoot);
   const participant = await prepareMacosLauncher({ home, installRoot: nextInstallRoot });
   const descriptorPath = join(root, "launcher-participant.json");
   const markerPath = join(root, "launcher-published.marker");
@@ -210,10 +243,7 @@ test("escapes plist XML and shell-quotes a stable path with punctuation", async 
   const { root } = await fixture(t, "base");
   const home = join(root, "家 & <目录>");
   const installRoot = join(home, ".codex", "HeiGe's $studio");
-  const entrypoint = join(installRoot, "scripts", "apply.command");
-  await mkdir(join(installRoot, "scripts"), { recursive: true });
-  await writeFile(entrypoint, "#!/bin/zsh\nexit 0\n", { mode: 0o755 });
-  await chmod(entrypoint, 0o755);
+  await populateRuntime(installRoot);
   const result = await installMacosLauncher({ home, installRoot });
   const executable = await readFile(result.executablePath, "utf8");
   const plist = await readFile(join(result.appPath, "Contents", "Info.plist"), "utf8");
@@ -242,47 +272,50 @@ test("replaces only an attributed generated bundle and restores it after publish
   assert.deepEqual(leftovers, []);
 });
 
-test("upgrades an attributed older generated bundle and can move its stable install root", async (t) => {
-  const { home, installRoot } = await fixture(t);
-  const first = await installMacosLauncher({ home, installRoot });
-  const legacyEntrypoint = join(installRoot, "scripts", "enable-skin.command");
-  await writeFile(legacyEntrypoint, "#!/bin/zsh\nexit 0\n", { mode: 0o755 });
-  await chmod(legacyEntrypoint, 0o755);
-  await writeFile(
-    first.executablePath,
-    renderMacosLauncherExecutable(legacyEntrypoint).replace("schema 2", "schema 1"),
-    { mode: 0o755 },
-  );
-  await chmod(first.executablePath, 0o755);
-  const plistPath = join(first.appPath, "Contents", "Info.plist");
-  const oldPlist = await readFile(plistPath, "utf8");
-  await writeFile(
-    plistPath,
-    oldPlist
+for (const legacySchema of [1, 2]) {
+  test(`upgrades an attributed Schema ${legacySchema} bundle and moves its stable install root`, async (t) => {
+    const { home, installRoot } = await fixture(t);
+    const first = await installMacosLauncher({ home, installRoot });
+    const legacyEntrypointName = legacySchema === 1 ? "enable-skin.command" : "apply.command";
+    const legacyEntrypoint = join(installRoot, "scripts", legacyEntrypointName);
+    await writeFile(legacyEntrypoint, "#!/bin/zsh\nexit 0\n", { mode: 0o755 });
+    await chmod(legacyEntrypoint, 0o755);
+    await rm(first.appPath, { recursive: true });
+    const legacyMacos = join(first.appPath, "Contents", "MacOS");
+    await mkdir(legacyMacos, { recursive: true });
+    const shellQuotedEntrypoint = `'${legacyEntrypoint.replaceAll("'", `'\"'\"'`)}'`;
+    await writeFile(
+      join(legacyMacos, "HeiGe Skin Launcher"),
+      `#!/bin/zsh\n# HeiGe generated launcher schema ${legacySchema}\nset -euo pipefail\nexec ${shellQuotedEntrypoint}\n`,
+      { mode: 0o755 },
+    );
+    const legacyPlist = renderMacosLauncherPlist(installRoot)
+      .replace(/    <key>CFBundleIconFile<\/key>\n    <string>AppIcon\.icns<\/string>\n/, "")
+      .replace("<string>5.5.4</string>", "<string>1.0</string>")
+      .replace("<string>5.5.4</string>", "<string>1</string>")
       .replace(
-        "<key>CFBundleShortVersionString</key>\n    <string>1.0</string>",
-        "<key>CFBundleShortVersionString</key>\n    <string>0.9</string>",
+        `<key>HeiGeLauncherSchemaVersion</key>\n    <integer>3</integer>`,
+        `<key>HeiGeLauncherSchemaVersion</key>\n    <integer>${legacySchema}</integer>`,
       )
-      .replace(
-        "<key>HeiGeLauncherSchemaVersion</key>\n    <integer>2</integer>",
-        "<key>HeiGeLauncherSchemaVersion</key>\n    <integer>1</integer>",
-      ),
-  );
+      .replace(/    <key>LSMinimumSystemVersion<\/key>\n    <string>13\.0<\/string>\n/, "")
+      .replace(/    <key>NSHighResolutionCapable<\/key>\n    <true\/>\n/, "");
+    await writeFile(join(first.appPath, "Contents", "Info.plist"), legacyPlist, { mode: 0o644 });
 
-  const nextInstallRoot = join(home, ".codex", "heige-codex-skin-studio-v2");
-  const nextEntrypoint = join(nextInstallRoot, "scripts", "apply.command");
-  await mkdir(join(nextInstallRoot, "scripts"), { recursive: true });
-  await writeFile(nextEntrypoint, "#!/bin/zsh\nexit 0\n", { mode: 0o755 });
-  await chmod(nextEntrypoint, 0o755);
-
-  const upgraded = await installMacosLauncher({ home, installRoot: nextInstallRoot });
-  const executable = await readFile(upgraded.executablePath, "utf8");
-  assert.match(executable, new RegExp(nextEntrypoint.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.match(executable, /generated launcher schema 2/);
-  assert.doesNotMatch(executable, /enable-skin\.command/);
-  assert.doesNotMatch(executable, new RegExp(join(installRoot, "scripts").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.match(await readFile(upgraded.plistPath, "utf8"), /<string>1\.0<\/string>/);
-});
+    const nextInstallRoot = join(home, ".codex", `heige-codex-skin-studio-v${legacySchema}`);
+    const { launcherEntrypoint: nextEntrypoint } = await populateRuntime(nextInstallRoot);
+    const upgraded = await installMacosLauncher({ home, installRoot: nextInstallRoot });
+    const executable = await readFile(upgraded.executablePath, "utf8");
+    assert.match(executable, new RegExp(nextEntrypoint.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(executable, /generated launcher schema 3/);
+    assert.doesNotMatch(executable, /enable-skin\.command/);
+    assert.doesNotMatch(
+      executable,
+      new RegExp(join(installRoot, "scripts").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+    );
+    assert.match(await readFile(upgraded.plistPath, "utf8"), /<string>5\.5\.4<\/string>/);
+    await execFileAsync("/usr/bin/codesign", ["--verify", "--deep", "--strict", "--", upgraded.appPath]);
+  });
+}
 
 test("refuses a foreign destination, symlinked entrypoint, and non-executable entrypoint", async (t) => {
   await t.test("foreign destination", async (t) => {
@@ -295,17 +328,17 @@ test("refuses a foreign destination, symlinked entrypoint, and non-executable en
   });
 
   await t.test("symlinked entrypoint", async (t) => {
-    const { root, home, installRoot, entrypoint } = await fixture(t);
+    const { root, home, installRoot, launcherEntrypoint } = await fixture(t);
     const outside = join(root, "outside.command");
     await writeFile(outside, "#!/bin/zsh\n", { mode: 0o755 });
-    await rm(entrypoint);
-    await symlink(outside, entrypoint);
+    await rm(launcherEntrypoint);
+    await symlink(outside, launcherEntrypoint);
     await assert.rejects(installMacosLauncher({ home, installRoot }), /符号链接|symlink|regular/i);
   });
 
   await t.test("non-executable entrypoint", async (t) => {
-    const { home, installRoot, entrypoint } = await fixture(t);
-    await chmod(entrypoint, 0o644);
+    const { home, installRoot, launcherEntrypoint } = await fixture(t);
+    await chmod(launcherEntrypoint, 0o644);
     await assert.rejects(installMacosLauncher({ home, installRoot }), /可执行|executable/i);
   });
 });
@@ -357,6 +390,32 @@ test("refuses extra bundle content and a nested directory symlink without deleti
     await assert.rejects(installMacosLauncher({ home, installRoot }), /归属|generated|符号链接/i);
     assert.equal(await readFile(outside, "utf8"), "#!/bin/zsh\nexit 0\n");
     assert.equal((await lstat(result.executablePath)).isSymbolicLink(), true);
+  });
+
+  await t.test("signature content injected after signing", async (t) => {
+    const { home, installRoot } = await fixture(t);
+    const result = await installMacosLauncher({ home, installRoot });
+    const extra = join(result.appPath, "Contents", "_CodeSignature", "foreign.signature");
+    await writeFile(extra, "foreign\n");
+    await assert.rejects(
+      installMacosLauncher({ home, installRoot }),
+      /signature|额外内容|归属|generated/i,
+    );
+    assert.equal(await readFile(extra, "utf8"), "foreign\n");
+  });
+
+  await t.test("icon changed after signing", async (t) => {
+    const { home, installRoot } = await fixture(t);
+    const result = await installMacosLauncher({ home, installRoot });
+    const iconPath = join(result.appPath, "Contents", "Resources", "AppIcon.icns");
+    const changed = Buffer.from(await readFile(iconPath));
+    changed[changed.length - 1] ^= 0xff;
+    await writeFile(iconPath, changed);
+    await assert.rejects(
+      installMacosLauncher({ home, installRoot }),
+      /codesign|signature|归属|generated/i,
+    );
+    assert.deepEqual(await readFile(iconPath), changed);
   });
 });
 

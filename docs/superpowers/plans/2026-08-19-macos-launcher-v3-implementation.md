@@ -225,10 +225,15 @@ Schema 3 固定结构只允许：
 ```js
 const SCHEMA_3_CONTENTS = ["Info.plist", "MacOS", "Resources", "_CodeSignature"];
 const SCHEMA_3_RESOURCES = ["AppIcon.icns"];
-const SCHEMA_3_SIGNATURE = ["CodeResources"];
+const SCHEMA_3_SIGNATURE = [
+  "CodeDirectory",
+  "CodeRequirements",
+  "CodeResources",
+  "CodeSignature",
+];
 ```
 
-staging 写入并 `fsync` 后执行：
+这是当前 macOS 对脚本型 Bundle 执行 ad hoc 签名的真实固定产物，其中 `CodeSignature` 可以是 0 字节。staging 写入并 `fsync` 后执行：
 
 ```js
 await execFile("/usr/bin/codesign", ["--force", "--sign", "-", "--", stagePath]);

@@ -122,8 +122,13 @@ HeiGe 皮肤启动器.app/
     Resources/
       AppIcon.icns
     _CodeSignature/
+      CodeDirectory
+      CodeRequirements
       CodeResources
+      CodeSignature
 ```
+
+在当前 macOS 对脚本型 Bundle 执行 ad hoc `codesign` 时，系统会固定生成以上四个签名文件；其中 `CodeSignature` 可以合法地为 0 字节。归属校验使用这组精确白名单并对四项组成的 canonical 摘要整体绑定，不接受任意额外签名文件。
 
 `Info.plist` 至少包含以下产品字段：
 

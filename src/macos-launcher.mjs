@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { execFile as execFileCallback } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
 import {
   chmod,
@@ -16,30 +17,45 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import { promisify } from "node:util";
 
 import { readProcessIdentity, sameProcessIdentity } from "./process-identity.mjs";
 
 export const MACOS_LAUNCHER_NAME = "HeiGe 皮肤启动器";
 export const MACOS_LAUNCHER_BUNDLE_ID = "com.heige.codex-skin-launcher";
-export const MACOS_LAUNCHER_SCHEMA_VERSION = 2;
+export const MACOS_LAUNCHER_SCHEMA_VERSION = 3;
 const EXECUTABLE_NAME = "HeiGe Skin Launcher";
+const ICON_NAME = "AppIcon.icns";
+const SIGNATURE_FILE_NAMES = [
+  "CodeDirectory",
+  "CodeRequirements",
+  "CodeResources",
+  "CodeSignature",
+];
 const GENERATOR_ID = "heige-codex-skin-studio";
 const MAX_GENERATED_FILE_BYTES = 64 * 1024;
+const MAX_ICON_BYTES = 8 * 1024 * 1024;
 const TRANSACTION_FILE = ".heige-codex-skin-launcher-transaction.json";
 const PREPARATION_FILE = ".heige-codex-skin-launcher-prepare.json";
 const LOCK_DIRECTORY = ".heige-codex-skin-launcher-install.lock";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PARTICIPANT_KEYS = [
   "afterExecutableSha256",
+  "afterIconSha256",
   "afterPlistSha256",
+  "afterSignatureSha256",
+  "afterVersion",
   "appPath",
   "applications",
   "applicationsPriorExisted",
   "backupPath",
   "beforeExecutableSha256",
   "beforeExisted",
+  "beforeIconSha256",
   "beforeInstallRoot",
   "beforePlistSha256",
+  "beforeSignatureSha256",
+  "beforeVersion",
   "home",
   "intentPath",
   "installRoot",
@@ -49,7 +65,7 @@ const PARTICIPANT_KEYS = [
   "transactionId",
   "unchanged",
 ];
-const PLIST_KEYS = [
+const LEGACY_PLIST_KEYS = [
   "CFBundleDevelopmentRegion",
   "CFBundleDisplayName",
   "CFBundleExecutable",
@@ -64,6 +80,14 @@ const PLIST_KEYS = [
   "HeiGeInstallRoot",
   "HeiGeLauncherSchemaVersion",
 ].sort();
+const SCHEMA_3_PLIST_KEYS = [
+  ...LEGACY_PLIST_KEYS,
+  "CFBundleIconFile",
+  "LSMinimumSystemVersion",
+  "NSHighResolutionCapable",
+].sort();
+const VERSION_PATTERN = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/;
+const execFile = promisify(execFileCallback);
 
 function exactKeys(value, keys) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
@@ -143,17 +167,30 @@ function shellQuote(value) {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
-function renderMacosLauncherExecutableVersion(entrypoint, schema) {
+function renderMacosLauncherExecutableVersion(entrypoint, schema, version = null) {
   entrypoint = assertAbsolutePath(entrypoint, "launcher entrypoint");
-  return `#!/bin/zsh\n# HeiGe generated launcher schema ${schema}\nset -euo pipefail\nexec ${shellQuote(entrypoint)}\n`;
+  const argument = schema === 3 ? ` ${shellQuote(validateLauncherVersion(version))}` : "";
+  return `#!/bin/zsh\n# HeiGe generated launcher schema ${schema}\nset -euo pipefail\nexec ${shellQuote(entrypoint)}${argument}\n`;
 }
 
-export function renderMacosLauncherExecutable(entrypoint) {
-  return renderMacosLauncherExecutableVersion(entrypoint, MACOS_LAUNCHER_SCHEMA_VERSION);
+function validateLauncherVersion(value) {
+  if (typeof value !== "string" || !VERSION_PATTERN.test(value)) {
+    throw new TypeError("launcher version 必须是规范三段 semver");
+  }
+  return value;
 }
 
-export function renderMacosLauncherPlist(installRoot) {
+export function renderMacosLauncherExecutable(entrypoint, version = "5.5.4") {
+  return renderMacosLauncherExecutableVersion(
+    entrypoint,
+    MACOS_LAUNCHER_SCHEMA_VERSION,
+    version,
+  );
+}
+
+export function renderMacosLauncherPlist(installRoot, version = "5.5.4") {
   installRoot = assertAbsolutePath(installRoot, "installRoot");
+  version = validateLauncherVersion(version);
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -166,6 +203,8 @@ export function renderMacosLauncherPlist(installRoot) {
     <string>${EXECUTABLE_NAME}</string>
     <key>CFBundleIdentifier</key>
     <string>${MACOS_LAUNCHER_BUNDLE_ID}</string>
+    <key>CFBundleIconFile</key>
+    <string>${ICON_NAME}</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
@@ -173,9 +212,9 @@ export function renderMacosLauncherPlist(installRoot) {
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0</string>
+    <string>${version}</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>${version}</string>
     <key>HeiGeGeneratedBy</key>
     <string>${GENERATOR_ID}</string>
     <key>HeiGeGeneratedLauncher</key>
@@ -184,6 +223,10 @@ export function renderMacosLauncherPlist(installRoot) {
     <string>${xmlEscape(installRoot)}</string>
     <key>HeiGeLauncherSchemaVersion</key>
     <integer>${MACOS_LAUNCHER_SCHEMA_VERSION}</integer>
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
 </dict>
 </plist>
 `;
@@ -204,14 +247,14 @@ async function requireStableEntrypoint(installRoot) {
   if (canonicalScripts !== join(canonicalRoot, "scripts")) {
     throw new Error("scripts 必须位于 stable installRoot 内");
   }
-  const entrypoint = join(scripts, "apply.command");
+  const entrypoint = join(scripts, "launch-skin.command");
   const info = await lstat(entrypoint);
   if (info.isSymbolicLink() || !info.isFile()) {
-    throw new Error("apply.command 必须是 regular file 且不得是符号链接");
+    throw new Error("launch-skin.command 必须是 regular file 且不得是符号链接");
   }
-  if ((info.mode & 0o111) === 0) throw new Error("apply.command 必须可执行");
-  if (await realpath(entrypoint) !== join(canonicalRoot, "scripts", "apply.command")) {
-    throw new Error("apply.command 必须位于 stable installRoot 内");
+  if ((info.mode & 0o111) === 0) throw new Error("launch-skin.command 必须可执行");
+  if (await realpath(entrypoint) !== join(canonicalRoot, "scripts", "launch-skin.command")) {
+    throw new Error("launch-skin.command 必须位于 stable installRoot 内");
   }
   return entrypoint;
 }
@@ -250,6 +293,88 @@ async function readSmallRegular(path, label) {
   }
 }
 
+async function readBoundedBinary(
+  path,
+  label,
+  maxBytes = MAX_ICON_BYTES,
+  { allowEmpty = false } = {},
+) {
+  const noFollow = fsConstants.O_NOFOLLOW ?? 0;
+  const handle = await open(path, fsConstants.O_RDONLY | noFollow);
+  try {
+    const before = await handle.stat({ bigint: true });
+    if (
+      !before.isFile()
+      || (!allowEmpty && before.size <= 0n)
+      || before.size > BigInt(maxBytes)
+    ) {
+      throw new Error(`${label} 不是受支持的 regular file`);
+    }
+    const bytes = await handle.readFile();
+    const after = await handle.stat({ bigint: true });
+    if (
+      before.dev !== after.dev
+      || before.ino !== after.ino
+      || before.size !== after.size
+      || before.mtimeNs !== after.mtimeNs
+      || BigInt(bytes.byteLength) !== before.size
+    ) throw new Error(`${label} 在归属校验期间发生变化`);
+    return { bytes, info: { mode: Number(before.mode) } };
+  } finally {
+    await handle.close();
+  }
+}
+
+function signatureResourcesSha256(resources) {
+  const hash = createHash("sha256");
+  for (const name of SIGNATURE_FILE_NAMES) {
+    const bytes = resources.get(name);
+    if (!Buffer.isBuffer(bytes)) throw new Error(`签名资源缺少 ${name}`);
+    hash.update(name, "utf8");
+    hash.update("\0");
+    hash.update(String(bytes.byteLength), "ascii");
+    hash.update("\0");
+    hash.update(bytes);
+  }
+  return hash.digest("hex");
+}
+
+function validateIcns(bytes) {
+  if (
+    !Buffer.isBuffer(bytes)
+    || bytes.byteLength < 16
+    || bytes.subarray(0, 4).toString("ascii") !== "icns"
+    || bytes.readUInt32BE(4) !== bytes.byteLength
+  ) throw new Error("AppIcon.icns 文件头或长度无效");
+  return bytes;
+}
+
+async function readLauncherInputs(validationRoot) {
+  const canonicalRoot = await requireRealDirectory(validationRoot, "validationRoot");
+  const packagePath = join(validationRoot, "package.json");
+  const iconPath = join(validationRoot, "assets", "launcher", ICON_NAME);
+  const [{ text }, { bytes: icon }] = await Promise.all([
+    readSmallRegular(packagePath, "package.json"),
+    readBoundedBinary(iconPath, ICON_NAME),
+  ]);
+  if (await realpath(packagePath) !== join(canonicalRoot, "package.json")) {
+    throw new Error("package.json 必须位于 validationRoot 内");
+  }
+  if (await realpath(iconPath) !== join(canonicalRoot, "assets", "launcher", ICON_NAME)) {
+    throw new Error("AppIcon.icns 必须位于 validationRoot 内");
+  }
+  let packageJson;
+  try {
+    packageJson = JSON.parse(text);
+  } catch (cause) {
+    throw new Error("package.json 不是有效 JSON", { cause });
+  }
+  return {
+    icon: validateIcns(icon),
+    version: validateLauncherVersion(packageJson?.version),
+  };
+}
+
 function oneMatch(text, expression, label) {
   const matches = [...text.matchAll(expression)];
   if (matches.length !== 1) throw new Error(`Info.plist ${label} 缺失或重复`);
@@ -267,20 +392,24 @@ function plistString(text, key) {
 
 function parseAttributedPlist(text) {
   assertXmlDocumentCharacters(text, "Info.plist");
-  const keys = [...text.matchAll(/<key>([^<]+)<\/key>/g)].map((match) => match[1]).sort();
-  if (keys.length !== PLIST_KEYS.length || !keys.every((key, index) => key === PLIST_KEYS[index])) {
-    throw new Error("Info.plist keys 不符合 generated launcher schema");
-  }
-  if (!/<key>HeiGeGeneratedLauncher<\/key>\s*<true\/>/.test(text)) {
-    throw new Error("Info.plist 缺少 generated launcher 标识");
-  }
   const schema = Number(oneMatch(
     text,
     /<key>HeiGeLauncherSchemaVersion<\/key>\s*<integer>(\d+)<\/integer>/g,
     "HeiGeLauncherSchemaVersion",
   ));
-  if (![1, MACOS_LAUNCHER_SCHEMA_VERSION].includes(schema)) {
+  if (![1, 2, MACOS_LAUNCHER_SCHEMA_VERSION].includes(schema)) {
     throw new Error("不支持的 generated launcher schema");
+  }
+  const keys = [...text.matchAll(/<key>([^<]+)<\/key>/g)].map((match) => match[1]).sort();
+  const expectedKeys = schema === 3 ? SCHEMA_3_PLIST_KEYS : LEGACY_PLIST_KEYS;
+  if (
+    keys.length !== expectedKeys.length
+    || !keys.every((key, index) => key === expectedKeys[index])
+  ) {
+    throw new Error("Info.plist keys 不符合 generated launcher schema");
+  }
+  if (!/<key>HeiGeGeneratedLauncher<\/key>\s*<true\/>/.test(text)) {
+    throw new Error("Info.plist 缺少 generated launcher 标识");
   }
   if (plistString(text, "CFBundleIdentifier") !== MACOS_LAUNCHER_BUNDLE_ID) {
     throw new Error("generated launcher bundle id 不匹配");
@@ -292,7 +421,21 @@ function parseAttributedPlist(text) {
     throw new Error("generated launcher producer 不匹配");
   }
   const installRoot = assertAbsolutePath(plistString(text, "HeiGeInstallRoot"), "attributed installRoot");
-  return { installRoot, schema };
+  if (schema !== 3) return { installRoot, schema, version: null };
+  const version = validateLauncherVersion(plistString(text, "CFBundleShortVersionString"));
+  if (plistString(text, "CFBundleVersion") !== version) {
+    throw new Error("generated launcher Bundle 版本字段不一致");
+  }
+  if (plistString(text, "CFBundleIconFile") !== ICON_NAME) {
+    throw new Error("generated launcher icon 字段不匹配");
+  }
+  if (plistString(text, "LSMinimumSystemVersion") !== "13.0") {
+    throw new Error("generated launcher 最低系统版本不匹配");
+  }
+  if (!/<key>NSHighResolutionCapable<\/key>\s*<true\/>/.test(text)) {
+    throw new Error("generated launcher 缺少高分辨率标识");
+  }
+  return { installRoot, schema, version };
 }
 
 async function assertExactDirectory(path, names, label) {
@@ -305,36 +448,105 @@ async function assertExactDirectory(path, names, label) {
   return canonical;
 }
 
+async function signMacosLauncherBundle(appPath) {
+  await execFile("/usr/bin/codesign", ["--force", "--sign", "-", "--", appPath], {
+    maxBuffer: 1024 * 1024,
+  });
+}
+
+async function verifyMacosLauncherSignature(appPath) {
+  await execFile("/usr/bin/codesign", ["--verify", "--deep", "--strict", "--", appPath], {
+    maxBuffer: 1024 * 1024,
+  });
+}
+
 async function validateAttributedBundle(appPath, expected = null) {
   try {
     const canonicalApp = await assertExactDirectory(appPath, ["Contents"], "launcher app");
     const contents = join(appPath, "Contents");
-    const canonicalContents = await assertExactDirectory(contents, ["Info.plist", "MacOS"], "launcher Contents");
+    const preliminaryContents = await requireRealDirectory(contents, "launcher Contents");
+    if (preliminaryContents !== join(canonicalApp, "Contents")) {
+      throw new Error("launcher Contents escaped bundle");
+    }
+    const plistPath = join(contents, "Info.plist");
+    const { info: plistInfo, text: plist } = await readSmallRegular(plistPath, "Info.plist");
+    const attribution = parseAttributedPlist(plist);
+    const contentNames = attribution.schema === 3
+      ? ["Info.plist", "MacOS", "Resources", "_CodeSignature"]
+      : ["Info.plist", "MacOS"];
+    const canonicalContents = await assertExactDirectory(contents, contentNames, "launcher Contents");
     if (canonicalContents !== join(canonicalApp, "Contents")) throw new Error("launcher Contents escaped bundle");
     const macos = join(contents, "MacOS");
     const canonicalMacos = await assertExactDirectory(macos, [EXECUTABLE_NAME], "launcher MacOS");
     if (canonicalMacos !== join(canonicalContents, "MacOS")) throw new Error("launcher MacOS escaped bundle");
     const executablePath = join(macos, EXECUTABLE_NAME);
-    const plistPath = join(contents, "Info.plist");
-    const [{ info: executableInfo, text: executable }, { info: plistInfo, text: plist }] = await Promise.all([
-      readSmallRegular(executablePath, "launcher executable"),
-      readSmallRegular(plistPath, "Info.plist"),
-    ]);
-    const attribution = parseAttributedPlist(plist);
+    const { info: executableInfo, text: executable } = await readSmallRegular(
+      executablePath,
+      "launcher executable",
+    );
     const entrypointName = attribution.schema === 1
       ? "enable-skin.command"
-      : "apply.command";
+      : attribution.schema === 2
+        ? "apply.command"
+        : "launch-skin.command";
     if (executable !== renderMacosLauncherExecutableVersion(join(
       attribution.installRoot,
       "scripts",
       entrypointName,
-    ), attribution.schema)) {
+    ), attribution.schema, attribution.version)) {
       throw new Error("generated launcher executable 与 attributed installRoot 不匹配");
     }
     if ((executableInfo.mode & 0o777) !== 0o755 || (plistInfo.mode & 0o777) !== 0o644) {
       throw new Error("generated bundle 权限不正确");
     }
-    if (expected !== null && (executable !== expected.executable || plist !== expected.plist)) {
+    let icon = null;
+    let iconPath = null;
+    let iconSha256 = null;
+    let codeResourcesPath = null;
+    let signatureSha256 = null;
+    if (attribution.schema === 3) {
+      const resources = join(contents, "Resources");
+      const signature = join(contents, "_CodeSignature");
+      if (await assertExactDirectory(resources, [ICON_NAME], "launcher Resources") !==
+          join(canonicalContents, "Resources")) {
+        throw new Error("launcher Resources escaped bundle");
+      }
+      if (await assertExactDirectory(signature, SIGNATURE_FILE_NAMES, "launcher signature") !==
+          join(canonicalContents, "_CodeSignature")) {
+        throw new Error("launcher signature escaped bundle");
+      }
+      iconPath = join(resources, ICON_NAME);
+      codeResourcesPath = join(signature, "CodeResources");
+      const [iconSnapshot, ...signatureSnapshots] = await Promise.all([
+        readBoundedBinary(iconPath, ICON_NAME),
+        ...SIGNATURE_FILE_NAMES.map((name) => readBoundedBinary(
+          join(signature, name),
+          name,
+          1024 * 1024,
+          { allowEmpty: name === "CodeSignature" },
+        )),
+      ]);
+      icon = validateIcns(iconSnapshot.bytes);
+      if (
+        (iconSnapshot.info.mode & 0o777) !== 0o644
+        || signatureSnapshots.some(({ info }) => (info.mode & 0o777) !== 0o644)
+      ) throw new Error("generated bundle resource 权限不正确");
+      await verifyMacosLauncherSignature(appPath);
+      iconSha256 = sha256(icon);
+      const signatureResources = new Map(SIGNATURE_FILE_NAMES.map(
+        (name, index) => [name, signatureSnapshots[index].bytes],
+      ));
+      signatureSha256 = signatureResourcesSha256(signatureResources);
+    }
+    if (
+      expected !== null
+      && (
+        executable !== expected.executable
+        || plist !== expected.plist
+        || !Buffer.isBuffer(icon)
+        || !icon.equals(expected.icon)
+      )
+    ) {
       throw new Error("staged generated bundle 与期望字节不一致");
     }
     return {
@@ -345,6 +557,11 @@ async function validateAttributedBundle(appPath, expected = null) {
       plist,
       plistPath,
       plistSha256: sha256(plist),
+      icon,
+      iconPath,
+      iconSha256,
+      codeResourcesPath,
+      signatureSha256,
     };
   } catch (cause) {
     throw new Error(
@@ -357,10 +574,15 @@ async function validateAttributedBundle(appPath, expected = null) {
 async function stageBundle(stagePath, expected, hooks = {}) {
   const contents = join(stagePath, "Contents");
   const macos = join(contents, "MacOS");
-  await mkdir(macos, { recursive: true, mode: 0o755 });
+  const resources = join(contents, "Resources");
+  await Promise.all([
+    mkdir(macos, { recursive: true, mode: 0o755 }),
+    mkdir(resources, { recursive: true, mode: 0o755 }),
+  ]);
   await chmod(stagePath, 0o755);
   await chmod(contents, 0o755);
   await chmod(macos, 0o755);
+  await chmod(resources, 0o755);
   await syncDirectory(macos);
   await syncDirectory(contents);
   await syncDirectory(stagePath);
@@ -376,17 +598,32 @@ async function stageBundle(stagePath, expected, hooks = {}) {
     flag: "wx",
     mode: 0o755,
   });
+  await writeFile(join(resources, ICON_NAME), expected.icon, {
+    flag: "wx",
+    mode: 0o644,
+  });
   await chmod(join(contents, "Info.plist"), 0o644);
   await chmod(join(macos, EXECUTABLE_NAME), 0o755);
-  for (const path of [join(contents, "Info.plist"), join(macos, EXECUTABLE_NAME)]) {
+  await chmod(join(resources, ICON_NAME), 0o644);
+  for (const path of [
+    join(contents, "Info.plist"),
+    join(macos, EXECUTABLE_NAME),
+    join(resources, ICON_NAME),
+  ]) {
     const handle = await open(path, "r+");
     try { await handle.sync(); } finally { await handle.close(); }
   }
   await syncDirectory(macos);
+  await syncDirectory(resources);
   await syncDirectory(contents);
   await syncDirectory(stagePath);
   await syncDirectory(dirname(stagePath));
-  await validateAttributedBundle(stagePath, expected);
+  await signMacosLauncherBundle(stagePath);
+  await syncDirectory(join(contents, "_CodeSignature"));
+  await syncDirectory(contents);
+  await syncDirectory(stagePath);
+  await syncDirectory(dirname(stagePath));
+  return validateAttributedBundle(stagePath, expected);
 }
 
 async function syncDirectory(path) {
@@ -559,7 +796,12 @@ async function validatePartialBundleStage(intent) {
     throw new Error("partial launcher Contents 不安全");
   }
   const contentNames = (await readdir(contents)).sort();
-  if (contentNames.some((name) => !["Info.plist", "MacOS"].includes(name))) {
+  if (contentNames.some((name) => ![
+    "Info.plist",
+    "MacOS",
+    "Resources",
+    "_CodeSignature",
+  ].includes(name))) {
     throw new Error("partial launcher Contents 含有未归属内容");
   }
   if (contentNames.includes("Info.plist")) {
@@ -568,20 +810,55 @@ async function validatePartialBundleStage(intent) {
       throw new Error("partial launcher Info.plist 不安全");
     }
   }
-  if (!contentNames.includes("MacOS")) return;
-  const macos = join(contents, "MacOS");
-  const macosInfo = await lstat(macos);
-  if (macosInfo.isSymbolicLink() || !macosInfo.isDirectory()) {
-    throw new Error("partial launcher MacOS 不安全");
+  if (contentNames.includes("MacOS")) {
+    const macos = join(contents, "MacOS");
+    const macosInfo = await lstat(macos);
+    if (macosInfo.isSymbolicLink() || !macosInfo.isDirectory()) {
+      throw new Error("partial launcher MacOS 不安全");
+    }
+    const executableNames = await readdir(macos);
+    if (executableNames.some((name) => name !== EXECUTABLE_NAME)) {
+      throw new Error("partial launcher MacOS 含有未归属内容");
+    }
+    if (executableNames.includes(EXECUTABLE_NAME)) {
+      const info = await lstat(join(macos, EXECUTABLE_NAME));
+      if (info.isSymbolicLink() || !info.isFile() || info.size > MAX_GENERATED_FILE_BYTES) {
+        throw new Error("partial launcher executable 不安全");
+      }
+    }
   }
-  const executableNames = await readdir(macos);
-  if (executableNames.some((name) => name !== EXECUTABLE_NAME)) {
-    throw new Error("partial launcher MacOS 含有未归属内容");
+  if (contentNames.includes("Resources")) {
+    const resources = join(contents, "Resources");
+    const resourcesInfo = await lstat(resources);
+    if (resourcesInfo.isSymbolicLink() || !resourcesInfo.isDirectory()) {
+      throw new Error("partial launcher Resources 不安全");
+    }
+    const resourceNames = await readdir(resources);
+    if (resourceNames.some((name) => name !== ICON_NAME)) {
+      throw new Error("partial launcher Resources 含有未归属内容");
+    }
+    if (resourceNames.includes(ICON_NAME)) {
+      const info = await lstat(join(resources, ICON_NAME));
+      if (info.isSymbolicLink() || !info.isFile() || info.size > MAX_ICON_BYTES) {
+        throw new Error("partial launcher icon 不安全");
+      }
+    }
   }
-  if (executableNames.includes(EXECUTABLE_NAME)) {
-    const info = await lstat(join(macos, EXECUTABLE_NAME));
-    if (info.isSymbolicLink() || !info.isFile() || info.size > MAX_GENERATED_FILE_BYTES) {
-      throw new Error("partial launcher executable 不安全");
+  if (contentNames.includes("_CodeSignature")) {
+    const signature = join(contents, "_CodeSignature");
+    const signatureInfo = await lstat(signature);
+    if (signatureInfo.isSymbolicLink() || !signatureInfo.isDirectory()) {
+      throw new Error("partial launcher signature 不安全");
+    }
+    const signatureNames = await readdir(signature);
+    if (signatureNames.some((name) => !SIGNATURE_FILE_NAMES.includes(name))) {
+      throw new Error("partial launcher signature 含有未归属内容");
+    }
+    for (const name of signatureNames) {
+      const info = await lstat(join(signature, name));
+      if (info.isSymbolicLink() || !info.isFile() || info.size > 1024 * 1024) {
+        throw new Error("partial launcher signature file 不安全");
+      }
     }
   }
 }
@@ -609,10 +886,14 @@ async function recoverPreparationIntent(home, { lockMayExist = false } = {}) {
     throw new Error("launcher prepare 在 publish 前意外创建了 backup");
   }
   if (await pathInfo(intent.stagePath)) {
+    let staged = null;
     try {
-      await validateAttributedBundle(intent.stagePath, expectedLauncher(intent.installRoot));
+      staged = await validateAttributedBundle(intent.stagePath);
     } catch {
       await validatePartialBundleStage(intent);
+    }
+    if (staged !== null && staged.installRoot !== intent.installRoot) {
+      throw new Error("launcher stage installRoot 与 preparation intent 不匹配");
     }
     await rm(intent.stagePath, { recursive: true, force: false });
     await syncDirectory(intent.applications);
@@ -887,18 +1168,24 @@ function assertSha256(value, label) {
   }
 }
 
-function expectedLauncher(installRoot) {
+function expectedLauncher(installRoot, { icon, version }) {
+  installRoot = assertAbsolutePath(installRoot, "expected launcher installRoot");
+  version = validateLauncherVersion(version);
+  validateIcns(icon);
   const executable = renderMacosLauncherExecutable(join(
     installRoot,
     "scripts",
-    "apply.command",
-  ));
-  const plist = renderMacosLauncherPlist(installRoot);
+    "launch-skin.command",
+  ), version);
+  const plist = renderMacosLauncherPlist(installRoot, version);
   return {
     executable,
     executableSha256: sha256(executable),
+    icon,
+    iconSha256: sha256(icon),
     plist,
     plistSha256: sha256(plist),
+    version,
   };
 }
 
@@ -908,7 +1195,7 @@ function assertLauncherParticipant(value) {
     || typeof value !== "object"
     || Array.isArray(value)
     || !exactKeys(value, PARTICIPANT_KEYS)
-    || value.schemaVersion !== 1
+    || value.schemaVersion !== 2
     || value.product !== GENERATOR_ID
   ) throw new Error("launcher participant schema 无效");
   const home = assertAbsolutePath(value.home, "participant home");
@@ -932,21 +1219,31 @@ function assertLauncherParticipant(value) {
   if (typeof value.applicationsPriorExisted !== "boolean") {
     throw new Error("launcher participant Applications prestate 无效");
   }
-  const expected = expectedLauncher(installRoot);
   assertSha256(value.afterExecutableSha256, "after executable");
+  assertSha256(value.afterIconSha256, "after icon");
   assertSha256(value.afterPlistSha256, "after plist");
-  if (
-    value.afterExecutableSha256 !== expected.executableSha256
-    || value.afterPlistSha256 !== expected.plistSha256
-  ) throw new Error("launcher participant after bytes 与 installRoot 不匹配");
+  assertSha256(value.afterSignatureSha256, "after signature");
+  validateLauncherVersion(value.afterVersion);
   if (value.beforeExisted) {
     assertAbsolutePath(value.beforeInstallRoot, "participant beforeInstallRoot");
     assertSha256(value.beforeExecutableSha256, "before executable");
     assertSha256(value.beforePlistSha256, "before plist");
+    if (value.beforeVersion === null) {
+      if (value.beforeIconSha256 !== null || value.beforeSignatureSha256 !== null) {
+        throw new Error("legacy launcher prestate 含有 Schema 3 摘要");
+      }
+    } else {
+      validateLauncherVersion(value.beforeVersion);
+      assertSha256(value.beforeIconSha256, "before icon");
+      assertSha256(value.beforeSignatureSha256, "before signature");
+    }
   } else if (
     value.beforeInstallRoot !== null
     || value.beforeExecutableSha256 !== null
+    || value.beforeIconSha256 !== null
     || value.beforePlistSha256 !== null
+    || value.beforeSignatureSha256 !== null
+    || value.beforeVersion !== null
     || value.unchanged
   ) throw new Error("不存在的 launcher prestate 含有无效归属字段");
   return value;
@@ -979,16 +1276,23 @@ async function validateParticipantBeforeBundle(participant, path) {
     actual.installRoot !== participant.beforeInstallRoot
     || actual.executableSha256 !== participant.beforeExecutableSha256
     || actual.plistSha256 !== participant.beforePlistSha256
+    || actual.iconSha256 !== participant.beforeIconSha256
+    || actual.signatureSha256 !== participant.beforeSignatureSha256
+    || actual.version !== participant.beforeVersion
   ) throw new Error("launcher before bundle 与 participant 归属不匹配");
   return actual;
 }
 
 async function validateParticipantAfterBundle(participant, path) {
-  const expected = expectedLauncher(participant.installRoot);
-  const actual = await validateAttributedBundle(path, expected);
+  const actual = await validateAttributedBundle(path);
   if (
-    actual.executableSha256 !== participant.afterExecutableSha256
+    actual.schema !== MACOS_LAUNCHER_SCHEMA_VERSION
+    || actual.installRoot !== participant.installRoot
+    || actual.executableSha256 !== participant.afterExecutableSha256
     || actual.plistSha256 !== participant.afterPlistSha256
+    || actual.iconSha256 !== participant.afterIconSha256
+    || actual.signatureSha256 !== participant.afterSignatureSha256
+    || actual.version !== participant.afterVersion
   ) throw new Error("launcher after bundle 与 participant 归属不匹配");
   return actual;
 }
@@ -1019,6 +1323,7 @@ export async function prepareMacosLauncher({
   if (!UUID_PATTERN.test(transactionId)) throw new Error("launcher transaction id 无效");
   const canonicalHome = await requireRealDirectory(home, "home");
   await requireStableEntrypoint(validationRoot);
+  const launcherInputs = await readLauncherInputs(validationRoot);
   const applications = join(home, "Applications");
   const applicationsInfo = await pathInfo(applications);
   if (applicationsPriorExisted === undefined) {
@@ -1043,7 +1348,7 @@ export async function prepareMacosLauncher({
   if (await pathInfo(stagePath) || await pathInfo(backupPath)) {
     throw new Error("launcher participant stage 或 backup 已存在");
   }
-  const expected = expectedLauncher(installRoot);
+  const expected = expectedLauncher(installRoot, launcherInputs);
   let intent = null;
   try {
     intent = await createPreparationIntent({
@@ -1060,32 +1365,15 @@ export async function prepareMacosLauncher({
     }
     const existingInfo = await pathInfo(appPath);
     const before = existingInfo === null ? null : await validateAttributedBundle(appPath);
-    await stageBundle(stagePath, expected, hooks);
+    const staged = await stageBundle(stagePath, expected, hooks);
     const unchanged = before !== null
       && before.executableSha256 === expected.executableSha256
-      && before.plistSha256 === expected.plistSha256;
-    if (unchanged) await removeParticipantAfterBundle(assertLauncherParticipant({
-      schemaVersion: 1,
-      product: GENERATOR_ID,
-      transactionId,
-      home,
-      applications,
-      applicationsPriorExisted,
-      intentPath: preparationIntentPath(home),
-      appPath,
-      stagePath,
-      backupPath,
-      installRoot,
-      beforeExisted: true,
-      beforeInstallRoot: before.installRoot,
-      beforeExecutableSha256: before.executableSha256,
-      beforePlistSha256: before.plistSha256,
-      afterExecutableSha256: expected.executableSha256,
-      afterPlistSha256: expected.plistSha256,
-      unchanged,
-    }), stagePath);
+      && before.plistSha256 === expected.plistSha256
+      && before.iconSha256 === expected.iconSha256
+      && before.signatureSha256 === staged.signatureSha256
+      && before.version === expected.version;
     const participant = assertLauncherParticipant({
-      schemaVersion: 1,
+      schemaVersion: 2,
       product: GENERATOR_ID,
       transactionId,
       home,
@@ -1099,11 +1387,18 @@ export async function prepareMacosLauncher({
       beforeExisted: before !== null,
       beforeInstallRoot: before?.installRoot ?? null,
       beforeExecutableSha256: before?.executableSha256 ?? null,
+      beforeIconSha256: before?.iconSha256 ?? null,
       beforePlistSha256: before?.plistSha256 ?? null,
-      afterExecutableSha256: expected.executableSha256,
-      afterPlistSha256: expected.plistSha256,
+      beforeSignatureSha256: before?.signatureSha256 ?? null,
+      beforeVersion: before?.version ?? null,
+      afterExecutableSha256: staged.executableSha256,
+      afterIconSha256: staged.iconSha256,
+      afterPlistSha256: staged.plistSha256,
+      afterSignatureSha256: staged.signatureSha256,
+      afterVersion: staged.version,
       unchanged,
     });
+    if (unchanged) await removeParticipantAfterBundle(participant, stagePath);
     if (unchanged) await clearPreparationIntent(home, transactionId);
     await hooks.afterPrepare?.({ participant });
     return participant;
@@ -1223,6 +1518,7 @@ export async function installMacosLauncher({
   home = assertAbsolutePath(home, "home");
   installRoot = assertAbsolutePath(installRoot, "installRoot");
   const entrypoint = await requireStableEntrypoint(installRoot);
+  const launcherInputs = await readLauncherInputs(installRoot);
   const launcherLock = await acquireMacosLauncherInstallLock({
     home,
     readProcessIdentity: identityReader,
@@ -1239,8 +1535,9 @@ export async function installMacosLauncher({
     const transactionId = randomUUID();
     const { backupPath, stagePath } = transactionPaths(appPath, transactionId);
     const expected = {
-      executable: renderMacosLauncherExecutable(entrypoint),
-      plist: renderMacosLauncherPlist(installRoot),
+      executable: renderMacosLauncherExecutable(entrypoint, launcherInputs.version),
+      plist: renderMacosLauncherPlist(installRoot, launcherInputs.version),
+      icon: launcherInputs.icon,
     };
     let journal = {
       schemaVersion: 1,
