@@ -20,6 +20,7 @@ import {
 const run = promisify(execFile);
 const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const wrapperPath = join(repositoryRoot, "scripts", "lib", "run-cli.zsh");
+const launcherWrapperPath = join(repositoryRoot, "scripts", "launch-skin.command");
 
 async function fakeNode(path, version = "v24.14.0") {
   await mkdir(dirname(path), { recursive: true });
@@ -42,6 +43,23 @@ async function fakeApp(home, { relativeNode = "Contents/Resources/cua_node/bin/n
   await fakeNode(join(appPath, relativeNode), version);
   return appPath;
 }
+
+test("the Finder launcher wrapper preserves failures and passes alert text only through argv", async () => {
+  const [source, info] = await Promise.all([
+    readFile(launcherWrapperPath, "utf8"),
+    stat(launcherWrapperPath),
+  ]);
+  assert.equal(info.mode & 0o777, 0o755);
+  assert.match(
+    source,
+    /launcher-apply[\s\\]+--launcher-version "\$VERSION"[\s\\]+--port "\$PORT"/,
+  );
+  assert.match(source, /set \+e[\s\S]*STATUS=\$\?[\s\S]*set -e/);
+  assert.match(source, /MESSAGE="\$\{MESSAGE\[1,1200\]\}"/);
+  assert.match(source, /\/usr\/bin\/osascript -l JavaScript -e 'function run\(argv\)/);
+  assert.match(source, /-- "\$MESSAGE" "HeiGe 皮肤启动器"/);
+  assert.doesNotMatch(source, /osascript[^\n]*-e "[^\n]*\$MESSAGE/);
+});
 
 test("run-cli accepts a validated explicit app whose path contains Chinese and spaces", async (t) => {
   const home = await mkdtemp(join(tmpdir(), "用户 空格-"));
@@ -503,6 +521,47 @@ test("a detached restart can run only the exact allowlisted CLI continuation aft
     completedAt: sidecar.completedAt,
   });
   assert.equal((await stat(`${path}.result.json`)).mode & 0o777, 0o600);
+});
+
+test("a launcher continuation carries its exact Bundle version into the trusted CLI argv", async () => {
+  const root = await mkdtemp(join(tmpdir(), "heige-launcher-continuation-"));
+  const path = join(root, "action.json");
+  const launchedProcess = {
+    pid: 5252,
+    executablePath: "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
+    startedAt: "Fri Jul 17 12:01:00 2026",
+  };
+  await writeLifecycleActionFile(path, {
+    process: null,
+    appPath: "/Applications/ChatGPT.app",
+    launchMode: "cdp",
+    port: 9341,
+    afterLaunch: {
+      command: "launcher-apply",
+      launcherVersion: "5.5.4",
+      cliPath: "/trusted/src/cli.mjs",
+      nodePath: "/trusted/node",
+      port: 9341,
+      themeId: "miku-488137",
+    },
+  });
+  const calls = [];
+  const result = await runLifecycleActionFile(path, {
+    launchApp: async () => calls.push("launch"),
+    waitForPort: async () => {},
+    readCdpProcess: async () => launchedProcess,
+    runAfterLaunch: async (input) => calls.push(input),
+  });
+  assert.equal(result.continuation, "launcher-apply");
+  assert.deepEqual(calls.at(-1), {
+    appPath: "/Applications/ChatGPT.app",
+    command: "launcher-apply",
+    launcherVersion: "5.5.4",
+    cliPath: "/trusted/src/cli.mjs",
+    nodePath: "/trusted/node",
+    port: 9341,
+    themeId: "miku-488137",
+  });
 });
 
 test("a detached lifecycle action rejects the removed persistence-enable continuation", async () => {

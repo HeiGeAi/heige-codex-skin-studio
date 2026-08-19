@@ -43,9 +43,11 @@ const ACTION_KEYS = Object.freeze([
 ]);
 const PROCESS_KEYS = Object.freeze(["executablePath", "pid", "startedAt"]);
 const CONTINUATION_KEYS = Object.freeze(["cliPath", "command", "nodePath", "port", "themeId"]);
+const LAUNCHER_CONTINUATION_KEYS = Object.freeze([...CONTINUATION_KEYS, "launcherVersion"]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const THEME_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const CONTINUATION_COMMANDS = new Set(["apply"]);
+const CONTINUATION_COMMANDS = new Set(["apply", "launcher-apply"]);
+const STABLE_VERSION = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/;
 const LIFECYCLE_FAILURE = Symbol("heige.lifecycle.failure");
 const SAFE_FAILURES = Object.freeze({
   CONTINUATION_FAILED_COMPENSATED: Object.freeze({
@@ -142,16 +144,26 @@ function parseCreatedAt(value, now) {
 function continuation(value, { launchMode, port }) {
   if (value === null) return null;
   if (launchMode !== "cdp") throw new TypeError("native 重启不得携带 continuation");
-  exactKeys(value, CONTINUATION_KEYS, "afterLaunch");
+  if (!isRecord(value)) throw new TypeError("afterLaunch必须是对象");
+  exactKeys(
+    value,
+    value.command === "launcher-apply" ? LAUNCHER_CONTINUATION_KEYS : CONTINUATION_KEYS,
+    "afterLaunch",
+  );
   if (!CONTINUATION_COMMANDS.has(value.command)) {
     throw new TypeError("afterLaunch command 不在允许列表中");
   }
+  if (
+    value.command === "launcher-apply"
+    && (typeof value.launcherVersion !== "string" || !STABLE_VERSION.test(value.launcherVersion))
+  ) throw new TypeError("afterLaunch launcherVersion 格式无效");
   if (typeof value.themeId !== "string" || !THEME_ID.test(value.themeId)) {
     throw new TypeError("afterLaunch themeId 格式无效");
   }
   if (value.port !== port) throw new TypeError("afterLaunch 端口必须与重启端口一致");
   return Object.freeze({
     command: value.command,
+    ...(value.command === "launcher-apply" ? { launcherVersion: value.launcherVersion } : {}),
     cliPath: absolutePath(value.cliPath, "afterLaunch cliPath"),
     nodePath: absolutePath(value.nodePath, "afterLaunch nodePath"),
     port: value.port,
@@ -643,6 +655,9 @@ async function defaultRunAfterLaunch(input) {
     input.cliPath,
     input.command,
     ...(productId === DEFAULT_PRODUCT_ID ? [] : ["--app", productId]),
+    ...(input.command === "launcher-apply"
+      ? ["--launcher-version", input.launcherVersion]
+      : []),
     "--theme",
     input.themeId,
     "--port",

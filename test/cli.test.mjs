@@ -549,6 +549,80 @@ test("apply prefer-stored uses authoritative lastNonNative only when Theme is om
   assert.equal(explicit.calls.registerEphemeral[0].themeId, "miku-488137");
 });
 
+test("launcher-apply binds the Bundle version, restores lastNonNative, and stays session-only", async () => {
+  const lastThemeId = "genshin-night";
+  const fx = lifecycleDeps({
+    initialState: {
+      schemaVersion: 2,
+      persistenceEnabled: false,
+      selectedThemeId: lastThemeId,
+      lastNonNativeThemeId: lastThemeId,
+      controlToken: Buffer.alloc(32, 30).toString("base64url"),
+      lastTransitionNonce: null,
+      revision: 5,
+    },
+    listThemes: async () => [
+      { id: "miku-488137", name: "Miku", path: "/bundle/themes/miku-488137" },
+      { id: lastThemeId, name: "Genshin", path: `/bundle/themes/${lastThemeId}` },
+    ],
+    readCurrentPackageVersion: async () => "5.5.4",
+  });
+
+  const result = await runCli([
+    "launcher-apply",
+    "--launcher-version",
+    "5.5.4",
+    "--port",
+    "9341",
+  ], fx.deps);
+
+  assert.deepEqual(result, { mode: "active", persistenceEnabled: false });
+  assert.equal(fx.calls.registerEphemeral.at(-1).themeId, lastThemeId);
+  assert.equal(fx.calls.controller.length, 0);
+  assert.equal(fx.state.persistenceEnabled, false);
+  await assert.rejects(
+    runCli(["launcher-apply", "--launcher-version", "5.5.3"], fx.deps),
+    /版本.*不匹配|重新运行安装器/,
+  );
+});
+
+test("launcher-apply preserves its command identity across a native Codex restart", async () => {
+  const fx = lifecycleDeps({
+    readCurrentPackageVersion: async () => "5.5.4",
+    preflightLifecycle: async ({ requirePort }) => {
+      if (requirePort) {
+        const error = new Error("当前 Codex 是原生启动");
+        error.code = "CDP_NOT_OWNED";
+        throw error;
+      }
+      return {
+        appPath: "/Applications/ChatGPT.app",
+        nodePath: "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node",
+        process: {
+          pid: 5252,
+          executablePath: "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
+          startedAt: "Fri Jul 17 09:00:00 2026",
+        },
+      };
+    },
+  });
+
+  assert.deepEqual(await runCli([
+    "launcher-apply",
+    "--launcher-version",
+    "5.5.4",
+  ], fx.deps), {
+    mode: "restarting",
+    persistenceEnabled: false,
+    queued: true,
+  });
+  assert.deepEqual(fx.calls.detached.at(-1).afterLaunch, {
+    command: "launcher-apply",
+    launcherVersion: "5.5.4",
+    themeId: "miku-488137",
+  });
+});
+
 test("launcher restores the last theme after a native restart and CLI cannot re-enable persistence", async () => {
   let runtime = "cdp";
   const lastThemeId = "genshin-night";

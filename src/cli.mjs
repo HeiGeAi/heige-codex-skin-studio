@@ -115,6 +115,7 @@ const COMMAND_OPTIONS = new Map([
   ["create", new Set(["image", "name", "app"])],
   ["customize", new Set(["image", "name", "port", "app"])],
   ["apply", new Set(["port", "prefer-stored", "restart", "theme", "app"])],
+  ["launcher-apply", new Set(["launcher-version", "port", "theme"])],
   ["enable-skin", new Set(["port", "theme", "app"])],
   ["set-persistence", new Set(["port", "revision", "app"])],
   ["pause", new Set(["port", "app"])],
@@ -2120,6 +2121,9 @@ async function productionRestartDetached({
         nodePath: preflight.nodePath,
         port,
         themeId: afterLaunch.themeId,
+        ...(afterLaunch.command === "launcher-apply"
+          ? { launcherVersion: afterLaunch.launcherVersion }
+          : {}),
       },
   });
   return spawnDetachedLifecycle({
@@ -2782,7 +2786,16 @@ async function preflightWithNativeFallback(deps, input) {
   }
 }
 
-async function applySelectedTheme({ deps, roots, command, port, preferStored, themeId, forceRestart = false }) {
+async function applySelectedTheme({
+  deps,
+  roots,
+  command,
+  port,
+  preferStored,
+  themeId,
+  forceRestart = false,
+  launcherVersion = null,
+}) {
   const bundle = await themeBundle({ deps, roots, themeId });
   const fallback = await preflightWithNativeFallback(deps, {
     command,
@@ -2796,12 +2809,17 @@ async function applySelectedTheme({ deps, roots, command, port, preferStored, th
   const before = await deps.readState();
   if (restartRequired) {
     assertDirectLifecycleRestartSupported(deps.platform, command);
+    const continuationCommand = command === "launcher-apply" ? "launcher-apply" : "apply";
     const queued = await deps.restartDetached({
       launchMode: "cdp",
       port,
       preflight,
       themeId,
-      afterLaunch: { command: "apply", themeId },
+      afterLaunch: {
+        command: continuationCommand,
+        themeId,
+        ...(continuationCommand === "launcher-apply" ? { launcherVersion } : {}),
+      },
     });
     return {
       mode: "restarting",
@@ -2964,6 +2982,31 @@ export async function runCli(argv, overrides = {}) {
       preferStored,
       themeId,
       forceRestart: Boolean(args.restart),
+    });
+  }
+  if (command === "launcher-apply") {
+    if (selectedControllerPlatform !== "darwin" || productId !== DEFAULT_PRODUCT_ID) {
+      throw new Error("launcher-apply 只支持 macOS 官方 Codex Desktop");
+    }
+    if (typeof args["launcher-version"] !== "string") {
+      throw new Error("launcher-apply 缺少 --launcher-version");
+    }
+    const currentVersion = await deps.readCurrentPackageVersion();
+    if (args["launcher-version"] !== currentVersion) {
+      throw new Error(
+        `启动器版本 ${args["launcher-version"]} 与稳定运行时 ${currentVersion} 不匹配，请重新运行安装器`,
+      );
+    }
+    const stored = args.theme === undefined ? await deps.readState() : null;
+    const themeId = args.theme ?? stored?.lastNonNativeThemeId ?? DEFAULT_THEME_ID;
+    return applySelectedTheme({
+      deps,
+      roots,
+      command,
+      port: portFrom(args.port, profile.defaultCdpPort),
+      preferStored: true,
+      themeId,
+      launcherVersion: currentVersion,
     });
   }
   if (command === "enable-skin") {
