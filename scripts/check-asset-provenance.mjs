@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const documentPath = resolve(root, "ASSET_PROVENANCE.md");
-const visualPath = /^(?:assets|themes|custom-pet|docs\/images)\/.*\.(?:png|jpe?g|webp)$/i;
+const visualPath = /^(?:assets|themes|custom-pet|docs\/images)\/.*\.(?:png|jpe?g|webp|icns)$/i;
 const APPROVED_RELEASE_STATUSES = new Set([
   "已验证可公开再分发",
   "项目所有者确认公开发布",

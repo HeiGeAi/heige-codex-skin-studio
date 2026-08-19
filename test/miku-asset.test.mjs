@@ -53,3 +53,29 @@ test("keeps every Miku preset crop valid, non-empty, and at its specified geomet
     assert.equal(sha256(bytes), crop.sha256, `${role} crop hash drifted`);
   }
 });
+
+test("ships a 1024px Miku launcher source, an ICNS bundle asset, and an explicit unknown-license record", async () => {
+  const [png, icns, provenance] = await Promise.all([
+    readFile(new URL("../assets/launcher/miku-launcher-icon.png", import.meta.url)),
+    readFile(new URL("../assets/launcher/AppIcon.icns", import.meta.url)),
+    readFile(new URL("../ASSET_PROVENANCE.md", import.meta.url), "utf8"),
+  ]);
+
+  assert.deepEqual(
+    [...png.subarray(0, 8)],
+    [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
+  );
+  assert.equal(png.readUInt32BE(16), 1024);
+  assert.equal(png.readUInt32BE(20), 1024);
+  assert.ok(png.byteLength > 16_384, "launcher source image is unexpectedly empty");
+  assert.equal(icns.subarray(0, 4).toString("ascii"), "icns");
+  assert.ok(icns.byteLength > 16_384, "launcher ICNS is unexpectedly empty");
+  assert.match(
+    provenance,
+    /`assets\/launcher\/miku-launcher-icon\.png`[^\n]*衍生[^\n]*未知/,
+  );
+  assert.match(
+    provenance,
+    /`assets\/launcher\/AppIcon\.icns`[^\n]*衍生[^\n]*未知/,
+  );
+});

@@ -87,7 +87,7 @@ test("public Release accepts the project owner's explicit distribution decision"
       encoding: "utf8",
     },
   );
-  assert.match(stdout, /public release provenance accepted: 40 visual assets/i);
+  assert.match(stdout, /public release provenance accepted: 42 visual assets/i);
 });
 
 test("notice does not pretend a disclaimer grants redistribution rights", async () => {
