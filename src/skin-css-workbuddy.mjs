@@ -532,11 +532,12 @@ body {
 
 /* AI 回复原生没有任何底色，正文颜色写死 rgb(0,0,0)，整段直接压在主题背景图上。
    浅色图勉强能读，深色图和高饱和图上就糊成一片。这和 Codex 侧是同一类问题，
-   解法也照搬 Codex：阅读增强开着时，给整条回复垫一层主题色蒙版并接管文字色。
-   钩子取稳定的 cb-assistant-message，同节点并存的 _assistantMessage_7jxnj_178 不碰。
-   消息列表是 virtuoso 虚拟滚动，条目高度由 ResizeObserver 重测，改内边距不会错位。
-   真机核对自 WorkBuddy 5.3.11 */
-:root[data-heige-readability="on"] .cb-assistant-message {
+   阅读增强开着时仍要垫主题色蒙版，但不能把蒙版直接打在消息外壳上。
+   WorkBuddy 会把同一个 request-id 拆成多个 cb-assistant-message，其中未使用的分片
+   只有一个空的直接子节点。外壳一旦有 padding，每个空分片都会被撑成一条横向白条。
+   因此只给非空直接子节点垫底，空分片保持原生零高度；选择器仍只用稳定语义类名，
+   不碰 _assistantMessage_7jxnj_178 这类构建哈希。真机核对自 WorkBuddy 5.3.14 */
+:root[data-heige-readability="on"] .cb-assistant-message > :not(:empty) {
   box-sizing: border-box;
   color: var(--heige-text) !important;
   background: ${surfaceMix(90)} !important;

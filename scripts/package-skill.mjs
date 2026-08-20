@@ -499,7 +499,10 @@ async function assertOutputParentUnchanged(output, capability) {
 }
 
 function archiveMode(destination) {
-  return /\.(?:command|zsh)$/.test(destination) ? 0o100755 : 0o100644;
+  return (
+    /\.(?:command|zsh)$/.test(destination)
+    || destination === `${archiveRoot}/payload/assets/launcher/HeiGeSkinLauncher.bin`
+  ) ? 0o100755 : 0o100644;
 }
 
 async function writeArchive(output, files, epoch, parentCapability) {

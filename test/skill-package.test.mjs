@@ -237,7 +237,10 @@ test("archive is a strict runtime allowlist with fixed metadata", async (t) => {
     names.some((name) => /\.before-|reports\/|package-skill|check-asset-provenance|sync-llms|update-release-hash|\.git\/|node_modules\/|test\//.test(name)),
     false,
   );
-  const executableArchiveEntry = (name) => /\.(?:command|zsh)$/.test(name);
+  const executableArchiveEntry = (name) => (
+    /\.(?:command|zsh)$/.test(name)
+    || name.endsWith("/payload/assets/launcher/HeiGeSkinLauncher.bin")
+  );
   for (const entry of entries) {
     assert.equal(entry.unixMtime, fixedEpoch, `fixed UTC mtime: ${entry.name}`);
     assert.equal(entry.dosTime, 0, `fixed UTC DOS time: ${entry.name}`);

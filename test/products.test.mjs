@@ -215,11 +215,18 @@ test("WorkBuddy 皮肤只挂稳定选择器，一个构建哈希类名都不许�
 
 test("AI 回复垫了蒙版就必须一起接管正文和底部文字，只垫底会做出黑字压深色蒙版", () => {
   const css = buildWorkBuddySkinCss({ theme: THEME, heroDataUrl: HERO });
-  // 蒙版本身挂阅读增强开关，跟 Codex 侧的 [data-response-annotation-conversation] 同一套机制
-  assert.match(
+  // WorkBuddy 会把一条回复拆成多个同 request-id 的消息壳，未使用的分片只有一个空子节点。
+  // 蒙版如果直接打在外壳上，padding 会把每个空分片撑成一条横向白条。
+  assert.doesNotMatch(
     css,
     /:root\[data-heige-readability="on"\] \.cb-assistant-message \{[^}]*background:/,
-    "回复蒙版必须挂在阅读增强开关下",
+    "回复外壳不能直接承载蒙版，否则空分片会被撑成白条",
+  );
+  // 蒙版本身挂阅读增强开关，并且只落在真正非空的直接内容节点上。
+  assert.match(
+    css,
+    /:root\[data-heige-readability="on"\] \.cb-assistant-message > :not\(:empty\) \{[^}]*background:[^}]*padding:/,
+    "回复蒙版必须只命中非空内容节点并挂在阅读增强开关下",
   );
   // 正文的 rgb(0,0,0) 和底部那排图标、消耗计数、时间的 rgba(0,0,0,.7) 都写死在各自节点上，
   // 不继承外层容器。漏掉任何一条，深色主题下就是黑字压深色蒙版，比不垫更糊
