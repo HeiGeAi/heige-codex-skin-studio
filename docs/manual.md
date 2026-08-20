@@ -39,7 +39,7 @@ macOS 安装需要已安装的 Codex Desktop。下载本仓库后：
 open "<仓库路径>/scripts/install.command"
 ```
 
-安装脚本会把工具放到 `~/.codex/heige-codex-skin-studio`，在 `$HOME/Applications` 创建或升级带 Miku 图标的「HeiGe 皮肤启动器」，并把 APP 注册到 macOS LaunchServices。默认安装流程会应用 Miku 预设。应用皮肤时 Codex 可能被正常退出并以本机调试模式重新打开，当前任务请先保存。
+安装脚本会把工具放到 `~/.codex/heige-codex-skin-studio`，在 `$HOME/Applications` 创建或升级带 Miku 图标的「HeiGe 皮肤启动器」，并把 APP 注册到 macOS LaunchServices。默认安装流程会应用 Miku 预设。打开启动器后会显示 Codex 与 WorkBuddy 两张产品卡片，分别读取各自最近使用的皮肤。应用皮肤时目标 APP 可能被正常退出并以本机调试模式重新打开，当前任务请先保存。
 
 之后的日常切换都在 Codex 顶部中间的 🎨 菜单里完成。想用自己的图片做皮肤：
 
@@ -74,7 +74,7 @@ open "$HOME/.codex/heige-codex-skin-studio/scripts/restore.command"
 ```
 
 `apply.command` 只应用本次会话，不会暗中打开下次启动常驻。
-安装生成的本地「HeiGe 皮肤启动器」使用专用 `launch-skin.command` 和内部 `launcher-apply` 路由。它先校验启动器版本与稳定运行树一致，再恢复 `lastNonNativeThemeId` 记录的最近非原生主题；没有有效历史时回退到 `miku-488137`。这个路径保持原有常驻选择不变。
+安装生成的本地「HeiGe 皮肤启动器」是 universal AppKit 应用，使用专用 `launcher-state.command`、`launch-skin.command` 和内部 `launcher-apply` 路由。面板不提供主题选择器，只显示并恢复每个产品状态目录里 `lastNonNativeThemeId` 记录的最近非原生主题；没有有效历史时回退到 `miku-488137`。Codex 与 WorkBuddy 分别使用 9341 和 9342，状态、锁和日志互不覆盖。
 
 Codex 长时间运行后偶发合成器卡死：整窗帧率骤降到约 10 帧，输入和滚动全局迟滞，连新开的空白窗口也一样，与皮肤无关，只有冷重启能恢复。健康会话下 `apply.command` 是幂等的，不会重启进程，此时用 `--restart` 先彻底退出 Codex 再拉起注入：
 
@@ -98,9 +98,9 @@ Codex 长时间运行后偶发合成器卡死：整窗帧率骤降到约 10 帧�
 open "$HOME/Applications/HeiGe 皮肤启动器.app"
 ```
 
-这个本地应用只指向稳定安装目录，不指向下载目录或开发仓库。点击后按现场状态执行最小动作：Codex 未运行时直接以 `127.0.0.1:9341` 的 CDP 模式启动；Codex 已受控且端口健康时幂等注入；Codex 以原生模式运行时先正常退出，再以 CDP 模式拉起并注入。它不会下载代码、请求管理员权限、创建新的登录项或将 `persistenceEnabled` 改为 `true`。
+这个本地应用只指向稳定安装目录，不指向下载目录或开发仓库。点击 Codex 卡片后按 9341 现场状态执行最小动作；点击 WorkBuddy 卡片后只走 9342 的一次性注入链。未安装的产品卡片会禁用，失败保留窗口并允许重试，成功后前置目标 APP 并关闭启动器。它不会下载代码、请求管理员权限、创建新的登录项或将 `persistenceEnabled` 改为 `true`，也不会为 WorkBuddy 创建常驻服务。
 
-每次 macOS 安装都会生成或升级 Schema 3 Bundle，其中包含 Miku `AppIcon.icns`、当前版本号、稳定入口和本地 ad hoc 完整性签名。提交安装前会严格校验 Bundle 内容、签名并注册 LaunchServices。ad hoc 签名用于发现本地 Bundle 被改动，不等于 Apple Developer ID 签名或 Apple 公证。
+每次 macOS 安装都会生成或升级 Schema 4 Bundle，其中包含 arm64 与 x86_64 universal 原生二进制、Miku `AppIcon.icns`、当前版本号、稳定入口和本地 ad hoc 完整性签名。提交安装前会严格校验二进制架构、Bundle 内容、签名并注册 LaunchServices。普通用户不需要安装 Xcode。ad hoc 签名用于发现本地 Bundle 被改动，不等于 Apple Developer ID 签名或 Apple 公证。
 
 启动器只在底层明确报告 `LOCK_CHAIN_CORRUPT` 时尝试一次静态状态根恢复。恢复前必须同时证明没有已加载的 HeiGe LaunchAgent、没有相关 controller 或 lifecycle helper、锁声明 PID 已失效、CDP 端口无外来监听，并且 `state.json` 与用户主题都通过严格校验。满足条件时，旧状态根会整体原子移动为带时间戳的备份，新目录只恢复通过校验的状态与用户主题，然后只重试一次。普通锁竞争、权限错误、陌生文件、活动进程或第二次失败都会明确停止，不会循环修复。
 

@@ -80,6 +80,12 @@
       "exclude": []
     },
     {
+      "source": "src/launcher-panel-state.mjs",
+      "destination": "payload/src/launcher-panel-state.mjs",
+      "recursive": false,
+      "exclude": []
+    },
+    {
       "source": "src/legacy-migration-coordinator.mjs",
       "destination": "payload/src/legacy-migration-coordinator.mjs",
       "recursive": false,
@@ -88,12 +94,6 @@
     {
       "source": "src/lifecycle-helper.mjs",
       "destination": "payload/src/lifecycle-helper.mjs",
-      "recursive": false,
-      "exclude": []
-    },
-    {
-      "source": "src/launcher-panel-state.mjs",
-      "destination": "payload/src/launcher-panel-state.mjs",
       "recursive": false,
       "exclude": []
     },

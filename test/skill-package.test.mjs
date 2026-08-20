@@ -293,7 +293,7 @@ test("archive is a strict runtime allowlist with fixed metadata", async (t) => {
     await readFile(join(repoRoot, "src/macos-launcher.mjs"), "utf8"),
     "the reusable skill must carry the audited macOS launcher byte-for-byte",
   );
-  assert.match(packagedMacosLauncher, /MACOS_LAUNCHER_SCHEMA_VERSION = 3/);
+  assert.match(packagedMacosLauncher, /MACOS_LAUNCHER_SCHEMA_VERSION = 4/);
   assert.match(packagedMacosLauncher, /const entrypoint = join\(scripts, "launch-skin\.command"\);/);
 
   const packagedSkill = await readZipText(

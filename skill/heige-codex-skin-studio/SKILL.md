@@ -46,7 +46,7 @@ Windows 用户也可双击 `scripts\install.bat`。Windows 入口只转发到包
 - `enable-persist.command` 是弃用的非零退出入口，不得将它当作上述步骤的替代方案。
 - 启动器未显式指定主题时，优先恢复上次非原生主题，只有没有历史选择时才使用 `miku-488137`。
 
-macOS 安装必须创建或升级带 Miku 图标的 Schema 3 启动器，完成本地 ad hoc 完整性签名和 LaunchServices 注册。不得把该签名描述成 Apple Developer ID 或公证。`launcher-apply` 只允许对明确的静态 `LOCK_CHAIN_CORRUPT` 做一次安全恢复：先证明相关服务、进程、锁声明和外来 CDP listener 均不活跃，严格校验状态与用户主题，整体备份旧状态根后再重建。普通锁竞争、未知内容或第二次失败必须停止。失败详情进入受限、轮转的 `launcher.log`，用户同时看到原生 macOS 提示。
+macOS 安装必须创建或升级带 Miku 图标的 Schema 4 原生双产品启动器，完成 universal 二进制校验、本地 ad hoc 完整性签名和 LaunchServices 注册。不得把该签名描述成 Apple Developer ID 或公证。启动器只恢复 Codex 或 WorkBuddy 各自最近皮肤，不在面板内选择主题，不为 WorkBuddy 开启常驻。`launcher-apply` 只允许对明确的静态 `LOCK_CHAIN_CORRUPT` 做一次安全恢复：先证明相关服务、进程、锁声明和外来 CDP listener 均不活跃，严格校验状态与用户主题，整体备份旧状态根后再重建。普通锁竞争、未知内容或第二次失败必须停止。失败详情进入受限、轮转的产品日志，用户同时在原生面板看到错误。
 
 macOS 稳定入口是 `scripts/launch-skin.command`、`scripts/apply.command`、`scripts/enable-skin.command`、`scripts/pause.command`、`scripts/resume.command` 和 `scripts/restore.command`。Windows 生命周期操作必须使用 `scripts\windows` 下的同名 `.ps1` 或 `.bat`，不得直接运行 Node CLI 代替 Windows Store/MSIX 激活或进程重启。Windows 彻底卸载必须使用 `scripts\windows\uninstall.ps1` 或 `scripts\windows\uninstall.bat`；该入口会清理当前用户计划任务、开始菜单、AppData 状态、残留控制器进程和稳定安装目录。若稳定安装目录已被手动删除，从源码目录运行卸载入口清理残留。需要完整退出 Codex/GPT 桌面端时，使用 `scripts\windows\close-codex.ps1` 或 `scripts\windows\close-codex.bat`。商店版若报 AppContainer 回环隔离，仅当用户明确允许一次管理员权限时才可调用 `scripts\windows\enable-loopback.bat`；不得每次 apply 静默提权，也不得复制或改 ACL `WindowsApps`。
 

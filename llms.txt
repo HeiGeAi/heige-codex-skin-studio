@@ -7,8 +7,9 @@
 - 通过本机回环 CDP 注入，不修改 `app.asar`、应用二进制或签名资源。
 - 常驻开关采用方案 1：关闭后本次继续使用；下次启动恢复原生界面。
 - 顶部菜单「皮肤常驻」开关是唯一受支持的开启常驻入口。想再次常驻时，先打开「HeiGe 皮肤启动器」恢复当前会话，再在顶部菜单显式打开常驻开关。
-- 每次 macOS 安装都会在 `$HOME/Applications` 生成或升级 Schema 3「HeiGe 皮肤启动器」，包含 Miku 图标、本地 ad hoc 完整性签名和 LaunchServices 注册。点击后会启动或受控重启官方 Codex，以回环 CDP 恢复最近一次非原生主题；没有历史时回退到 `miku-488137`。
-- macOS 启动器走专用 `launch-skin.command` 与内部 `launcher-apply`，只恢复当前会话，不联网下载、不提权、不创建登录项，也不把 `persistenceEnabled` 改为 `true`。失败会显示原生提示并写入受限、轮转的 `launcher.log`。
+- 每次 macOS 安装都会在 `$HOME/Applications` 生成或升级 Schema 4 原生「HeiGe 皮肤启动器」，包含 arm64 与 x86_64 universal AppKit 二进制、Miku 图标、本地 ad hoc 完整性签名和 LaunchServices 注册。
+- 启动器用 Codex 与 WorkBuddy 两张产品卡片显示各自最近皮肤，不在面板内选择主题。点击后走隔离端口恢复所选产品的最近非原生主题；没有历史时回退到 `miku-488137`。Codex 只恢复当前会话且不改 `persistenceEnabled`，WorkBuddy 仍是一次性皮肤且不创建常驻。
+- macOS 启动器走专用 `launcher-state.command`、`launch-skin.command` 与版本绑定的内部 `launcher-apply`，不联网下载、不提权、不创建登录项。失败在卡片内显示并可重试，诊断保存在产品各自受限、轮转的日志中。
 - 启动器只对明确的静态 `LOCK_CHAIN_CORRUPT` 尝试一次安全恢复：先证明相关服务、进程和外来 CDP listener 均不活跃，严格校验状态与用户主题，再整体备份旧状态根并重建。普通锁竞争、陌生内容或二次失败都会停止。
 - `apply` 与兼容名 `enable-skin` 都只恢复当前会话；`pause`、`resume`、`restore` 与只读 `status`、`doctor` 语义分离。
 - `enable-persist.command` 是弃用的非零退出入口，不是常驻开关的替代入口。

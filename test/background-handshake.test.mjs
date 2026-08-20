@@ -305,7 +305,9 @@ test("handshake reader rejects unknown fields, permissive modes, and symlinks", 
 
   await t.test("mode", async () => {
     const stateRoot = await privateRoot();
-    await writeFile(backgroundHandshakePath(stateRoot), "{}", { mode: 0o644 });
+    const path = backgroundHandshakePath(stateRoot);
+    await writeFile(path, "{}", { mode: 0o644 });
+    await chmod(path, 0o644);
     await assert.rejects(readBackgroundHandshake({ stateRoot }), /0600/);
   });
 

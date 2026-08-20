@@ -52,7 +52,7 @@ test("the Finder launcher wrapper preserves failures and passes alert text only 
   assert.equal(info.mode & 0o777, 0o755);
   assert.match(
     source,
-    /launcher-apply[\s\\]+--launcher-version "\$VERSION"[\s\\]+--port "\$PORT"/,
+    /launcher-apply[\s\\]+--launcher-version "\$VERSION"[\s\\]+"\$\{APP_ARGS\[@\]\}"[\s\\]+--port "\$PORT"/,
   );
   assert.match(source, /set \+e[\s\S]*STATUS=\$\?[\s\S]*set -e/);
   assert.match(source, /MESSAGE="\$\{MESSAGE\[1,1200\]\}"/);
