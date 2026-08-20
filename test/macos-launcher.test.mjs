@@ -24,6 +24,7 @@ import {
 const execFileAsync = promisify(execFile);
 const launcherModuleUrl = new URL("../src/macos-launcher.mjs", import.meta.url).href;
 const launcherIconUrl = new URL("../assets/launcher/AppIcon.icns", import.meta.url);
+const launcherBinaryUrl = new URL("../assets/launcher/HeiGeSkinLauncher.bin", import.meta.url);
 
 async function populateRuntime(installRoot, version = "5.5.4") {
   const entrypoint = join(installRoot, "scripts", "apply.command");
@@ -41,6 +42,12 @@ async function populateRuntime(installRoot, version = "5.5.4") {
     join(installRoot, "assets", "launcher", "AppIcon.icns"),
     await readFile(launcherIconUrl),
   );
+  await writeFile(
+    join(installRoot, "assets", "launcher", "HeiGeSkinLauncher.bin"),
+    await readFile(launcherBinaryUrl),
+    { mode: 0o755 },
+  );
+  await chmod(join(installRoot, "assets", "launcher", "HeiGeSkinLauncher.bin"), 0o755);
   return { entrypoint, launcherEntrypoint };
 }
 
@@ -66,20 +73,18 @@ async function waitForPath(child, path, stderr) {
   throw new Error(`child did not reach launcher prepare boundary: ${stderr()}`);
 }
 
-test("creates a Finder-visible local app that calls only the current-session apply entrypoint", async (t) => {
-  const { home, installRoot, launcherEntrypoint } = await fixture(t);
+test("creates a Finder-visible schema 4 app with the native universal executable", async (t) => {
+  const { home, installRoot } = await fixture(t);
   const result = await installMacosLauncher({ home, installRoot });
-  assert.equal(MACOS_LAUNCHER_SCHEMA_VERSION, 3);
+  assert.equal(MACOS_LAUNCHER_SCHEMA_VERSION, 4);
   assert.equal(result.appPath, join(home, "Applications", "HeiGe 皮肤启动器.app"));
   assert.equal(result.executablePath, join(result.appPath, "Contents", "MacOS", "HeiGe Skin Launcher"));
-  const executable = await readFile(result.executablePath, "utf8");
+  const executable = await readFile(result.executablePath);
   const plist = await readFile(join(result.appPath, "Contents", "Info.plist"), "utf8");
-  assert.match(executable, /^#!\/bin\/zsh\n# HeiGe generated launcher schema 3\nset -euo pipefail\nexec /);
-  assert.match(executable, new RegExp(launcherEntrypoint.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.doesNotMatch(executable, /enable-skin\.command/);
-  assert.doesNotMatch(executable, /curl|osascript|sudo|\$HOME|\$\{/);
+  assert.equal(executable.readUInt32BE(0), 0xcafebabe);
   assert.match(plist, /com\.heige\.codex-skin-launcher/);
   assert.match(plist, /HeiGe 皮肤启动器/);
+  assert.match(plist, /<key>HeiGeLauncherSchemaVersion<\/key>\s*<integer>4<\/integer>/);
   assert.match(plist, /<key>CFBundleIconFile<\/key>\s*<string>AppIcon\.icns<\/string>/);
   assert.match(plist, /<key>CFBundleShortVersionString<\/key>\s*<string>5\.5\.4<\/string>/);
   assert.match(plist, /<key>LSMinimumSystemVersion<\/key>\s*<string>13\.0<\/string>/);
@@ -89,7 +94,7 @@ test("creates a Finder-visible local app that calls only the current-session app
   );
   assert.deepEqual(
     (await readdir(join(result.appPath, "Contents", "_CodeSignature"))).sort(),
-    ["CodeDirectory", "CodeRequirements", "CodeResources", "CodeSignature"].sort(),
+    ["CodeResources"],
   );
   await execFileAsync("/usr/bin/codesign", ["--verify", "--deep", "--strict", "--", result.appPath]);
   assert.equal((await stat(result.executablePath)).mode & 0o777, 0o755);
@@ -106,7 +111,7 @@ test("creates canonical launcher signature resources under a private umask", asy
     (await stat(join(result.appPath, "Contents", "_CodeSignature"))).mode & 0o777,
     0o755,
   );
-  for (const name of ["CodeDirectory", "CodeRequirements", "CodeResources", "CodeSignature"]) {
+  for (const name of ["CodeResources"]) {
     assert.equal(
       (await stat(join(result.appPath, "Contents", "_CodeSignature", name))).mode & 0o777,
       0o644,
@@ -169,7 +174,10 @@ test("serializable launcher participant retains the old bundle until outer final
   await publishMacosLauncher(participant);
 
   assert.equal((await lstat(participant.backupPath)).isDirectory(), true);
-  assert.match(await readFile(join(participant.appPath, "Contents", "MacOS", "HeiGe Skin Launcher"), "utf8"), /studio-next/);
+  assert.match(
+    await readFile(join(participant.appPath, "Contents", "Info.plist"), "utf8"),
+    /heige-codex-skin-studio-next/,
+  );
   await rollbackMacosLauncher(participant);
   assert.deepEqual(await readFile(original.executablePath), originalExecutable);
   await assert.rejects(lstat(participant.stagePath), /ENOENT/);
@@ -181,7 +189,10 @@ test("serializable launcher participant retains the old bundle until outer final
   })));
   await publishMacosLauncher(committed);
   await finalizeMacosLauncher(committed, { registerLauncher: async () => {} });
-  assert.match(await readFile(original.executablePath, "utf8"), /studio-next/);
+  assert.match(
+    await readFile(join(committed.appPath, "Contents", "Info.plist"), "utf8"),
+    /heige-codex-skin-studio-next/,
+  );
   await assert.rejects(lstat(committed.backupPath), /ENOENT/);
 });
 
@@ -218,16 +229,14 @@ test("launcher staging reads release inputs from source while binding the app to
   });
   const stagedExecutable = await readFile(
     join(participant.stagePath, "Contents", "MacOS", "HeiGe Skin Launcher"),
-    "utf8",
   );
+  const stagedPlist = await readFile(join(participant.stagePath, "Contents", "Info.plist"), "utf8");
 
   assert.equal(participant.installRoot, targetRoot);
   assert.equal(participant.afterVersion, "5.5.4");
-  assert.equal(
-    stagedExecutable,
-    renderMacosLauncherExecutable(join(targetRoot, "scripts", "launch-skin.command"), "5.5.4"),
-  );
-  assert.doesNotMatch(stagedExecutable, new RegExp(sourceRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.equal(stagedExecutable.readUInt32BE(0), 0xcafebabe);
+  assert.match(stagedPlist, new RegExp(targetRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.doesNotMatch(stagedPlist, new RegExp(sourceRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   await rollbackMacosLauncher(participant);
 });
 
@@ -322,18 +331,15 @@ await publishMacosLauncher(participant, {
   await assert.rejects(lstat(reconstructed.stagePath), /ENOENT/);
 });
 
-test("escapes plist XML and shell-quotes a stable path with punctuation", async (t) => {
+test("escapes plist XML for a stable path with punctuation", async (t) => {
   const { root } = await fixture(t, "base");
   const home = join(root, "家 & <目录>");
   const installRoot = join(home, ".codex", "HeiGe's $studio");
   await populateRuntime(installRoot);
   const result = await installMacosLauncher({ home, installRoot });
-  const executable = await readFile(result.executablePath, "utf8");
   const plist = await readFile(join(result.appPath, "Contents", "Info.plist"), "utf8");
-  assert.match(executable, /'"'"'/);
-  assert.match(executable, /\$studio/);
-  assert.match(executable, /^exec '[^\n]+'$/m);
   assert.match(plist, /家 &amp; &lt;目录&gt;/);
+  assert.match(plist, /HeiGe&apos;s \$studio/);
   assert.doesNotMatch(plist, /家 & <目录>/);
 });
 
@@ -372,30 +378,33 @@ for (const legacySchema of [1, 2]) {
       `#!/bin/zsh\n# HeiGe generated launcher schema ${legacySchema}\nset -euo pipefail\nexec ${shellQuotedEntrypoint}\n`,
       { mode: 0o755 },
     );
+    await chmod(join(legacyMacos, "HeiGe Skin Launcher"), 0o755);
     const legacyPlist = renderMacosLauncherPlist(installRoot)
       .replace(/    <key>CFBundleIconFile<\/key>\n    <string>AppIcon\.icns<\/string>\n/, "")
       .replace("<string>5.5.4</string>", "<string>1.0</string>")
       .replace("<string>5.5.4</string>", "<string>1</string>")
       .replace(
-        `<key>HeiGeLauncherSchemaVersion</key>\n    <integer>3</integer>`,
+        `<key>HeiGeLauncherSchemaVersion</key>\n    <integer>4</integer>`,
         `<key>HeiGeLauncherSchemaVersion</key>\n    <integer>${legacySchema}</integer>`,
       )
       .replace(/    <key>LSMinimumSystemVersion<\/key>\n    <string>13\.0<\/string>\n/, "")
       .replace(/    <key>NSHighResolutionCapable<\/key>\n    <true\/>\n/, "");
     await writeFile(join(first.appPath, "Contents", "Info.plist"), legacyPlist, { mode: 0o644 });
+    await chmod(join(first.appPath, "Contents", "Info.plist"), 0o644);
 
     const nextInstallRoot = join(home, ".codex", `heige-codex-skin-studio-v${legacySchema}`);
-    const { launcherEntrypoint: nextEntrypoint } = await populateRuntime(nextInstallRoot);
+    await populateRuntime(nextInstallRoot);
     const upgraded = await installMacosLauncher({ home, installRoot: nextInstallRoot });
-    const executable = await readFile(upgraded.executablePath, "utf8");
-    assert.match(executable, new RegExp(nextEntrypoint.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-    assert.match(executable, /generated launcher schema 3/);
-    assert.doesNotMatch(executable, /enable-skin\.command/);
+    const executable = await readFile(upgraded.executablePath);
+    const upgradedPlist = await readFile(upgraded.plistPath, "utf8");
+    assert.equal(executable.readUInt32BE(0), 0xcafebabe);
+    assert.match(upgradedPlist, /<integer>4<\/integer>/);
+    assert.match(upgradedPlist, new RegExp(nextInstallRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     assert.doesNotMatch(
-      executable,
-      new RegExp(join(installRoot, "scripts").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+      upgradedPlist,
+      new RegExp(`<string>${installRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}<\\/string>`),
     );
-    assert.match(await readFile(upgraded.plistPath, "utf8"), /<string>5\.5\.4<\/string>/);
+    assert.match(upgradedPlist, /<string>5\.5\.4<\/string>/);
     await execFileAsync("/usr/bin/codesign", ["--verify", "--deep", "--strict", "--", upgraded.appPath]);
   });
 }

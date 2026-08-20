@@ -254,6 +254,12 @@
       "exclude": []
     },
     {
+      "source": "native/macos-launcher",
+      "destination": "payload/native/macos-launcher",
+      "recursive": true,
+      "exclude": []
+    },
+    {
       "source": "themes",
       "destination": "payload/themes",
       "recursive": true,

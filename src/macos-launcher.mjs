@@ -23,18 +23,21 @@ import { readProcessIdentity, sameProcessIdentity } from "./process-identity.mjs
 
 export const MACOS_LAUNCHER_NAME = "HeiGe 皮肤启动器";
 export const MACOS_LAUNCHER_BUNDLE_ID = "com.heige.codex-skin-launcher";
-export const MACOS_LAUNCHER_SCHEMA_VERSION = 3;
+export const MACOS_LAUNCHER_SCHEMA_VERSION = 4;
 const EXECUTABLE_NAME = "HeiGe Skin Launcher";
 const ICON_NAME = "AppIcon.icns";
-const SIGNATURE_FILE_NAMES = [
+const NATIVE_EXECUTABLE_ASSET = "HeiGeSkinLauncher.bin";
+const LEGACY_SIGNATURE_FILE_NAMES = [
   "CodeDirectory",
   "CodeRequirements",
   "CodeResources",
   "CodeSignature",
 ];
+const NATIVE_SIGNATURE_FILE_NAMES = ["CodeResources"];
 const GENERATOR_ID = "heige-codex-skin-studio";
 const MAX_GENERATED_FILE_BYTES = 64 * 1024;
 const MAX_ICON_BYTES = 8 * 1024 * 1024;
+const MAX_NATIVE_EXECUTABLE_BYTES = 4 * 1024 * 1024;
 const TRANSACTION_FILE = ".heige-codex-skin-launcher-transaction.json";
 const PREPARATION_FILE = ".heige-codex-skin-launcher-prepare.json";
 const LOCK_DIRECTORY = ".heige-codex-skin-launcher-install.lock";
@@ -184,7 +187,7 @@ function validateLauncherVersion(value) {
 export function renderMacosLauncherExecutable(entrypoint, version = "5.5.4") {
   return renderMacosLauncherExecutableVersion(
     entrypoint,
-    MACOS_LAUNCHER_SCHEMA_VERSION,
+    3,
     version,
   );
 }
@@ -326,9 +329,9 @@ async function readBoundedBinary(
   }
 }
 
-function signatureResourcesSha256(resources) {
+function signatureResourcesSha256(resources, names) {
   const hash = createHash("sha256");
-  for (const name of SIGNATURE_FILE_NAMES) {
+  for (const name of names) {
     const bytes = resources.get(name);
     if (!Buffer.isBuffer(bytes)) throw new Error(`签名资源缺少 ${name}`);
     hash.update(name, "utf8");
@@ -350,13 +353,52 @@ function validateIcns(bytes) {
   return bytes;
 }
 
+function validateNativeLauncherExecutable(bytes) {
+  if (
+    !Buffer.isBuffer(bytes)
+    || bytes.byteLength < 32 * 1024
+    || bytes.readUInt32BE(0) !== 0xcafebabe
+  ) throw new Error("原生启动器不是受支持的 universal Mach-O");
+  const architectureCount = bytes.readUInt32BE(4);
+  if (architectureCount !== 2 || 8 + architectureCount * 20 > bytes.byteLength) {
+    throw new Error("原生启动器必须只包含 arm64 与 x86_64 两个架构");
+  }
+  const architectures = new Set();
+  const slices = [];
+  for (let index = 0; index < architectureCount; index += 1) {
+    const entry = 8 + index * 20;
+    const cpuType = bytes.readUInt32BE(entry);
+    const offset = bytes.readUInt32BE(entry + 8);
+    const size = bytes.readUInt32BE(entry + 12);
+    if (size < 16 * 1024 || offset < 8 + architectureCount * 20 || offset + size > bytes.byteLength) {
+      throw new Error("原生启动器架构切片越界或过小");
+    }
+    architectures.add(cpuType);
+    slices.push({ offset, size });
+  }
+  slices.sort((left, right) => left.offset - right.offset);
+  if (
+    architectures.size !== 2
+    || !architectures.has(0x01000007)
+    || !architectures.has(0x0100000c)
+    || slices[0].offset + slices[0].size > slices[1].offset
+  ) throw new Error("原生启动器架构集合或切片布局无效");
+  return bytes;
+}
+
 async function readLauncherInputs(validationRoot) {
   const canonicalRoot = await requireRealDirectory(validationRoot, "validationRoot");
   const packagePath = join(validationRoot, "package.json");
   const iconPath = join(validationRoot, "assets", "launcher", ICON_NAME);
-  const [{ text }, { bytes: icon }] = await Promise.all([
+  const executablePath = join(validationRoot, "assets", "launcher", NATIVE_EXECUTABLE_ASSET);
+  const [{ text }, { bytes: icon }, { bytes: executable, info: executableInfo }] = await Promise.all([
     readSmallRegular(packagePath, "package.json"),
     readBoundedBinary(iconPath, ICON_NAME),
+    readBoundedBinary(
+      executablePath,
+      NATIVE_EXECUTABLE_ASSET,
+      MAX_NATIVE_EXECUTABLE_BYTES,
+    ),
   ]);
   if (await realpath(packagePath) !== join(canonicalRoot, "package.json")) {
     throw new Error("package.json 必须位于 validationRoot 内");
@@ -364,6 +406,13 @@ async function readLauncherInputs(validationRoot) {
   if (await realpath(iconPath) !== join(canonicalRoot, "assets", "launcher", ICON_NAME)) {
     throw new Error("AppIcon.icns 必须位于 validationRoot 内");
   }
+  if (await realpath(executablePath) !== join(
+    canonicalRoot,
+    "assets",
+    "launcher",
+    NATIVE_EXECUTABLE_ASSET,
+  )) throw new Error("原生启动器必须位于 validationRoot 内");
+  if ((executableInfo.mode & 0o111) === 0) throw new Error("原生启动器资源必须可执行");
   let packageJson;
   try {
     packageJson = JSON.parse(text);
@@ -371,6 +420,7 @@ async function readLauncherInputs(validationRoot) {
     throw new Error("package.json 不是有效 JSON", { cause });
   }
   return {
+    executable: validateNativeLauncherExecutable(executable),
     icon: validateIcns(icon),
     version: validateLauncherVersion(packageJson?.version),
   };
@@ -398,11 +448,11 @@ function parseAttributedPlist(text) {
     /<key>HeiGeLauncherSchemaVersion<\/key>\s*<integer>(\d+)<\/integer>/g,
     "HeiGeLauncherSchemaVersion",
   ));
-  if (![1, 2, MACOS_LAUNCHER_SCHEMA_VERSION].includes(schema)) {
+  if (![1, 2, 3, MACOS_LAUNCHER_SCHEMA_VERSION].includes(schema)) {
     throw new Error("不支持的 generated launcher schema");
   }
   const keys = [...text.matchAll(/<key>([^<]+)<\/key>/g)].map((match) => match[1]).sort();
-  const expectedKeys = schema === 3 ? SCHEMA_3_PLIST_KEYS : LEGACY_PLIST_KEYS;
+  const expectedKeys = schema >= 3 ? SCHEMA_3_PLIST_KEYS : LEGACY_PLIST_KEYS;
   if (
     keys.length !== expectedKeys.length
     || !keys.every((key, index) => key === expectedKeys[index])
@@ -422,7 +472,7 @@ function parseAttributedPlist(text) {
     throw new Error("generated launcher producer 不匹配");
   }
   const installRoot = assertAbsolutePath(plistString(text, "HeiGeInstallRoot"), "attributed installRoot");
-  if (schema !== 3) return { installRoot, schema, version: null };
+  if (schema < 3) return { installRoot, schema, version: null };
   const version = validateLauncherVersion(plistString(text, "CFBundleShortVersionString"));
   if (plistString(text, "CFBundleVersion") !== version) {
     throw new Error("generated launcher Bundle 版本字段不一致");
@@ -472,7 +522,7 @@ async function validateAttributedBundle(appPath, expected = null) {
     const plistPath = join(contents, "Info.plist");
     const { info: plistInfo, text: plist } = await readSmallRegular(plistPath, "Info.plist");
     const attribution = parseAttributedPlist(plist);
-    const contentNames = attribution.schema === 3
+    const contentNames = attribution.schema >= 3
       ? ["Info.plist", "MacOS", "Resources", "_CodeSignature"]
       : ["Info.plist", "MacOS"];
     const canonicalContents = await assertExactDirectory(contents, contentNames, "launcher Contents");
@@ -481,20 +531,34 @@ async function validateAttributedBundle(appPath, expected = null) {
     const canonicalMacos = await assertExactDirectory(macos, [EXECUTABLE_NAME], "launcher MacOS");
     if (canonicalMacos !== join(canonicalContents, "MacOS")) throw new Error("launcher MacOS escaped bundle");
     const executablePath = join(macos, EXECUTABLE_NAME);
-    const { info: executableInfo, text: executable } = await readSmallRegular(
-      executablePath,
-      "launcher executable",
-    );
+    let executable;
+    let executableInfo;
+    if (attribution.schema === 4) {
+      const snapshot = await readBoundedBinary(
+        executablePath,
+        "launcher executable",
+        MAX_NATIVE_EXECUTABLE_BYTES,
+      );
+      executable = validateNativeLauncherExecutable(snapshot.bytes);
+      executableInfo = snapshot.info;
+    } else {
+      const snapshot = await readSmallRegular(executablePath, "launcher executable");
+      executable = snapshot.text;
+      executableInfo = snapshot.info;
+    }
     const entrypointName = attribution.schema === 1
       ? "enable-skin.command"
       : attribution.schema === 2
         ? "apply.command"
         : "launch-skin.command";
-    if (executable !== renderMacosLauncherExecutableVersion(join(
-      attribution.installRoot,
-      "scripts",
-      entrypointName,
-    ), attribution.schema, attribution.version)) {
+    if (
+      attribution.schema !== 4
+      && executable !== renderMacosLauncherExecutableVersion(join(
+        attribution.installRoot,
+        "scripts",
+        entrypointName,
+      ), attribution.schema, attribution.version)
+    ) {
       throw new Error("generated launcher executable 与 attributed installRoot 不匹配");
     }
     if ((executableInfo.mode & 0o777) !== 0o755 || (plistInfo.mode & 0o777) !== 0o644) {
@@ -505,14 +569,17 @@ async function validateAttributedBundle(appPath, expected = null) {
     let iconSha256 = null;
     let codeResourcesPath = null;
     let signatureSha256 = null;
-    if (attribution.schema === 3) {
+    if (attribution.schema >= 3) {
       const resources = join(contents, "Resources");
       const signature = join(contents, "_CodeSignature");
       if (await assertExactDirectory(resources, [ICON_NAME], "launcher Resources") !==
           join(canonicalContents, "Resources")) {
         throw new Error("launcher Resources escaped bundle");
       }
-      if (await assertExactDirectory(signature, SIGNATURE_FILE_NAMES, "launcher signature") !==
+      const signatureFileNames = attribution.schema === 4
+        ? NATIVE_SIGNATURE_FILE_NAMES
+        : LEGACY_SIGNATURE_FILE_NAMES;
+      if (await assertExactDirectory(signature, signatureFileNames, "launcher signature") !==
           join(canonicalContents, "_CodeSignature")) {
         throw new Error("launcher signature escaped bundle");
       }
@@ -520,7 +587,7 @@ async function validateAttributedBundle(appPath, expected = null) {
       codeResourcesPath = join(signature, "CodeResources");
       const [iconSnapshot, ...signatureSnapshots] = await Promise.all([
         readBoundedBinary(iconPath, ICON_NAME),
-        ...SIGNATURE_FILE_NAMES.map((name) => readBoundedBinary(
+        ...signatureFileNames.map((name) => readBoundedBinary(
           join(signature, name),
           name,
           1024 * 1024,
@@ -534,16 +601,15 @@ async function validateAttributedBundle(appPath, expected = null) {
       ) throw new Error("generated bundle resource 权限不正确");
       await verifyMacosLauncherSignature(appPath);
       iconSha256 = sha256(icon);
-      const signatureResources = new Map(SIGNATURE_FILE_NAMES.map(
+      const signatureResources = new Map(signatureFileNames.map(
         (name, index) => [name, signatureSnapshots[index].bytes],
       ));
-      signatureSha256 = signatureResourcesSha256(signatureResources);
+      signatureSha256 = signatureResourcesSha256(signatureResources, signatureFileNames);
     }
     if (
       expected !== null
       && (
-        executable !== expected.executable
-        || plist !== expected.plist
+        plist !== expected.plist
         || !Buffer.isBuffer(icon)
         || !icon.equals(expected.icon)
       )
@@ -605,7 +671,6 @@ async function stageBundle(stagePath, expected, hooks = {}) {
     mode: 0o644,
   });
   await writeFile(join(macos, EXECUTABLE_NAME), expected.executable, {
-    encoding: "utf8",
     flag: "wx",
     mode: 0o755,
   });
@@ -624,6 +689,15 @@ async function stageBundle(stagePath, expected, hooks = {}) {
     const handle = await open(path, "r+");
     try { await handle.sync(); } finally { await handle.close(); }
   }
+  const unsignedExecutable = await readBoundedBinary(
+    join(macos, EXECUTABLE_NAME),
+    "staged unsigned launcher executable",
+    MAX_NATIVE_EXECUTABLE_BYTES,
+  );
+  if (
+    !Buffer.isBuffer(expected.executable)
+    || !unsignedExecutable.bytes.equals(expected.executable)
+  ) throw new Error("staged unsigned launcher executable 与发布源不一致");
   await syncDirectory(macos);
   await syncDirectory(resources);
   await syncDirectory(contents);
@@ -632,7 +706,9 @@ async function stageBundle(stagePath, expected, hooks = {}) {
   await signMacosLauncherBundle(stagePath);
   const signature = join(contents, "_CodeSignature");
   await chmod(signature, 0o755);
-  await Promise.all(SIGNATURE_FILE_NAMES.map((name) => chmod(join(signature, name), 0o644)));
+  await Promise.all(NATIVE_SIGNATURE_FILE_NAMES.map(
+    (name) => chmod(join(signature, name), 0o644),
+  ));
   await syncDirectory(signature);
   await syncDirectory(contents);
   await syncDirectory(stagePath);
@@ -836,7 +912,7 @@ async function validatePartialBundleStage(intent) {
     }
     if (executableNames.includes(EXECUTABLE_NAME)) {
       const info = await lstat(join(macos, EXECUTABLE_NAME));
-      if (info.isSymbolicLink() || !info.isFile() || info.size > MAX_GENERATED_FILE_BYTES) {
+      if (info.isSymbolicLink() || !info.isFile() || info.size > MAX_NATIVE_EXECUTABLE_BYTES) {
         throw new Error("partial launcher executable 不安全");
       }
     }
@@ -865,7 +941,11 @@ async function validatePartialBundleStage(intent) {
       throw new Error("partial launcher signature 不安全");
     }
     const signatureNames = await readdir(signature);
-    if (signatureNames.some((name) => !SIGNATURE_FILE_NAMES.includes(name))) {
+    const knownSignatureNames = new Set([
+      ...LEGACY_SIGNATURE_FILE_NAMES,
+      ...NATIVE_SIGNATURE_FILE_NAMES,
+    ]);
+    if (signatureNames.some((name) => !knownSignatureNames.has(name))) {
       throw new Error("partial launcher signature 含有未归属内容");
     }
     for (const name of signatureNames) {
@@ -1182,15 +1262,11 @@ function assertSha256(value, label) {
   }
 }
 
-function expectedLauncher(installRoot, { icon, version }) {
+function expectedLauncher(installRoot, { executable, icon, version }) {
   installRoot = assertAbsolutePath(installRoot, "expected launcher installRoot");
   version = validateLauncherVersion(version);
+  validateNativeLauncherExecutable(executable);
   validateIcns(icon);
-  const executable = renderMacosLauncherExecutable(join(
-    installRoot,
-    "scripts",
-    "launch-skin.command",
-  ), version);
   const plist = renderMacosLauncherPlist(installRoot, version);
   return {
     executable,
@@ -1538,7 +1614,7 @@ export async function installMacosLauncher({
 } = {}) {
   home = assertAbsolutePath(home, "home");
   installRoot = assertAbsolutePath(installRoot, "installRoot");
-  const entrypoint = await requireStableEntrypoint(installRoot);
+  await requireStableEntrypoint(installRoot);
   const launcherInputs = await readLauncherInputs(installRoot);
   const launcherLock = await acquireMacosLauncherInstallLock({
     home,
@@ -1555,11 +1631,7 @@ export async function installMacosLauncher({
     if (existing !== null) await validateAttributedBundle(appPath);
     const transactionId = randomUUID();
     const { backupPath, stagePath } = transactionPaths(appPath, transactionId);
-    const expected = {
-      executable: renderMacosLauncherExecutable(entrypoint, launcherInputs.version),
-      plist: renderMacosLauncherPlist(installRoot, launcherInputs.version),
-      icon: launcherInputs.icon,
-    };
+    const expected = expectedLauncher(installRoot, launcherInputs);
     let journal = {
       schemaVersion: 1,
       transactionId,
