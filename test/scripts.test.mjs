@@ -197,6 +197,7 @@ test("lifecycle action files require mode 0600 before any process action", async
   const root = await mkdtemp(join(tmpdir(), "heige-lifecycle-mode-"));
   const path = join(root, "action.json");
   await writeFile(path, JSON.stringify({}), { mode: 0o644 });
+  await chmod(path, 0o644);
   const calls = [];
   await assert.rejects(
     runLifecycleActionFile(path, { requestQuit: async () => calls.push("quit") }),
@@ -601,6 +602,53 @@ test("an asynchronous launcher lifecycle failure is recorded in the bounded laun
   assert.equal(entry.event, "launcher.lifecycle");
   assert.match(entry.message, /未正常退出/);
   assert.equal((await stat(logPath)).mode & 0o777, 0o600);
+});
+
+test("the Finder launcher waits longer than thirty seconds for Codex to quit normally", async (t) => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "heige-launcher-patient-quit-")));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const path = join(root, "action.json");
+  const original = {
+    pid: 4242,
+    executablePath: "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
+    startedAt: "Fri Jul 17 12:00:00 2026",
+  };
+  const launched = {
+    pid: 5252,
+    executablePath: original.executablePath,
+    startedAt: "Fri Jul 17 12:01:00 2026",
+  };
+  await writeLifecycleActionFile(path, {
+    process: original,
+    appPath: "/Applications/ChatGPT.app",
+    launchMode: "cdp",
+    port: 9341,
+    afterLaunch: {
+      command: "launcher-apply",
+      launcherVersion: "5.5.4",
+      cliPath: "/trusted/src/cli.mjs",
+      nodePath: "/trusted/node",
+      port: 9341,
+      themeId: "miku-488137",
+    },
+  });
+  let processProbes = 0;
+  const result = await runLifecycleActionFile(path, {
+    readProcessIdentity: async (pid) => {
+      if (pid === original.pid) return ++processProbes <= 121 ? original : null;
+      return launched;
+    },
+    requestQuit: async () => {},
+    wait: async () => {},
+    launchApp: async () => {},
+    waitForPort: async () => {},
+    readCdpProcess: async () => launched,
+    runAfterLaunch: async () => true,
+  });
+
+  assert.equal(result.restarted, true);
+  assert.equal(result.continuation, "launcher-apply");
+  assert.ok(processProbes > 120, "launcher should outwait the old thirty-second limit");
 });
 
 test("a detached lifecycle action rejects the removed persistence-enable continuation", async () => {

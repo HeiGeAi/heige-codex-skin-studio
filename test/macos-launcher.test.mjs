@@ -96,6 +96,24 @@ test("creates a Finder-visible local app that calls only the current-session app
   assert.equal((await stat(join(result.appPath, "Contents", "Info.plist"))).mode & 0o777, 0o644);
 });
 
+test("creates canonical launcher signature resources under a private umask", async (t) => {
+  const originalUmask = process.umask(0o077);
+  t.after(() => process.umask(originalUmask));
+  const { home, installRoot } = await fixture(t, "private-umask");
+
+  const result = await installMacosLauncher({ home, installRoot });
+  assert.equal(
+    (await stat(join(result.appPath, "Contents", "_CodeSignature"))).mode & 0o777,
+    0o755,
+  );
+  for (const name of ["CodeDirectory", "CodeRequirements", "CodeResources", "CodeSignature"]) {
+    assert.equal(
+      (await stat(join(result.appPath, "Contents", "_CodeSignature", name))).mode & 0o777,
+      0o644,
+    );
+  }
+});
+
 for (const hook of ["afterStageCreated", "afterPrepare"]) {
   test(`SIGKILL at launcher ${hook} recovers its durable preparation intent`, async (t) => {
     const { root, home, installRoot } = await fixture(t);

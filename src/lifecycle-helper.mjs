@@ -681,7 +681,11 @@ async function executeLifecycleActionCore(action, deps, progress) {
   const verifyPortReleased = deps.verifyPortReleased ?? defaultVerifyPortReleased;
   const readCdpProcess = deps.readCdpProcess ?? readMacCdpProcess;
   const readAppProcesses = deps.readAppProcesses ?? defaultReadAppProcesses;
-  const maxWaitAttempts = deps.maxWaitAttempts ?? 120;
+  // Finder 启动器经常在 Codex 仍有一轮任务收尾时触发。继续只请求正常退出，
+  // 但给这条显式用户入口更长的等待窗口，避免固定 30 秒后误报失败。
+  const maxWaitAttempts = deps.maxWaitAttempts ?? (
+    action.afterLaunch?.command === "launcher-apply" ? 1200 : 120
+  );
   const waitIntervalMs = deps.waitIntervalMs ?? 250;
   if (![readProcessIdentity, requestQuit, launchApp, wait, waitForPort, runAfterLaunch,
     verifyPortReleased, readCdpProcess, readAppProcesses]

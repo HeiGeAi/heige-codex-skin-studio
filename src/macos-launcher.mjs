@@ -630,7 +630,10 @@ async function stageBundle(stagePath, expected, hooks = {}) {
   await syncDirectory(stagePath);
   await syncDirectory(dirname(stagePath));
   await signMacosLauncherBundle(stagePath);
-  await syncDirectory(join(contents, "_CodeSignature"));
+  const signature = join(contents, "_CodeSignature");
+  await chmod(signature, 0o755);
+  await Promise.all(SIGNATURE_FILE_NAMES.map((name) => chmod(join(signature, name), 0o644)));
+  await syncDirectory(signature);
   await syncDirectory(contents);
   await syncDirectory(stagePath);
   await syncDirectory(dirname(stagePath));
