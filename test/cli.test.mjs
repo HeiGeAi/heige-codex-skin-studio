@@ -599,6 +599,77 @@ test("launcher-apply binds the Bundle version, restores lastNonNative, and stays
   assert.match(fx.calls.launcherLogs[0].message, /5\.5\.3.*5\.5\.4/);
 });
 
+test("launcher-state returns the WorkBuddy card without probing its runtime port", async () => {
+  const discoveryCalls = [];
+  const result = await runCli(["launcher-state", "--app", "workbuddy"], deps({
+    platform: "darwin",
+    nodeVersion: "v22.14.0",
+    readState: async () => ({ lastNonNativeThemeId: "miku-488137" }),
+    discoverCodex: async (input) => {
+      discoveryCalls.push(input);
+      return {
+        appFound: true,
+        app: "/Applications/WorkBuddy.app",
+      };
+    },
+    listThemes: async () => [{
+      id: "miku-488137",
+      name: "Miku 488137",
+      path: "/bundle/themes/miku-488137",
+    }],
+  }));
+
+  assert.deepEqual(result, {
+    schemaVersion: 1,
+    product: "workbuddy",
+    productName: "WorkBuddy",
+    appInstalled: true,
+    appPath: "/Applications/WorkBuddy.app",
+    themeId: "miku-488137",
+    themeName: "Miku 488137",
+    mode: "one-shot",
+  });
+  assert.deepEqual(discoveryCalls, [{ product: "workbuddy" }]);
+});
+
+test("launcher-state rejects options outside its fixed product selector", async () => {
+  await assert.rejects(
+    runCli(["launcher-state", "--port", "9341"], deps()),
+    /无法识别的参数：--port/,
+  );
+});
+
+test("launcher-apply version-binds WorkBuddy while preserving one-shot semantics", async () => {
+  const fx = lifecycleDeps({
+    initialState: {
+      schemaVersion: 2,
+      persistenceEnabled: false,
+      selectedThemeId: "miku-488137",
+      lastNonNativeThemeId: "miku-488137",
+      controlToken: Buffer.alloc(32, 17).toString("base64url"),
+      lastTransitionNonce: null,
+      revision: 8,
+    },
+    readCurrentPackageVersion: async () => "5.5.5",
+  });
+
+  const result = await runCli([
+    "launcher-apply",
+    "--launcher-version",
+    "5.5.5",
+    "--app",
+    "workbuddy",
+    "--port",
+    "9342",
+  ], fx.deps);
+
+  assert.deepEqual(result, { mode: "active", persistenceEnabled: false });
+  assert.deepEqual(fx.calls.launcherLock, [{ port: 9342 }]);
+  assert.equal(fx.calls.registerEphemeral.at(-1).themeId, "miku-488137");
+  assert.equal(fx.calls.registerEphemeral.at(-1).preferStored, true);
+  assert.equal(fx.calls.controller.length, 0);
+});
+
 test("launcher-apply preserves its command identity across a native Codex restart", async () => {
   const fx = lifecycleDeps({
     readCurrentPackageVersion: async () => "5.5.4",

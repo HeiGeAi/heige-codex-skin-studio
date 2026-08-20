@@ -92,6 +92,12 @@
       "exclude": []
     },
     {
+      "source": "src/launcher-panel-state.mjs",
+      "destination": "payload/src/launcher-panel-state.mjs",
+      "recursive": false,
+      "exclude": []
+    },
+    {
       "source": "src/macos-app-repair.mjs",
       "destination": "payload/src/macos-app-repair.mjs",
       "recursive": false,

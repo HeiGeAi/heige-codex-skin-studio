@@ -4,14 +4,31 @@ umask 077
 
 ROOT="${0:A:h:h}"
 VERSION="${1:-}"
-PORT="${HEIGE_CODEX_SKIN_PORT:-9341}"
+PRODUCT="${2:-codex}"
 ERROR_FILE="$(/usr/bin/mktemp -t heige-skin-launcher)"
 trap '/bin/rm -f -- "$ERROR_FILE"' EXIT
+
+case "$PRODUCT" in
+  codex)
+    PORT=9341
+    APP_ARGS=()
+    ;;
+  workbuddy)
+    PORT=9342
+    APP_ARGS=(--app workbuddy)
+    export HEIGE_SKIN_PRODUCT=workbuddy
+    ;;
+  *)
+    print -u2 -- "HeiGe 皮肤启动器：不支持的产品：$PRODUCT"
+    exit 64
+    ;;
+esac
 
 set +e
 "$ROOT/scripts/lib/run-cli.zsh" \
   launcher-apply \
   --launcher-version "$VERSION" \
+  "${APP_ARGS[@]}" \
   --port "$PORT" \
   2>"$ERROR_FILE"
 STATUS=$?

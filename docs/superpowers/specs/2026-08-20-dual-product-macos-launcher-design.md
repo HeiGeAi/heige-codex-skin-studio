@@ -29,7 +29,7 @@ Codex 与 WorkBuddy 的状态、锁、日志和端口完全隔离：
 | 产品 | 状态目录 | CDP 端口 | 动作 |
 | --- | --- | ---: | --- |
 | Codex | `~/Library/Application Support/HeiGeCodexSkinStudio` | 9341 | `launcher-apply` |
-| WorkBuddy | `~/Library/Application Support/HeiGeCodexSkinStudio-workbuddy` | 9342 | `apply --app workbuddy --prefer-stored` |
+| WorkBuddy | `~/Library/Application Support/HeiGeCodexSkinStudio-workbuddy` | 9342 | `launcher-apply --app workbuddy` |
 
 ## 技术架构
 
@@ -38,7 +38,7 @@ Codex 与 WorkBuddy 的状态、锁、日志和端口完全隔离：
 原生进程从自身 `Info.plist` 读取 `HeiGeInstallRoot` 与版本号，不接受环境变量覆盖稳定运行时路径。它通过稳定安装根中的两个受控脚本读取状态和执行动作：
 
 1. `launcher-state.command <product>` 调用 Node CLI 的 `launcher-state --app <product>`，只输出一个 JSON 对象。
-2. `launch-skin.command <version> <product>` 校验版本与产品白名单，再路由到现有 Codex 或 WorkBuddy 动作。
+2. `launch-skin.command <version> <product>` 校验产品白名单，再把两个产品都路由到版本绑定的 `launcher-apply`。WorkBuddy 继续使用自身隔离状态和一次性注入能力。
 
 CLI 的启动器状态对象固定为：
 

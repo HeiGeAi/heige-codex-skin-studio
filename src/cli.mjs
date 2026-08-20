@@ -85,6 +85,7 @@ import {
   writeStudioState,
 } from "./state-store.mjs";
 import { createStudioLogger } from "./studio-logger.mjs";
+import { buildLauncherPanelState } from "./launcher-panel-state.mjs";
 import { loadTheme } from "./theme-schema.mjs";
 import {
   createSingleImageTheme,
@@ -116,7 +117,8 @@ const COMMAND_OPTIONS = new Map([
   ["create", new Set(["image", "name", "app"])],
   ["customize", new Set(["image", "name", "port", "app"])],
   ["apply", new Set(["port", "prefer-stored", "restart", "theme", "app"])],
-  ["launcher-apply", new Set(["launcher-version", "port", "theme"])],
+  ["launcher-apply", new Set(["launcher-version", "port", "theme", "app"])],
+  ["launcher-state", new Set(["app"])],
   ["enable-skin", new Set(["port", "theme", "app"])],
   ["set-persistence", new Set(["port", "revision", "app"])],
   ["pause", new Set(["port", "app"])],
@@ -2933,6 +2935,7 @@ export async function runCli(argv, overrides = {}) {
         "create --image PATH --name NAME",
         "customize [--image PATH --name NAME]",
         "apply [--theme ID] [--port 9341]",
+        "launcher-state --app codex|workbuddy",
         "enable-skin [--theme ID] [--port 9341]",
         "set-persistence false [--revision N]",
         "pause",
@@ -2948,6 +2951,20 @@ export async function runCli(argv, overrides = {}) {
   assertNodeVersion(deps.nodeVersion);
   const roots = deps.roots;
 
+  if (command === "launcher-state") {
+    const [discovery, studioState, themes] = await Promise.all([
+      (deps.discoverCodex ?? discoverCodex)({ product: productId }),
+      deps.readState(),
+      deps.listThemes({ roots }),
+    ]);
+    return buildLauncherPanelState({
+      profile,
+      discovery,
+      studioState,
+      themes,
+      defaultThemeId: DEFAULT_THEME_ID,
+    });
+  }
   if (command === "list") return deps.listThemes({ roots });
   if (command === "create") {
     if (!args.image) throw new Error("create 需要 --image");
@@ -3001,8 +3018,8 @@ export async function runCli(argv, overrides = {}) {
   }
   if (command === "launcher-apply") {
     try {
-      if (selectedControllerPlatform !== "darwin" || productId !== DEFAULT_PRODUCT_ID) {
-        throw new Error("launcher-apply 只支持 macOS 官方 Codex Desktop");
+      if (selectedControllerPlatform !== "darwin") {
+        throw new Error("launcher-apply 只支持 macOS 桌面产品");
       }
       if (typeof args["launcher-version"] !== "string") {
         throw new Error("launcher-apply 缺少 --launcher-version");

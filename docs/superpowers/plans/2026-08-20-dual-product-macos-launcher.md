@@ -51,7 +51,7 @@ Expected: all selected tests pass with zero failures.
 
 - [ ] **Step 1: Write failing script tests**
 
-Use a temporary copied script tree and a recording `run-cli.zsh` fixture. Assert Codex routes to `launcher-apply --launcher-version <version> --port 9341`, WorkBuddy routes to `apply --app workbuddy --prefer-stored --port 9342`, state routes to `launcher-state --app <product>`, and any other product exits nonzero before invoking the CLI.
+Use a temporary copied script tree and a recording `run-cli.zsh` fixture. Assert Codex routes to `launcher-apply --launcher-version <version> --port 9341`, WorkBuddy routes to `launcher-apply --launcher-version <version> --app workbuddy --port 9342`, state routes to `launcher-state --app <product>`, and any other product exits nonzero before invoking the CLI.
 
 - [ ] **Step 2: Verify RED**
 
