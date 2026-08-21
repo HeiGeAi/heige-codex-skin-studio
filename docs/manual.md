@@ -100,7 +100,7 @@ open "$HOME/Applications/HeiGe 皮肤启动器.app"
 
 这个本地应用只指向稳定安装目录，不指向下载目录或开发仓库。点击 Codex 卡片后按 9341 现场状态执行最小动作；点击 WorkBuddy 卡片后只走 9342 的一次性注入链。未安装的产品卡片会禁用，失败保留窗口并允许重试，成功后前置目标 APP 并关闭启动器。它不会下载代码、请求管理员权限、创建新的登录项或将 `persistenceEnabled` 改为 `true`，也不会为 WorkBuddy 创建常驻服务。
 
-每次 macOS 安装都会生成或升级 Schema 4 Bundle，其中包含 arm64 与 x86_64 universal 原生二进制、Miku `AppIcon.icns`、当前版本号、稳定入口和本地 ad hoc 完整性签名。提交安装前会严格校验二进制架构、Bundle 内容、签名并注册 LaunchServices。普通用户不需要安装 Xcode。ad hoc 签名用于发现本地 Bundle 被改动，不等于 Apple Developer ID 签名或 Apple 公证。
+每次 macOS 安装都会生成或升级 Schema 5 Bundle，其中包含 arm64 与 x86_64 universal 原生二进制、Dock 使用的 Miku `AppIcon.icns`、窗口标题区域独立使用的 `LauncherLogo.png`、当前版本号、稳定入口和本地 ad hoc 完整性签名。提交安装前会严格校验二进制架构、Bundle 内容、签名并注册 LaunchServices。普通用户不需要安装 Xcode。ad hoc 签名用于发现本地 Bundle 被改动，不等于 Apple Developer ID 签名或 Apple 公证。
 
 启动器只在底层明确报告 `LOCK_CHAIN_CORRUPT` 时尝试一次静态状态根恢复。恢复前必须同时证明没有已加载的 HeiGe LaunchAgent、没有相关 controller 或 lifecycle helper、锁声明 PID 已失效、CDP 端口无外来监听，并且 `state.json` 与用户主题都通过严格校验。满足条件时，旧状态根会整体原子移动为带时间戳的备份，新目录只恢复通过校验的状态与用户主题，然后只重试一次。普通锁竞争、权限错误、陌生文件、活动进程或第二次失败都会明确停止，不会循环修复。
 

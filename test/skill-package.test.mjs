@@ -214,6 +214,7 @@ test("archive is a strict runtime allowlist with fixed metadata", async (t) => {
     "heige-codex-skin-studio/payload/src/macos-launcher.mjs",
     "heige-codex-skin-studio/payload/src/theme-center-style.mjs",
     "heige-codex-skin-studio/payload/assets/launcher/AppIcon.icns",
+    "heige-codex-skin-studio/payload/assets/launcher/LauncherLogo.png",
     "heige-codex-skin-studio/payload/assets/launcher/miku-launcher-icon.png",
     "heige-codex-skin-studio/payload/scripts/launch-skin.command",
     "heige-codex-skin-studio/payload/scripts/enable-skin.command",
@@ -296,7 +297,8 @@ test("archive is a strict runtime allowlist with fixed metadata", async (t) => {
     await readFile(join(repoRoot, "src/macos-launcher.mjs"), "utf8"),
     "the reusable skill must carry the audited macOS launcher byte-for-byte",
   );
-  assert.match(packagedMacosLauncher, /MACOS_LAUNCHER_SCHEMA_VERSION = 4/);
+  assert.match(packagedMacosLauncher, /MACOS_LAUNCHER_SCHEMA_VERSION = 5/);
+  assert.match(packagedMacosLauncher, /LAUNCHER_LOGO_NAME = "LauncherLogo\.png"/);
   assert.match(packagedMacosLauncher, /const entrypoint = join\(scripts, "launch-skin\.command"\);/);
 
   const packagedSkill = await readZipText(

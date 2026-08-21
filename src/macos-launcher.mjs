@@ -23,9 +23,10 @@ import { readProcessIdentity, sameProcessIdentity } from "./process-identity.mjs
 
 export const MACOS_LAUNCHER_NAME = "HeiGe 皮肤启动器";
 export const MACOS_LAUNCHER_BUNDLE_ID = "com.heige.codex-skin-launcher";
-export const MACOS_LAUNCHER_SCHEMA_VERSION = 4;
+export const MACOS_LAUNCHER_SCHEMA_VERSION = 5;
 const EXECUTABLE_NAME = "HeiGe Skin Launcher";
 const ICON_NAME = "AppIcon.icns";
+const LAUNCHER_LOGO_NAME = "LauncherLogo.png";
 const NATIVE_EXECUTABLE_ASSET = "HeiGeSkinLauncher.bin";
 const LEGACY_SIGNATURE_FILE_NAMES = [
   "CodeDirectory",
@@ -184,7 +185,7 @@ function validateLauncherVersion(value) {
   return value;
 }
 
-export function renderMacosLauncherExecutable(entrypoint, version = "5.5.10") {
+export function renderMacosLauncherExecutable(entrypoint, version = "5.5.11") {
   return renderMacosLauncherExecutableVersion(
     entrypoint,
     3,
@@ -192,7 +193,7 @@ export function renderMacosLauncherExecutable(entrypoint, version = "5.5.10") {
   );
 }
 
-export function renderMacosLauncherPlist(installRoot, version = "5.5.10") {
+export function renderMacosLauncherPlist(installRoot, version = "5.5.11") {
   installRoot = assertAbsolutePath(installRoot, "installRoot");
   version = validateLauncherVersion(version);
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -353,6 +354,23 @@ function validateIcns(bytes) {
   return bytes;
 }
 
+function validateLauncherLogo(bytes) {
+  const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  if (
+    !Buffer.isBuffer(bytes)
+    || bytes.byteLength < 33
+    || !bytes.subarray(0, 8).equals(pngSignature)
+    || bytes.readUInt32BE(8) !== 13
+    || bytes.subarray(12, 16).toString("ascii") !== "IHDR"
+  ) throw new Error("LauncherLogo.png 文件头无效");
+  const width = bytes.readUInt32BE(16);
+  const height = bytes.readUInt32BE(20);
+  if (width < 64 || width > 4096 || height !== width) {
+    throw new Error("LauncherLogo.png 必须是 64 至 4096 像素的正方形 PNG");
+  }
+  return bytes;
+}
+
 function validateNativeLauncherExecutable(bytes) {
   if (
     !Buffer.isBuffer(bytes)
@@ -390,10 +408,17 @@ async function readLauncherInputs(validationRoot) {
   const canonicalRoot = await requireRealDirectory(validationRoot, "validationRoot");
   const packagePath = join(validationRoot, "package.json");
   const iconPath = join(validationRoot, "assets", "launcher", ICON_NAME);
+  const logoPath = join(validationRoot, "assets", "launcher", LAUNCHER_LOGO_NAME);
   const executablePath = join(validationRoot, "assets", "launcher", NATIVE_EXECUTABLE_ASSET);
-  const [{ text }, { bytes: icon }, { bytes: executable, info: executableInfo }] = await Promise.all([
+  const [
+    { text },
+    { bytes: icon },
+    { bytes: logo },
+    { bytes: executable, info: executableInfo },
+  ] = await Promise.all([
     readSmallRegular(packagePath, "package.json"),
     readBoundedBinary(iconPath, ICON_NAME),
+    readBoundedBinary(logoPath, LAUNCHER_LOGO_NAME),
     readBoundedBinary(
       executablePath,
       NATIVE_EXECUTABLE_ASSET,
@@ -405,6 +430,9 @@ async function readLauncherInputs(validationRoot) {
   }
   if (await realpath(iconPath) !== join(canonicalRoot, "assets", "launcher", ICON_NAME)) {
     throw new Error("AppIcon.icns 必须位于 validationRoot 内");
+  }
+  if (await realpath(logoPath) !== join(canonicalRoot, "assets", "launcher", LAUNCHER_LOGO_NAME)) {
+    throw new Error("LauncherLogo.png 必须位于 validationRoot 内");
   }
   if (await realpath(executablePath) !== join(
     canonicalRoot,
@@ -422,6 +450,7 @@ async function readLauncherInputs(validationRoot) {
   return {
     executable: validateNativeLauncherExecutable(executable),
     icon: validateIcns(icon),
+    logo: validateLauncherLogo(logo),
     version: validateLauncherVersion(packageJson?.version),
   };
 }
@@ -448,7 +477,7 @@ function parseAttributedPlist(text) {
     /<key>HeiGeLauncherSchemaVersion<\/key>\s*<integer>(\d+)<\/integer>/g,
     "HeiGeLauncherSchemaVersion",
   ));
-  if (![1, 2, 3, MACOS_LAUNCHER_SCHEMA_VERSION].includes(schema)) {
+  if (![1, 2, 3, 4, MACOS_LAUNCHER_SCHEMA_VERSION].includes(schema)) {
     throw new Error("不支持的 generated launcher schema");
   }
   const keys = [...text.matchAll(/<key>([^<]+)<\/key>/g)].map((match) => match[1]).sort();
@@ -533,7 +562,7 @@ async function validateAttributedBundle(appPath, expected = null) {
     const executablePath = join(macos, EXECUTABLE_NAME);
     let executable;
     let executableInfo;
-    if (attribution.schema === 4) {
+    if (attribution.schema >= 4) {
       const snapshot = await readBoundedBinary(
         executablePath,
         "launcher executable",
@@ -552,7 +581,7 @@ async function validateAttributedBundle(appPath, expected = null) {
         ? "apply.command"
         : "launch-skin.command";
     if (
-      attribution.schema !== 4
+      attribution.schema < 4
       && executable !== renderMacosLauncherExecutableVersion(join(
         attribution.installRoot,
         "scripts",
@@ -567,16 +596,22 @@ async function validateAttributedBundle(appPath, expected = null) {
     let icon = null;
     let iconPath = null;
     let iconSha256 = null;
+    let logo = null;
+    let logoPath = null;
+    let logoSha256 = null;
     let codeResourcesPath = null;
     let signatureSha256 = null;
     if (attribution.schema >= 3) {
       const resources = join(contents, "Resources");
       const signature = join(contents, "_CodeSignature");
-      if (await assertExactDirectory(resources, [ICON_NAME], "launcher Resources") !==
+      const resourceFileNames = attribution.schema >= 5
+        ? [ICON_NAME, LAUNCHER_LOGO_NAME]
+        : [ICON_NAME];
+      if (await assertExactDirectory(resources, resourceFileNames, "launcher Resources") !==
           join(canonicalContents, "Resources")) {
         throw new Error("launcher Resources escaped bundle");
       }
-      const signatureFileNames = attribution.schema === 4
+      const signatureFileNames = attribution.schema >= 4
         ? NATIVE_SIGNATURE_FILE_NAMES
         : LEGACY_SIGNATURE_FILE_NAMES;
       if (await assertExactDirectory(signature, signatureFileNames, "launcher signature") !==
@@ -584,23 +619,29 @@ async function validateAttributedBundle(appPath, expected = null) {
         throw new Error("launcher signature escaped bundle");
       }
       iconPath = join(resources, ICON_NAME);
+      logoPath = attribution.schema >= 5 ? join(resources, LAUNCHER_LOGO_NAME) : null;
       codeResourcesPath = join(signature, "CodeResources");
-      const [iconSnapshot, ...signatureSnapshots] = await Promise.all([
-        readBoundedBinary(iconPath, ICON_NAME),
-        ...signatureFileNames.map((name) => readBoundedBinary(
+      const [resourceSnapshots, signatureSnapshots] = await Promise.all([
+        Promise.all(resourceFileNames.map((name) => readBoundedBinary(
+          join(resources, name),
+          name,
+        ))),
+        Promise.all(signatureFileNames.map((name) => readBoundedBinary(
           join(signature, name),
           name,
           1024 * 1024,
           { allowEmpty: name === "CodeSignature" },
-        )),
+        ))),
       ]);
-      icon = validateIcns(iconSnapshot.bytes);
+      icon = validateIcns(resourceSnapshots[0].bytes);
+      if (attribution.schema >= 5) logo = validateLauncherLogo(resourceSnapshots[1].bytes);
       if (
-        (iconSnapshot.info.mode & 0o777) !== 0o644
+        resourceSnapshots.some(({ info }) => (info.mode & 0o777) !== 0o644)
         || signatureSnapshots.some(({ info }) => (info.mode & 0o777) !== 0o644)
       ) throw new Error("generated bundle resource 权限不正确");
       await verifyMacosLauncherSignature(appPath);
       iconSha256 = sha256(icon);
+      logoSha256 = logo === null ? null : sha256(logo);
       const signatureResources = new Map(signatureFileNames.map(
         (name, index) => [name, signatureSnapshots[index].bytes],
       ));
@@ -612,6 +653,8 @@ async function validateAttributedBundle(appPath, expected = null) {
         plist !== expected.plist
         || !Buffer.isBuffer(icon)
         || !icon.equals(expected.icon)
+        || !Buffer.isBuffer(logo)
+        || !logo.equals(expected.logo)
       )
     ) {
       throw new Error("staged generated bundle 与期望字节不一致");
@@ -627,6 +670,9 @@ async function validateAttributedBundle(appPath, expected = null) {
       icon,
       iconPath,
       iconSha256,
+      logo,
+      logoPath,
+      logoSha256,
       codeResourcesPath,
       signatureSha256,
     };
@@ -678,13 +724,19 @@ async function stageBundle(stagePath, expected, hooks = {}) {
     flag: "wx",
     mode: 0o644,
   });
+  await writeFile(join(resources, LAUNCHER_LOGO_NAME), expected.logo, {
+    flag: "wx",
+    mode: 0o644,
+  });
   await chmod(join(contents, "Info.plist"), 0o644);
   await chmod(join(macos, EXECUTABLE_NAME), 0o755);
   await chmod(join(resources, ICON_NAME), 0o644);
+  await chmod(join(resources, LAUNCHER_LOGO_NAME), 0o644);
   for (const path of [
     join(contents, "Info.plist"),
     join(macos, EXECUTABLE_NAME),
     join(resources, ICON_NAME),
+    join(resources, LAUNCHER_LOGO_NAME),
   ]) {
     const handle = await open(path, "r+");
     try { await handle.sync(); } finally { await handle.close(); }
@@ -1262,17 +1314,20 @@ function assertSha256(value, label) {
   }
 }
 
-function expectedLauncher(installRoot, { executable, icon, version }) {
+function expectedLauncher(installRoot, { executable, icon, logo, version }) {
   installRoot = assertAbsolutePath(installRoot, "expected launcher installRoot");
   version = validateLauncherVersion(version);
   validateNativeLauncherExecutable(executable);
   validateIcns(icon);
+  validateLauncherLogo(logo);
   const plist = renderMacosLauncherPlist(installRoot, version);
   return {
     executable,
     executableSha256: sha256(executable),
     icon,
     iconSha256: sha256(icon),
+    logo,
+    logoSha256: sha256(logo),
     plist,
     plistSha256: sha256(plist),
     version,
@@ -1460,6 +1515,7 @@ export async function prepareMacosLauncher({
       && before.executableSha256 === expected.executableSha256
       && before.plistSha256 === expected.plistSha256
       && before.iconSha256 === expected.iconSha256
+      && before.logoSha256 === expected.logoSha256
       && before.signatureSha256 === staged.signatureSha256
       && before.version === expected.version;
     const participant = assertLauncherParticipant({

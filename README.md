@@ -133,7 +133,7 @@ Windows 用 `scripts\windows\install.bat` 安装；日常入口是 `scripts/wind
 - 常驻由你决定：顶部菜单「皮肤常驻」开关是唯一受支持的开启常驻入口，关闭时会先确认，并提示「关闭后本次继续使用；下次启动恢复原生界面」。
 - 阅读增强默认开启：最终回复和过程回复都使用 90％ 主题自适应半透明底色，并保留对称留白保护文字可读性；可在主题中心随时关闭，不使用大面积实时模糊、阴影、观察器、滚动监听或后台请求。
 - 想让皮肤重启后一直在：先打开「HeiGe 皮肤启动器」恢复当前会话，再到顶部菜单打开开关进入常驻。开启成功时开关应在数秒内变绿，且状态与计划任务或 LaunchAgent 已写入；失败会立刻提示，不会长时间停在「正在等待后台确认」。常驻开启后，正常重启 Codex 也会由后台控制器接管并恢复皮肤（Windows 与 macOS 均支持；Store 若屏蔽调试端口则无法接管）。
-- macOS 每次安装都会生成或升级 Schema 4 原生「HeiGe 皮肤启动器」。APP 内的 universal AppKit 二进制、Miku 图标和入口均纳入本地 ad hoc 完整性签名，并注册到 LaunchServices。ad hoc 签名用于发现本地篡改，不等于 Apple Developer ID 签名或公证，也不承诺绕过未来系统安全策略。
+- macOS 每次安装都会生成或升级 Schema 5 原生「HeiGe 皮肤启动器」。APP 内的 universal AppKit 二进制、Dock 图标、独立的初音未来窗口 Logo 和入口均纳入本地 ad hoc 完整性签名，并注册到 LaunchServices。ad hoc 签名用于发现本地篡改，不等于 Apple Developer ID 签名或公证，也不承诺绕过未来系统安全策略。
 - 「HeiGe 皮肤启动器」按产品走专用 `launch-skin.command` 和版本绑定的内部 `launcher-apply` 路由。Codex 使用 9341，WorkBuddy 使用 9342，各自优先恢复最近一次非原生主题；没有历史选择时才使用 `miku-488137`。`enable-skin.command` 仍是 session-only 兼容入口；`enable-persist.command` 是弃用的非零退出入口。
 - 整窗突然变卡（帧率骤降、输入滚动全局迟滞）：跑 `scripts/apply.command --restart` 先彻底退出 Codex 再拉起注入；健康会话下直接重跑 apply 是幂等的，不会重启进程。
 - 支持范围：macOS 有日期化真机验证；Windows 走跨 PowerShell 自动化，Microsoft Store/MSIX 真机待验证；使用系统 Node 时要求 Node.js 22 或更新版本。

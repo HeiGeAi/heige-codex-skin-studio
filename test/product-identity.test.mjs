@@ -52,9 +52,9 @@ test("uses the approved package identity without ASAR runtime modules", async ()
   ]);
 
   assert.equal(packageJson.name, "heige-codex-skin-studio");
-  assert.equal(packageJson.version, "5.5.10");
-  assert.equal(packageLock.version, "5.5.10");
-  assert.equal(packageLock.packages?.[""]?.version, "5.5.10");
+  assert.equal(packageJson.version, "5.5.11");
+  assert.equal(packageLock.version, "5.5.11");
+  assert.equal(packageLock.packages?.[""]?.version, "5.5.11");
   assert.doesNotMatch(readme, /v\d+\.\d+\.\d+\s+for Windows/i);
   assert.match(readme, /releases\/latest/);
   assert.equal(packageJson.type, "module");

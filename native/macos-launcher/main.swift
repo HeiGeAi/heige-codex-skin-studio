@@ -209,7 +209,7 @@ final class BrandLogoView: AppearanceSurfaceView {
         )
         layer?.masksToBounds = true
 
-        if let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns") {
+        if let iconURL = Bundle.main.url(forResource: "LauncherLogo", withExtension: "png") {
             icon.image = NSImage(contentsOf: iconURL)
         } else {
             icon.image = NSApp.applicationIconImage
@@ -217,7 +217,7 @@ final class BrandLogoView: AppearanceSurfaceView {
         icon.imageScaling = .scaleProportionallyUpOrDown
         icon.imageAlignment = .alignCenter
         icon.translatesAutoresizingMaskIntoConstraints = false
-        icon.setAccessibilityLabel("初音未来主题图标")
+        icon.setAccessibilityLabel("初音未来启动器内置 Logo")
         addSubview(icon)
         NSLayoutConstraint.activate([
             icon.leadingAnchor.constraint(equalTo: leadingAnchor),

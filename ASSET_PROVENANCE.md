@@ -11,6 +11,7 @@
 | `assets/miku-character.png` | Miku 主题角色图层 | 来源证据缺失，授权未验证 | 未知 | 项目所有者确认公开发布 | 后续可替换为权利记录更完整的素材 |
 | `assets/launcher/miku-launcher-icon.png` | macOS 启动器图标母版 | 2026-08-19 按项目所有者要求，以 `assets/miku-character.png` 为参考经图像生成工具编辑衍生 | 未知，继承角色源图未验证的授权状态 | 项目所有者确认公开发布 | 公开分发前补齐角色及源图授权，或替换为原创素材 |
 | `assets/launcher/AppIcon.icns` | macOS 启动器 Bundle 图标 | 2026-08-19 由 `assets/launcher/miku-launcher-icon.png` 的标准尺寸 iconset 确定性衍生 | 未知，继承图标母版与角色源图未验证的授权状态 | 项目所有者确认公开发布 | 与图标母版同步替换或补齐权利记录 |
+| `assets/launcher/LauncherLogo.png` | macOS 启动器窗口内置 Logo | 2026-08-21 按项目所有者要求，以 `assets/miku-character.png` 中的核心人物为参考，经图像生成工具重构为正方形上半身构图 | 未知，继承角色源图未验证的授权状态 | 项目所有者确认公开发布 | 公开分发前补齐角色及源图授权，或替换为原创素材 |
 | `assets/miku-full-canvas.png` | Miku 主题完整画布 | 来源证据缺失，授权未验证 | 未知 | 项目所有者确认公开发布 | 后续可替换为权利记录更完整的素材 |
 | `assets/miku-hero.png` | Miku 主题主视觉 | 来源证据缺失，授权未验证 | 未知 | 项目所有者确认公开发布 | 后续可替换为权利记录更完整的素材 |
 | `assets/miku-polaroid.png` | Miku 主题拍立得装饰 | 来源证据缺失，授权未验证 | 未知 | 项目所有者确认公开发布 | 后续可替换为权利记录更完整的素材 |

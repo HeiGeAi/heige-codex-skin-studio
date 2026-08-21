@@ -36,10 +36,11 @@ test("native launcher source owns the exact two-product AppKit contract", async 
   }
 });
 
-test("native launcher header uses the bundled Miku app icon instead of a letter placeholder", async () => {
+test("native launcher header uses its dedicated Miku logo instead of the Dock app icon", async () => {
   const source = await readFile(sourceUrl, "utf8");
 
-  assert.match(source, /Bundle\.main\.url\(forResource: "AppIcon", withExtension: "icns"\)/);
+  assert.match(source, /Bundle\.main\.url\(forResource: "LauncherLogo", withExtension: "png"\)/);
+  assert.doesNotMatch(source, /Bundle\.main\.url\(forResource: "AppIcon", withExtension: "icns"\)/);
   assert.match(source, /NSImageView/);
   assert.match(source, /\.scaleProportionallyUpOrDown/);
   assert.doesNotMatch(source, /labelWithString:\s*"H"/);
