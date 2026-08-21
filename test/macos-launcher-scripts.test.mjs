@@ -42,16 +42,16 @@ async function recorded(root, recorder, script, args) {
 test("Codex launcher action uses the version-bound 9341 route", async (t) => {
   const { root, recorder } = await fixture(t);
   assert.equal(
-    await recorded(root, recorder, "launch-skin.command", ["5.5.9", "codex"]),
-    "product=codex\nlauncher-apply --launcher-version 5.5.9 --port 9341\n",
+    await recorded(root, recorder, "launch-skin.command", ["5.5.10", "codex"]),
+    "product=codex\nlauncher-apply --launcher-version 5.5.10 --port 9341\n",
   );
 });
 
 test("WorkBuddy launcher action stays on its isolated one-shot 9342 route", async (t) => {
   const { root, recorder } = await fixture(t);
   assert.equal(
-    await recorded(root, recorder, "launch-skin.command", ["5.5.9", "workbuddy"]),
-    "product=workbuddy\nlauncher-apply --launcher-version 5.5.9 --app workbuddy --port 9342\n",
+    await recorded(root, recorder, "launch-skin.command", ["5.5.10", "workbuddy"]),
+    "product=workbuddy\nlauncher-apply --launcher-version 5.5.10 --app workbuddy --port 9342\n",
   );
 });
 
@@ -68,7 +68,7 @@ for (const script of ["launch-skin.command", "launcher-state.command"]) {
     const { root, recorder } = await fixture(t);
     await assert.rejects(
       execFileAsync(join(root, "scripts", script),
-        script === "launch-skin.command" ? ["5.5.9", "other"] : ["other"], {
+        script === "launch-skin.command" ? ["5.5.10", "other"] : ["other"], {
           env: { ...process.env, HEIGE_TEST_RECORD: recorder },
         }),
       /不支持的产品/,

@@ -184,7 +184,7 @@ function validateLauncherVersion(value) {
   return value;
 }
 
-export function renderMacosLauncherExecutable(entrypoint, version = "5.5.9") {
+export function renderMacosLauncherExecutable(entrypoint, version = "5.5.10") {
   return renderMacosLauncherExecutableVersion(
     entrypoint,
     3,
@@ -192,7 +192,7 @@ export function renderMacosLauncherExecutable(entrypoint, version = "5.5.9") {
   );
 }
 
-export function renderMacosLauncherPlist(installRoot, version = "5.5.9") {
+export function renderMacosLauncherPlist(installRoot, version = "5.5.10") {
   installRoot = assertAbsolutePath(installRoot, "installRoot");
   version = validateLauncherVersion(version);
   return `<?xml version="1.0" encoding="UTF-8"?>

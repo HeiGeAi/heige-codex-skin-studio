@@ -45,6 +45,25 @@ test("native launcher header uses the bundled Miku app icon instead of a letter 
   assert.doesNotMatch(source, /labelWithString:\s*"H"/);
 });
 
+test("native launcher re-resolves every layer surface when macOS appearance changes", async () => {
+  const source = await readFile(sourceUrl, "utf8");
+
+  assert.match(source, /class AppearanceSurfaceView: NSView/);
+  assert.match(source, /override func viewDidChangeEffectiveAppearance\(\)/);
+  assert.match(source, /effectiveAppearance\.performAsCurrentDrawingAppearance/);
+  assert.match(source, /AppearanceSurfaceView\(backgroundColor: \.windowBackgroundColor/);
+  assert.match(source, /AppearanceSurfaceView\(backgroundColor: \.controlBackgroundColor/);
+  assert.match(source, /super\.init\([\s\S]*backgroundColor: \.windowBackgroundColor/);
+
+  for (const staleColor of [
+    "NSColor.windowBackgroundColor.cgColor",
+    "NSColor.controlBackgroundColor.cgColor",
+    "NSColor.separatorColor.withAlphaComponent(0.55).cgColor",
+  ]) {
+    assert.doesNotMatch(source, new RegExp(staleColor.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+});
+
 test("native launcher build is reproducible for both supported Mac architectures", async () => {
   const script = await readFile(buildUrl, "utf8");
   assert.match(script, /arm64-apple-macos13\.0/);

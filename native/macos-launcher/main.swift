@@ -159,16 +159,55 @@ enum ProcessRunner {
     }
 }
 
-final class BrandLogoView: NSView {
+class AppearanceSurfaceView: NSView {
+    private let semanticBackgroundColor: NSColor?
+    private let semanticBorderColor: NSColor?
+
+    init(
+        backgroundColor: NSColor? = nil,
+        borderColor: NSColor? = nil,
+        cornerRadius: CGFloat = 0,
+        borderWidth: CGFloat = 0
+    ) {
+        semanticBackgroundColor = backgroundColor
+        semanticBorderColor = borderColor
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = cornerRadius
+        layer?.borderWidth = borderWidth
+        applyAppearanceColors()
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        applyAppearanceColors()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyAppearanceColors()
+    }
+
+    private func applyAppearanceColors() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = semanticBackgroundColor?.cgColor
+            layer?.borderColor = semanticBorderColor?.cgColor
+        }
+    }
+}
+
+final class BrandLogoView: AppearanceSurfaceView {
     private let icon = NSImageView()
 
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        wantsLayer = true
-        layer?.cornerRadius = 14
+    init() {
+        super.init(
+            borderColor: .separatorColor.withAlphaComponent(0.28),
+            cornerRadius: 14,
+            borderWidth: 0.5
+        )
         layer?.masksToBounds = true
-        layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.28).cgColor
-        layer?.borderWidth = 0.5
 
         if let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns") {
             icon.image = NSImage(contentsOf: iconURL)
@@ -191,7 +230,7 @@ final class BrandLogoView: NSView {
     required init?(coder: NSCoder) { nil }
 }
 
-final class ProductCardView: NSView {
+final class ProductCardView: AppearanceSurfaceView {
     let definition: ProductDefinition
     var onAction: ((ProductDefinition) -> Void)?
 
@@ -203,12 +242,12 @@ final class ProductCardView: NSView {
 
     init(definition: ProductDefinition) {
         self.definition = definition
-        super.init(frame: .zero)
-        wantsLayer = true
-        layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-        layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.55).cgColor
-        layer?.borderWidth = 1
-        layer?.cornerRadius = 16
+        super.init(
+            backgroundColor: .windowBackgroundColor,
+            borderColor: .separatorColor.withAlphaComponent(0.55),
+            cornerRadius: 16,
+            borderWidth: 1
+        )
 
         let appMark = NSTextField(labelWithString: definition.id == .codex ? "C" : "W")
         appMark.font = .systemFont(ofSize: 16, weight: .bold)
@@ -227,6 +266,7 @@ final class ProductCardView: NSView {
 
         let title = NSTextField(labelWithString: definition.title)
         title.font = .systemFont(ofSize: 15, weight: .semibold)
+        title.textColor = .labelColor
         let identity = NSStackView(views: [appMark, title])
         identity.orientation = .horizontal
         identity.alignment = .centerY
@@ -243,15 +283,21 @@ final class ProductCardView: NSView {
         recentTitle.font = .systemFont(ofSize: 11)
         recentTitle.textColor = .secondaryLabelColor
         themeLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        themeLabel.textColor = .labelColor
         themeLabel.lineBreakMode = .byTruncatingTail
-        let recent = NSStackView(views: [recentTitle, themeLabel])
-        recent.orientation = .vertical
-        recent.alignment = .leading
-        recent.spacing = 4
-        recent.edgeInsets = NSEdgeInsets(top: 10, left: 11, bottom: 10, right: 11)
-        recent.wantsLayer = true
-        recent.layer?.cornerRadius = 10
-        recent.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+        let recentContent = NSStackView(views: [recentTitle, themeLabel])
+        recentContent.orientation = .vertical
+        recentContent.alignment = .leading
+        recentContent.spacing = 4
+        recentContent.translatesAutoresizingMaskIntoConstraints = false
+        let recent = AppearanceSurfaceView(backgroundColor: .controlBackgroundColor, cornerRadius: 10)
+        recent.addSubview(recentContent)
+        NSLayoutConstraint.activate([
+            recentContent.leadingAnchor.constraint(equalTo: recent.leadingAnchor, constant: 11),
+            recentContent.trailingAnchor.constraint(equalTo: recent.trailingAnchor, constant: -11),
+            recentContent.topAnchor.constraint(equalTo: recent.topAnchor, constant: 10),
+            recentContent.bottomAnchor.constraint(equalTo: recent.bottomAnchor, constant: -10),
+        ])
 
         actionButton.target = self
         actionButton.action = #selector(actionClicked)
@@ -375,9 +421,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.center()
         window.isReleasedWhenClosed = false
 
-        let content = NSView()
-        content.wantsLayer = true
-        content.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        let content = AppearanceSurfaceView(backgroundColor: .windowBackgroundColor)
 
         let logo = BrandLogoView()
         logo.translatesAutoresizingMaskIntoConstraints = false
@@ -387,6 +431,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ])
         let title = NSTextField(labelWithString: "HeiGe 皮肤启动器")
         title.font = .systemFont(ofSize: 21, weight: .bold)
+        title.textColor = .labelColor
         let subtitle = NSTextField(labelWithString: "选择要恢复皮肤的产品")
         subtitle.font = .systemFont(ofSize: 12)
         subtitle.textColor = .secondaryLabelColor
