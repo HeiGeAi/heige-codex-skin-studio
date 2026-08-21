@@ -10,6 +10,14 @@ import test from "node:test";
 const execFileAsync = promisify(execFile);
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
 
+test("launcher shell scripts use portable mktemp templates", async () => {
+  const launchScript = await readFile(join(repositoryRoot, "scripts", "launch-skin.command"), "utf8");
+  const buildScript = await readFile(join(repositoryRoot, "scripts", "build-macos-launcher.command"), "utf8");
+
+  assert.match(launchScript, /mktemp[^\n]*heige-skin-launcher\.XXXXXX/);
+  assert.match(buildScript, /mktemp[^\n]*heige-native-launcher\.XXXXXX/);
+});
+
 async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), "heige-launcher-scripts-"));
   t.after(() => rm(root, { recursive: true, force: true }));

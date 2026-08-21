@@ -54,6 +54,11 @@ test("tracked source contains no backup assets or ignored reports", async () => 
   assert.equal(tracked.some((path) => path.startsWith("reports/")), false);
 });
 
+test("packaged Swift source has an explicit cross-platform LF contract", async () => {
+  const attributes = await readFile(new URL("../.gitattributes", import.meta.url), "utf8");
+  assert.match(attributes, /^\*\.swift text eol=lf$/m);
+});
+
 test("tracked skill artifact is the exact deterministic build of current source", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "heige-tracked-package-"));
   t.after(() => rm(directory, { recursive: true, force: true }));

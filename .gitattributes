@@ -3,6 +3,7 @@
 *.mjs text eol=lf
 *.command text eol=lf
 *.zsh text eol=lf
+*.swift text eol=lf
 *.md text eol=lf
 *.json text eol=lf
 *.yml text eol=lf

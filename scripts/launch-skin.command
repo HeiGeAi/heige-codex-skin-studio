@@ -5,7 +5,7 @@ umask 077
 ROOT="${0:A:h:h}"
 VERSION="${1:-}"
 PRODUCT="${2:-codex}"
-ERROR_FILE="$(/usr/bin/mktemp -t heige-skin-launcher)"
+ERROR_FILE="$(/usr/bin/mktemp "${TMPDIR:-/tmp}/heige-skin-launcher.XXXXXX")"
 trap '/bin/rm -f -- "$ERROR_FILE"' EXIT
 
 case "$PRODUCT" in

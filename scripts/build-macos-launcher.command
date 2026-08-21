@@ -5,7 +5,7 @@ umask 077
 ROOT="${0:A:h:h}"
 SOURCE="$ROOT/native/macos-launcher/main.swift"
 OUTPUT="$ROOT/assets/launcher/HeiGeSkinLauncher.bin"
-TEMP_DIR="$(/usr/bin/mktemp -d -t heige-native-launcher)"
+TEMP_DIR="$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/heige-native-launcher.XXXXXX")"
 trap '/bin/rm -rf -- "$TEMP_DIR"' EXIT
 
 [[ -f "$SOURCE" && ! -L "$SOURCE" ]] || {
