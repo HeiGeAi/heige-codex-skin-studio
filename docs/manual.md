@@ -39,7 +39,7 @@ macOS 安装需要已安装的 Codex Desktop。下载本仓库后：
 open "<仓库路径>/scripts/install.command"
 ```
 
-安装脚本会把工具放到 `~/.codex/heige-codex-skin-studio`，在 `$HOME/Applications` 创建或升级带 Miku 图标的「HeiGe 皮肤启动器」，并把 APP 注册到 macOS LaunchServices。默认安装流程会应用 Miku 预设。打开启动器后会显示 Codex 与 WorkBuddy 两张产品卡片，分别读取各自最近使用的皮肤。应用皮肤时目标 APP 可能被正常退出并以本机调试模式重新打开，当前任务请先保存。
+安装脚本会把工具放到 `~/.codex/heige-codex-skin-studio`，在 `$HOME/Applications` 创建或升级带 Miku 图标的「HeiGe 皮肤启动器」，并把 APP 注册到 macOS LaunchServices。默认安装流程会应用 Miku 预设。打开启动器后会显示 Codex 与 WorkBuddy 两张产品卡片，分别读取各自最近使用的皮肤。每张卡可打开或关闭当前产品皮肤；关闭只暂停当前会话并保留最近主题和常驻选择。底部「一键修复」会跳过未安装产品，对已安装产品执行干净重启并恢复最近皮肤，使用前请保存当前任务。
 
 之后的日常切换都在 Codex 顶部中间的 🎨 菜单里完成。想用自己的图片做皮肤：
 

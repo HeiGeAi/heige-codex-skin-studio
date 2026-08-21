@@ -217,6 +217,8 @@ test("archive is a strict runtime allowlist with fixed metadata", async (t) => {
     "heige-codex-skin-studio/payload/assets/launcher/LauncherLogo.png",
     "heige-codex-skin-studio/payload/assets/launcher/miku-launcher-icon.png",
     "heige-codex-skin-studio/payload/scripts/launch-skin.command",
+    "heige-codex-skin-studio/payload/scripts/close-skin.command",
+    "heige-codex-skin-studio/payload/scripts/repair-skin.command",
     "heige-codex-skin-studio/payload/scripts/enable-skin.command",
     "heige-codex-skin-studio/payload/scripts/resume.command",
     "heige-codex-skin-studio/payload/scripts/windows/install.bat",
@@ -305,8 +307,11 @@ test("archive is a strict runtime allowlist with fixed metadata", async (t) => {
     archive,
     "heige-codex-skin-studio/SKILL.md",
   );
-  assert.match(packagedSkill, /专用 `launch-skin\.command` 与内部 `launcher-apply`/);
-  assert.match(packagedSkill, /保持 `persistenceEnabled=false`/);
+  assert.match(
+    packagedSkill,
+    /打开、关闭和修复必须分别走版本绑定的 `launcher-apply`、`launcher-close`、`launcher-repair`/,
+  );
+  assert.match(packagedSkill, /关闭只暂停当前会话并保留最近主题和常驻选择/);
 });
 
 test("CLI requires exact explicit absolute output and epoch arguments", async (t) => {

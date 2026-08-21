@@ -1159,6 +1159,8 @@ test("lifecycle shell entrypoints contain no independent process or service muta
     "pause.command",
     "resume.command",
     "restore.command",
+    "close-skin.command",
+    "repair-skin.command",
     "disable-persist.command",
     "lib/launch-codex.zsh",
   ];

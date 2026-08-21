@@ -118,6 +118,8 @@ const COMMAND_OPTIONS = new Map([
   ["customize", new Set(["image", "name", "port", "app"])],
   ["apply", new Set(["port", "prefer-stored", "restart", "theme", "app"])],
   ["launcher-apply", new Set(["launcher-version", "port", "theme", "app"])],
+  ["launcher-close", new Set(["launcher-version", "port", "app"])],
+  ["launcher-repair", new Set(["launcher-version", "port", "app"])],
   ["launcher-state", new Set(["app"])],
   ["enable-skin", new Set(["port", "theme", "app"])],
   ["set-persistence", new Set(["port", "revision", "app"])],
@@ -2826,7 +2828,9 @@ async function applySelectedTheme({
   const before = await deps.readState();
   if (restartRequired) {
     assertDirectLifecycleRestartSupported(deps.platform, command);
-    const continuationCommand = command === "launcher-apply" ? "launcher-apply" : "apply";
+    const continuationCommand = command === "launcher-apply" || command === "launcher-repair"
+      ? "launcher-apply"
+      : "apply";
     const queued = await deps.restartDetached({
       launchMode: "cdp",
       port,
@@ -3016,13 +3020,13 @@ export async function runCli(argv, overrides = {}) {
       forceRestart: Boolean(args.restart),
     });
   }
-  if (command === "launcher-apply") {
+  if (["launcher-apply", "launcher-close", "launcher-repair"].includes(command)) {
     try {
       if (selectedControllerPlatform !== "darwin") {
-        throw new Error("launcher-apply 只支持 macOS 桌面产品");
+        throw new Error(`${command} 只支持 macOS 桌面产品`);
       }
       if (typeof args["launcher-version"] !== "string") {
-        throw new Error("launcher-apply 缺少 --launcher-version");
+        throw new Error(`${command} 缺少 --launcher-version`);
       }
       const currentVersion = await deps.readCurrentPackageVersion();
       if (args["launcher-version"] !== currentVersion) {
@@ -3035,6 +3039,17 @@ export async function runCli(argv, overrides = {}) {
       if (lockHealth?.recovered === true) {
         await deps.logLauncherRecovery(lockHealth).catch(() => false);
       }
+      if (command === "launcher-close") {
+        let preflight;
+        try {
+          preflight = await deps.preflightLifecycle({ command, port, requirePort: true });
+        } catch (error) {
+          if (error?.code === "CDP_NOT_OWNED") return { mode: "closed" };
+          throw error;
+        }
+        const controller = await lifecycleController(deps, { port, preflight });
+        return await withStoppedController(controller, () => controller.pause());
+      }
       const stored = args.theme === undefined ? await deps.readState() : null;
       const themeId = args.theme ?? stored?.lastNonNativeThemeId ?? DEFAULT_THEME_ID;
       return await applySelectedTheme({
@@ -3044,6 +3059,7 @@ export async function runCli(argv, overrides = {}) {
         port,
         preferStored: true,
         themeId,
+        forceRestart: command === "launcher-repair",
         launcherVersion: currentVersion,
       });
     } catch (error) {

@@ -71,6 +71,7 @@ function lifecycleDeps(overrides = {}) {
     controller: [],
     createController: [],
     detached: [],
+    lifecycleActions: [],
     launcherLock: [],
     launcherLogs: [],
     offlineDisable: [],
@@ -80,9 +81,18 @@ function lifecycleDeps(overrides = {}) {
     runController: [],
   };
   const controller = {
-    pause: async () => ({ mode: "paused" }),
-    resume: async () => ({ mode: "active" }),
-    restore: async () => ({ mode: "restoring", persistenceEnabled: false }),
+    pause: async () => {
+      calls.lifecycleActions.push("pause");
+      return { mode: "paused" };
+    },
+    resume: async () => {
+      calls.lifecycleActions.push("resume");
+      return { mode: "active" };
+    },
+    restore: async () => {
+      calls.lifecycleActions.push("restore");
+      return { mode: "restoring", persistenceEnabled: false };
+    },
     setPersistence: async ({ expectedRevision, enabled }) => {
       calls.controller.push({ expectedRevision, enabled });
       state = { ...state, persistenceEnabled: enabled, revision: state.revision + 1 };
@@ -706,6 +716,102 @@ test("launcher-apply preserves its command identity across a native Codex restar
     themeId: "miku-488137",
   });
   assert.deepEqual(fx.calls.launcherLock, [{ port: 9341 }]);
+});
+
+test("launcher-close version-binds the product and pauses only the current skin session", async () => {
+  const fx = lifecycleDeps({
+    readCurrentPackageVersion: async () => "5.5.13",
+    initialState: {
+      schemaVersion: 2,
+      persistenceEnabled: true,
+      selectedThemeId: "genshin-night",
+      lastNonNativeThemeId: "genshin-night",
+      controlToken: Buffer.alloc(32, 44).toString("base64url"),
+      lastTransitionNonce: null,
+      revision: 7,
+    },
+  });
+
+  assert.deepEqual(await runCli([
+    "launcher-close",
+    "--launcher-version",
+    "5.5.13",
+    "--app",
+    "workbuddy",
+    "--port",
+    "9342",
+  ], fx.deps), { mode: "paused" });
+  assert.deepEqual(fx.calls.launcherLock, [{ port: 9342 }]);
+  assert.deepEqual(fx.calls.lifecycleActions, ["pause"]);
+  assert.equal(fx.calls.preflight.at(-1).command, "launcher-close");
+  assert.equal(fx.calls.preflight.at(-1).requirePort, true);
+  assert.equal(fx.state.persistenceEnabled, true);
+  assert.equal(fx.state.lastNonNativeThemeId, "genshin-night");
+
+  await assert.rejects(
+    runCli(["launcher-close", "--launcher-version", "5.5.12"], fx.deps),
+    /版本.*不匹配|重新运行安装器/,
+  );
+});
+
+test("launcher-close is idempotent when the product already has no owned skin port", async () => {
+  const fx = lifecycleDeps({
+    readCurrentPackageVersion: async () => "5.5.13",
+    preflightLifecycle: async () => {
+      const error = new Error("当前产品已经是原生界面");
+      error.code = "CDP_NOT_OWNED";
+      throw error;
+    },
+  });
+
+  assert.deepEqual(await runCli([
+    "launcher-close",
+    "--launcher-version",
+    "5.5.13",
+  ], fx.deps), { mode: "closed" });
+  assert.deepEqual(fx.calls.lifecycleActions, []);
+  assert.equal(fx.calls.createController.length, 0);
+});
+
+test("launcher-repair force-restarts and resumes through the version-bound launcher command", async () => {
+  const fx = lifecycleDeps({
+    readCurrentPackageVersion: async () => "5.5.13",
+    initialState: {
+      schemaVersion: 2,
+      persistenceEnabled: false,
+      selectedThemeId: "genshin-night",
+      lastNonNativeThemeId: "genshin-night",
+      controlToken: Buffer.alloc(32, 45).toString("base64url"),
+      lastTransitionNonce: null,
+      revision: 9,
+    },
+    listThemes: async () => [
+      { id: "miku-488137", name: "Miku", path: "/bundle/themes/miku-488137" },
+      { id: "genshin-night", name: "Genshin", path: "/bundle/themes/genshin-night" },
+    ],
+  });
+
+  assert.deepEqual(await runCli([
+    "launcher-repair",
+    "--launcher-version",
+    "5.5.13",
+    "--port",
+    "9341",
+  ], fx.deps), {
+    mode: "restarting",
+    persistenceEnabled: false,
+    queued: true,
+  });
+  assert.deepEqual(fx.calls.launcherLock, [{ port: 9341 }]);
+  assert.equal(fx.calls.registerEphemeral.length, 0);
+  assert.equal(fx.calls.preflight.at(-1).command, "launcher-repair");
+  assert.deepEqual(fx.calls.detached.at(-1).afterLaunch, {
+    command: "launcher-apply",
+    launcherVersion: "5.5.13",
+    themeId: "genshin-night",
+  });
+  assert.equal(fx.state.persistenceEnabled, false);
+  assert.equal(fx.state.lastNonNativeThemeId, "genshin-night");
 });
 
 test("launcher restores the last theme after a native restart and CLI cannot re-enable persistence", async () => {

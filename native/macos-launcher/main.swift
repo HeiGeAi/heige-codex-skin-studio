@@ -20,8 +20,8 @@ struct ProductDefinition {
             id: .codex,
             title: "Codex",
             badge: "会话皮肤",
-            actionTitle: "恢复 Codex 皮肤",
-            note: "恢复当前会话，可在 Codex 顶部菜单开启常驻。",
+            actionTitle: "打开 Codex 皮肤",
+            note: "打开最近皮肤，关闭只影响当前会话。",
             bundleIdentifier: "com.openai.codex"
         ),
         ProductDefinition(
@@ -29,7 +29,7 @@ struct ProductDefinition {
             title: "WorkBuddy",
             badge: "单次恢复",
             actionTitle: "打开 WorkBuddy 皮肤",
-            note: "一次性恢复，重启 WorkBuddy 后可再次打开。",
+            note: "打开最近皮肤，关闭只影响当前会话。",
             bundleIdentifier: "com.workbuddy.workbuddy"
         ),
     ]
@@ -329,12 +329,14 @@ final class BrandLogoView: AppearanceSurfaceView {
 final class ProductCardView: AppearanceSurfaceView {
     let definition: ProductDefinition
     var onAction: ((ProductDefinition) -> Void)?
+    var onClose: ((ProductDefinition) -> Void)?
 
     private let accentColor: NSColor
     private let appIcon = NSImageView()
     private let statusPill: StatusPillView
     private let themeLabel = NSTextField(labelWithString: "正在读取最近皮肤…")
     private let actionButton = NSButton(title: "读取中…", target: nil, action: nil)
+    private let closeButton = NSButton(title: "关闭皮肤", target: nil, action: nil)
     private let errorLabel = NSTextField(wrappingLabelWithString: "")
     private var state: LauncherProductState?
 
@@ -455,7 +457,25 @@ final class ProductCardView: AppearanceSurfaceView {
         actionButton.contentTintColor = .white
         actionButton.translatesAutoresizingMaskIntoConstraints = false
         actionButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
-        setActionEnabled(false)
+
+        closeButton.target = self
+        closeButton.action = #selector(closeClicked)
+        closeButton.bezelStyle = .rounded
+        closeButton.controlSize = .large
+        closeButton.font = .systemFont(ofSize: 12, weight: .medium)
+        closeButton.image = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: nil)
+        closeButton.imagePosition = .imageLeading
+        closeButton.contentTintColor = .secondaryLabelColor
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        closeButton.widthAnchor.constraint(equalToConstant: 108).isActive = true
+        closeButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
+
+        let actionRow = NSStackView(views: [actionButton, closeButton])
+        actionRow.orientation = .horizontal
+        actionRow.alignment = .centerY
+        actionRow.distribution = .fill
+        actionRow.spacing = 8
+        setControlsEnabled(false)
 
         let note = NSTextField(wrappingLabelWithString: definition.note)
         note.font = .systemFont(ofSize: 10.5)
@@ -467,7 +487,7 @@ final class ProductCardView: AppearanceSurfaceView {
 
         let cardSpacer = NSView()
         cardSpacer.setContentHuggingPriority(.defaultLow, for: .vertical)
-        let stack = NSStackView(views: [header, recent, actionButton, cardSpacer, note, errorLabel])
+        let stack = NSStackView(views: [header, recent, actionRow, cardSpacer, note, errorLabel])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 12
@@ -480,7 +500,7 @@ final class ProductCardView: AppearanceSurfaceView {
             stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -16),
             header.widthAnchor.constraint(equalTo: stack.widthAnchor),
             recent.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            actionButton.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            actionRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             widthAnchor.constraint(equalToConstant: 351),
             heightAnchor.constraint(equalToConstant: 286),
         ])
@@ -493,6 +513,10 @@ final class ProductCardView: AppearanceSurfaceView {
         onAction?(definition)
     }
 
+    @objc private func closeClicked() {
+        onClose?(definition)
+    }
+
     func showReady(_ newState: LauncherProductState) {
         state = newState
         statusPill.update(
@@ -501,7 +525,7 @@ final class ProductCardView: AppearanceSurfaceView {
         )
         themeLabel.stringValue = newState.themeName
         actionButton.title = definition.actionTitle
-        setActionEnabled(newState.appInstalled)
+        setControlsEnabled(newState.appInstalled)
         errorLabel.stringValue = ""
         errorLabel.isHidden = true
         loadApplicationIcon(preferredPath: newState.appPath)
@@ -512,7 +536,7 @@ final class ProductCardView: AppearanceSurfaceView {
         statusPill.update(text: "读取失败", tint: .systemRed)
         themeLabel.stringValue = "无法读取最近皮肤"
         actionButton.title = "重新读取"
-        setActionEnabled(true)
+        setControlsEnabled(true)
         errorLabel.stringValue = message
         errorLabel.isHidden = false
     }
@@ -520,7 +544,7 @@ final class ProductCardView: AppearanceSurfaceView {
     func showRunning() {
         statusPill.update(text: "恢复中", tint: .systemOrange)
         actionButton.title = "正在恢复…"
-        setActionEnabled(false)
+        setControlsEnabled(false)
         errorLabel.stringValue = ""
         errorLabel.isHidden = true
     }
@@ -528,9 +552,49 @@ final class ProductCardView: AppearanceSurfaceView {
     func showActionFailure(_ message: String) {
         statusPill.update(text: "恢复失败", tint: .systemRed)
         actionButton.title = "恢复失败，点击重试"
-        setActionEnabled(state?.appInstalled == true)
+        setControlsEnabled(state?.appInstalled == true)
         errorLabel.stringValue = message
         errorLabel.isHidden = false
+    }
+
+    func showClosing() {
+        statusPill.update(text: "关闭中", tint: .systemOrange)
+        actionButton.title = definition.actionTitle
+        setControlsEnabled(false)
+        errorLabel.stringValue = ""
+        errorLabel.isHidden = true
+    }
+
+    func showClosed() {
+        statusPill.update(text: "已关闭", tint: .secondaryLabelColor)
+        actionButton.title = definition.actionTitle
+        setControlsEnabled(state?.appInstalled == true)
+        errorLabel.stringValue = ""
+        errorLabel.isHidden = true
+    }
+
+    func showCloseFailure(_ message: String) {
+        statusPill.update(text: "关闭失败", tint: .systemRed)
+        actionButton.title = definition.actionTitle
+        setControlsEnabled(state?.appInstalled == true)
+        errorLabel.stringValue = message
+        errorLabel.isHidden = false
+    }
+
+    func showRepairing() {
+        statusPill.update(text: "修复中", tint: .systemOrange)
+        actionButton.title = "正在修复…"
+        setControlsEnabled(false)
+        errorLabel.stringValue = ""
+        errorLabel.isHidden = true
+    }
+
+    func showRepairQueued() {
+        statusPill.update(text: "修复已启动", tint: .systemGreen)
+        actionButton.title = definition.actionTitle
+        setControlsEnabled(false)
+        errorLabel.stringValue = ""
+        errorLabel.isHidden = true
     }
 
     private func loadApplicationIcon(preferredPath: String? = nil) {
@@ -551,9 +615,11 @@ final class ProductCardView: AppearanceSurfaceView {
         )
     }
 
-    private func setActionEnabled(_ enabled: Bool) {
+    private func setControlsEnabled(_ enabled: Bool) {
         actionButton.isEnabled = enabled
         actionButton.alphaValue = enabled ? 1 : 0.48
+        closeButton.isEnabled = enabled
+        closeButton.alphaValue = enabled ? 1 : 0.48
     }
 
     var currentState: LauncherProductState? { state }
@@ -565,6 +631,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var installRoot: URL?
     private var launcherVersion: String?
     private var actionInFlight = false
+    private var loadedProducts = Set<ProductID>()
+    private let repairButton = NSButton(title: "一键修复", target: nil, action: nil)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -621,7 +689,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let title = NSTextField(labelWithString: "HeiGe 皮肤启动器")
         title.font = .systemFont(ofSize: 24, weight: .semibold)
         title.textColor = .labelColor
-        let subtitle = NSTextField(labelWithString: "一键恢复 Codex 与 WorkBuddy 的最近皮肤")
+        let subtitle = NSTextField(labelWithString: "打开、关闭或一键修复 Codex 与 WorkBuddy 皮肤")
         subtitle.font = .systemFont(ofSize: 12)
         subtitle.textColor = .secondaryLabelColor
         let textStack = NSStackView(views: [title, subtitle])
@@ -646,7 +714,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let definitions = ProductDefinition.all
         let productCards = definitions.map { definition -> ProductCardView in
             let card = ProductCardView(definition: definition)
-            card.onAction = { [weak self] selected in self?.performAction(selected) }
+            card.onAction = { [weak self] selected in self?.performOpen(selected) }
+            card.onClose = { [weak self] selected in self?.performClose(selected) }
             cards[definition.id] = card
             return card
         }
@@ -660,6 +729,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let workbuddyPort = StatusPillView(text: "WorkBuddy · 9342", tint: .systemIndigo)
         let footerSpacer = NSView()
         footerSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        repairButton.target = self
+        repairButton.action = #selector(performRepair)
+        repairButton.image = NSImage(systemSymbolName: "wand.and.stars", accessibilityDescription: nil)
+        repairButton.imagePosition = .imageLeading
+        repairButton.bezelStyle = .rounded
+        repairButton.controlSize = .small
+        repairButton.font = .systemFont(ofSize: 11, weight: .semibold)
+        repairButton.contentTintColor = .systemTeal
+        repairButton.setAccessibilityLabel("一键修复已安装产品的皮肤")
+        repairButton.isEnabled = false
         let diagnostics = NSButton(title: "诊断与日志", target: self, action: #selector(openDiagnostics))
         diagnostics.image = NSImage(
             systemSymbolName: "wrench.and.screwdriver.fill",
@@ -669,7 +748,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         diagnostics.isBordered = false
         diagnostics.contentTintColor = .controlAccentColor
         diagnostics.font = .systemFont(ofSize: 11, weight: .medium)
-        let footer = NSStackView(views: [safety, codexPort, workbuddyPort, footerSpacer, diagnostics])
+        let footer = NSStackView(views: [safety, codexPort, workbuddyPort, footerSpacer, repairButton, diagnostics])
         footer.orientation = .horizontal
         footer.alignment = .centerY
         footer.distribution = .fill
@@ -734,11 +813,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 case .success(let state): card.showReady(state)
                 case .failure(let error): card.showLoadingFailure(self.safeMessage(error.localizedDescription))
                 }
+                self.loadedProducts.insert(definition.id)
+                self.updateRepairAvailability()
             }
         }
     }
 
-    private func performAction(_ definition: ProductDefinition) {
+    private func performOpen(_ definition: ProductDefinition) {
         guard !actionInFlight else { NSSound.beep(); return }
         guard let card = cards[definition.id] else { return }
         guard card.currentState?.appInstalled == true else {
@@ -772,9 +853,127 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 case .failure(let error):
                     self.actionInFlight = false
                     card.showActionFailure(self.safeMessage(error.localizedDescription))
+                    self.updateRepairAvailability()
                 }
             }
         }
+    }
+
+    private func performClose(_ definition: ProductDefinition) {
+        guard !actionInFlight else { NSSound.beep(); return }
+        guard let card = cards[definition.id] else { return }
+        guard card.currentState?.appInstalled == true else {
+            loadState(definition)
+            return
+        }
+        guard let version = launcherVersion else {
+            card.showCloseFailure("启动器版本未加载")
+            return
+        }
+        actionInFlight = true
+        card.showClosing()
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            let result: Result<Void, Error> = Result {
+                let script = try self.fixedScript("close-skin.command")
+                guard let root = self.installRoot else { throw LauncherError.invalidBundle("稳定安装路径未加载") }
+                let output = try ProcessRunner.run(
+                    executable: script,
+                    arguments: [version, definition.id.rawValue],
+                    currentDirectory: root
+                )
+                guard output.status == 0 else {
+                    throw LauncherError.commandFailed(self.safeMessage(output.stderr))
+                }
+            }
+            DispatchQueue.main.async {
+                self.actionInFlight = false
+                switch result {
+                case .success: card.showClosed()
+                case .failure(let error): card.showCloseFailure(self.safeMessage(error.localizedDescription))
+                }
+                self.updateRepairAvailability()
+            }
+        }
+    }
+
+    @objc private func performRepair() {
+        guard !actionInFlight else { NSSound.beep(); return }
+        guard let version = launcherVersion else {
+            showRepairSummary(successes: [], failures: ["启动器版本未加载"])
+            return
+        }
+        let installed = ProductDefinition.all.filter { definition in
+            cards[definition.id]?.currentState?.appInstalled == true
+        }
+        guard !installed.isEmpty else {
+            showRepairSummary(successes: [], failures: ["没有找到可修复的 Codex 或 WorkBuddy"])
+            return
+        }
+
+        actionInFlight = true
+        repairButton.isEnabled = false
+        repairButton.title = "修复中…"
+        for definition in installed { cards[definition.id]?.showRepairing() }
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            var successes: [String] = []
+            var failures: [String] = []
+            for definition in installed {
+                do {
+                    let script = try self.fixedScript("repair-skin.command")
+                    guard let root = self.installRoot else { throw LauncherError.invalidBundle("稳定安装路径未加载") }
+                    let output = try ProcessRunner.run(
+                        executable: script,
+                        arguments: [version, definition.id.rawValue],
+                        currentDirectory: root
+                    )
+                    guard output.status == 0 else {
+                        throw LauncherError.commandFailed(self.safeMessage(output.stderr))
+                    }
+                    successes.append(definition.title)
+                } catch {
+                    failures.append("\(definition.title)：\(self.safeMessage(error.localizedDescription))")
+                }
+            }
+            DispatchQueue.main.async {
+                self.actionInFlight = false
+                self.repairButton.title = "一键修复"
+                for definition in installed {
+                    if successes.contains(definition.title) {
+                        self.cards[definition.id]?.showRepairQueued()
+                    } else if let failure = failures.first(where: { $0.hasPrefix(definition.title + "：") }) {
+                        self.cards[definition.id]?.showActionFailure(failure)
+                    }
+                }
+                self.updateRepairAvailability()
+                self.showRepairSummary(successes: successes, failures: failures)
+            }
+        }
+    }
+
+    private func showRepairSummary(successes: [String], failures: [String]) {
+        let alert = NSAlert()
+        alert.messageText = failures.isEmpty ? "皮肤修复已启动" : "皮肤修复结果"
+        var lines: [String] = []
+        if !successes.isEmpty {
+            lines.append("已启动：\(successes.joined(separator: "、"))。目标应用正在重启并恢复最近皮肤。")
+        }
+        if !failures.isEmpty { lines.append("未完成：\(failures.joined(separator: "；"))") }
+        alert.informativeText = lines.joined(separator: "\n")
+        alert.alertStyle = failures.isEmpty ? .informational : .warning
+        alert.addButton(withTitle: "好")
+        alert.runModal()
+        if failures.isEmpty && !successes.isEmpty { NSApp.terminate(nil) }
+    }
+
+    private func updateRepairAvailability() {
+        let stateLoadingFinished = loadedProducts.count == ProductDefinition.all.count
+        let hasInstalledProduct = ProductDefinition.all.contains { definition in
+            cards[definition.id]?.currentState?.appInstalled == true
+        }
+        repairButton.isEnabled = !actionInFlight && stateLoadingFinished && hasInstalledProduct
     }
 
     private func activateTarget(_ definition: ProductDefinition, state: LauncherProductState?) {

@@ -40,15 +40,15 @@ Windows 用户也可双击 `scripts\install.bat`。Windows 入口只转发到包
 
 - `apply`：仅应用当前会话，不改变下次启动的常驻选择。
 - 顶部菜单「皮肤常驻」开关是唯一受支持的开启常驻入口。打开后下次启动继续使用；关闭后本次继续使用，下次启动恢复原生界面。
-- 「启用皮肤」与「开启常驻」是两个意图。关闭后，macOS 打开 `$HOME/Applications/HeiGe 皮肤启动器.app` 会通过专用 `launch-skin.command` 与内部 `launcher-apply` 启动或受控重启官方 Codex，恢复当前会话的最近非原生主题，并保持 `persistenceEnabled=false`。
+- 「启用皮肤」与「开启常驻」是两个意图。macOS 打开 `$HOME/Applications/HeiGe 皮肤启动器.app` 后，可通过固定入口打开或关闭 Codex 与 WorkBuddy 当前皮肤。关闭只暂停当前会话并保留最近主题和常驻选择；一键修复会强制干净重启已安装产品并恢复最近皮肤。
 - `enable-skin` 和 `enable-skin.command` 都是 session-only `apply` 的兼容名，只恢复当前会话，常驻选择保持不变。
 - 用户明确要求常驻时，先用启动器或 `apply` 恢复当前会话，再提醒用户在顶部菜单显式打开常驻开关。Agent 不得代替用户改成 `true`。
 - `enable-persist.command` 是弃用的非零退出入口，不得将它当作上述步骤的替代方案。
 - 启动器未显式指定主题时，优先恢复上次非原生主题，只有没有历史选择时才使用 `miku-488137`。
 
-macOS 安装必须创建或升级带 Miku 图标的 Schema 4 原生双产品启动器，完成 universal 二进制校验、本地 ad hoc 完整性签名和 LaunchServices 注册。不得把该签名描述成 Apple Developer ID 或公证。启动器只恢复 Codex 或 WorkBuddy 各自最近皮肤，不在面板内选择主题，不为 WorkBuddy 开启常驻。`launcher-apply` 只允许对明确的静态 `LOCK_CHAIN_CORRUPT` 做一次安全恢复：先证明相关服务、进程、锁声明和外来 CDP listener 均不活跃，严格校验状态与用户主题，整体备份旧状态根后再重建。普通锁竞争、未知内容或第二次失败必须停止。失败详情进入受限、轮转的产品日志，用户同时在原生面板看到错误。
+macOS 安装必须创建或升级带 Miku 图标的 Schema 5 原生双产品启动器，完成 universal 二进制校验、本地 ad hoc 完整性签名和 LaunchServices 注册。不得把该签名描述成 Apple Developer ID 或公证。启动器不在面板内选择主题，不为 WorkBuddy 开启常驻。打开、关闭和修复必须分别走版本绑定的 `launcher-apply`、`launcher-close`、`launcher-repair`；Codex 固定使用 9341，WorkBuddy 固定使用 9342。启动器只允许对明确的静态 `LOCK_CHAIN_CORRUPT` 做一次安全恢复：先证明相关服务、进程、锁声明和外来 CDP listener 均不活跃，严格校验状态与用户主题，整体备份旧状态根后再重建。普通锁竞争、未知内容或第二次失败必须停止。失败详情进入受限、轮转的产品日志，用户同时在原生面板看到错误。
 
-macOS 稳定入口是 `scripts/launch-skin.command`、`scripts/apply.command`、`scripts/enable-skin.command`、`scripts/pause.command`、`scripts/resume.command` 和 `scripts/restore.command`。Windows 生命周期操作必须使用 `scripts\windows` 下的同名 `.ps1` 或 `.bat`，不得直接运行 Node CLI 代替 Windows Store/MSIX 激活或进程重启。Windows 彻底卸载必须使用 `scripts\windows\uninstall.ps1` 或 `scripts\windows\uninstall.bat`；该入口会清理当前用户计划任务、开始菜单、AppData 状态、残留控制器进程和稳定安装目录。若稳定安装目录已被手动删除，从源码目录运行卸载入口清理残留。需要完整退出 Codex/GPT 桌面端时，使用 `scripts\windows\close-codex.ps1` 或 `scripts\windows\close-codex.bat`。商店版若报 AppContainer 回环隔离，仅当用户明确允许一次管理员权限时才可调用 `scripts\windows\enable-loopback.bat`；不得每次 apply 静默提权，也不得复制或改 ACL `WindowsApps`。
+macOS 稳定入口是 `scripts/launch-skin.command`、`scripts/close-skin.command`、`scripts/repair-skin.command`、`scripts/apply.command`、`scripts/enable-skin.command`、`scripts/pause.command`、`scripts/resume.command` 和 `scripts/restore.command`。Windows 生命周期操作必须使用 `scripts\windows` 下的同名 `.ps1` 或 `.bat`，不得直接运行 Node CLI 代替 Windows Store/MSIX 激活或进程重启。Windows 彻底卸载必须使用 `scripts\windows\uninstall.ps1` 或 `scripts\windows\uninstall.bat`；该入口会清理当前用户计划任务、开始菜单、AppData 状态、残留控制器进程和稳定安装目录。若稳定安装目录已被手动删除，从源码目录运行卸载入口清理残留。需要完整退出 Codex/GPT 桌面端时，使用 `scripts\windows\close-codex.ps1` 或 `scripts\windows\close-codex.bat`。商店版若报 AppContainer 回环隔离，仅当用户明确允许一次管理员权限时才可调用 `scripts\windows\enable-loopback.bat`；不得每次 apply 静默提权，也不得复制或改 ACL `WindowsApps`。
 
 用户意图必须分开：
 
