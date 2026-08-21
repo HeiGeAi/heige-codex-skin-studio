@@ -280,7 +280,14 @@ test("浮层一律实底：半透明只给对话区，菜单和弹层透光就�
   }
 
   // 什么令牌都不读的那批浮层：只能按稳定类名钉实底
-  for (const hook of [".settings-modal", ".user-menu-popover", ".wb-popover", ".wb-dropdown", ".wb-modal"]) {
+  for (const hook of [
+    ".settings-modal",
+    ".user-menu-popover",
+    ".wb-popover",
+    ".wb-dropdown",
+    ".wb-modal",
+    ".ec-modal-card",
+  ]) {
     assert.ok(css.includes(`${hook},`) || css.includes(`${hook} {`), `浮层名单缺少 ${hook}`);
   }
 

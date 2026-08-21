@@ -421,13 +421,15 @@ body {
    这些浮层就跟着一起透了：设置弹层背后的对话正文直接印在设置文字上，两层字叠着没法读。
    上面那批 --wb-bg-modal / --cb-popover-bg 令牌已经改成实底，覆盖的是「读令牌」的那批浮层；
    这里补的是「什么底都不读」的那批，只能按稳定类名把实底显式钉上去。
+   专家团详情卡片 .ec-modal-card 会直接读取透明的 --wb-bg-primary，也必须显式补实底。
    遮罩层（*-overlay、*-mask）不在这份名单里：它本来就该是半透明的黑纱，
-   改成不透明整个界面会全黑。真机核对自 WorkBuddy 5.3.11 */
+   改成不透明整个界面会全黑。真机核对自 WorkBuddy 5.3.14 */
 .settings-modal,
 .settings-modal__nav,
 .user-menu-popover,
 .account-panel,
 .wb-modal,
+.ec-modal-card,
 .wb-drawer,
 .wb-popover,
 .wb-shadow-popover,
