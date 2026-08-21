@@ -287,13 +287,71 @@ test("浮层一律实底：半透明只给对话区，菜单和弹层透光就�
     ".wb-dropdown",
     ".wb-modal",
     ".ec-modal-card",
+    ".feedback-modal",
+    ".published-apps-list__progress-dialog",
+    ".custom-dropdown__menu",
+    ".tip-sound-select__menu",
+    ".wb-storage-confirm-popover",
+    ".models-settings-panel__delete-dialog",
+    ".collab-modal__container",
+    ".mcp-modal",
+    ".connector-center__popup-menu",
+    ".agent-mail-detail-dialog",
+    ".tdoc-import-menu",
+    ".create-file-popover",
+    ".netdrive-selector-modal",
+    ".action-popover__menu",
+    ".collaborator-avatar-stack-popover",
+    ".compact-nav-dropdown",
+    ".expert-prompt-modal",
+    ".mcp-apps-panel__dropdown",
+    ".dc-drawer",
+    ".dc-launch-dialog",
+    ".dc-confirm-dialog",
+    ".skills-installed-dropdown",
+    ".skillhub-sort-dropdown-menu",
+    ".skill-detail-dropdown",
+    ".skills-add-dropdown",
+    ".skill-batch-update-modal",
+    ".ima-file-selector__dialog",
+    ".lexiang-picker-dialog",
+    ".search-result-modal",
+    ".doc-selector-modal",
+    ".wb-cascader-popover",
+    ".network-check-modal",
+    ".connector-qr-modal",
+    ".connector-token-config-modal",
+    ".cfp-context-menu",
+    ".cfp-blank-context-menu",
+    ".cfp-preview-modal",
+    ".cfp-preview-modal__dropdown",
+    ".cfp-card-dropdown",
+    ".cfp-version-modal",
+    ".cfp-folder-modal",
+    ".upload-modal",
+    ".upload-modal__context-menu",
+    ".upload-modal__folder-dialog",
+    ".preview-modal",
+    ".folder-picker-modal",
+    ".new-folder-modal",
+    ".project-detail-view__source-menu",
+    ".project-instruction-drawer",
+    ".conversation-search-modal",
+    ".conversation-context-menu",
   ]) {
     assert.ok(css.includes(`${hook},`) || css.includes(`${hook} {`), `浮层名单缺少 ${hook}`);
   }
 
+  assert.match(
+    css,
+    /body\.agent-ui-theme \.conversation-archive-dialog > \* \{[^}]*background: var\(--heige-solid\) !important;/,
+    "归档弹窗必须用高于宿主规则的稳定选择器钉实底",
+  );
+
   // BEM 子面板兜底：连字符和双下划线两种写法都得在，只写一种会漏掉添加模型框
   for (const suffix of ["-modal-overlay", "__modal-overlay", "-editor-overlay", "__editor-overlay", "__overlay"]) {
     assert.ok(css.includes(`[class$="${suffix}"] > *`), `兜底选择器缺少 ${suffix}`);
+    assert.ok(css.includes(`[class*="${suffix} "] > *`), `多 class 兜底选择器缺少 ${suffix}`);
   }
 
   // 遮罩自己必须留半透明黑纱，被兜底规则连坐会让整个界面全黑

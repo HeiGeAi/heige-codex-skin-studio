@@ -422,6 +422,9 @@ body {
    上面那批 --wb-bg-modal / --cb-popover-bg 令牌已经改成实底，覆盖的是「读令牌」的那批浮层；
    这里补的是「什么底都不读」的那批，只能按稳定类名把实底显式钉上去。
    专家团详情卡片 .ec-modal-card 会直接读取透明的 --wb-bg-primary，也必须显式补实底。
+   WorkBuddy 5.3.14 的全量已加载 CSS 审计还发现一批弹窗、抽屉和菜单直接读取
+   --wb-bg-primary / --cb-vscode-editor-background；这两个令牌为主画布透图而保持透明，
+   所以浮层根容器必须在这里逐个用稳定语义类名改回实底。
    遮罩层（*-overlay、*-mask）不在这份名单里：它本来就该是半透明的黑纱，
    改成不透明整个界面会全黑。真机核对自 WorkBuddy 5.3.14 */
 .settings-modal,
@@ -461,9 +464,68 @@ body {
 .notification-ctx-menu,
 .notification-action-menu,
 .welcome-screen-menu,
+.feedback-modal,
+.published-apps-list__progress-dialog,
+.custom-dropdown__menu,
+.tip-sound-select__menu,
+.wb-storage-confirm-popover,
+.models-settings-panel__delete-dialog,
+.collab-modal__container,
+.mcp-modal,
+.connector-center__popup-menu,
+.agent-mail-detail-dialog,
+.tdoc-import-menu,
+.create-file-popover,
+.netdrive-selector-modal,
+.action-popover__menu,
+.collaborator-avatar-stack-popover,
+.compact-nav-dropdown,
+.expert-prompt-modal,
+.mcp-apps-panel__dropdown,
+.dc-drawer,
+.dc-launch-dialog,
+.dc-confirm-dialog,
+.skills-installed-dropdown,
+.skillhub-sort-dropdown-menu,
+.skill-detail-dropdown,
+.skills-add-dropdown,
+.skill-batch-update-modal,
+.ima-file-selector__dialog,
+.lexiang-picker-dialog,
+.search-result-modal,
+.doc-selector-modal,
+.wb-cascader-popover,
+.network-check-modal,
+.connector-qr-modal,
+.connector-token-config-modal,
+.cfp-context-menu,
+.cfp-blank-context-menu,
+.cfp-preview-modal,
+.cfp-preview-modal__dropdown,
+.cfp-card-dropdown,
+.cfp-version-modal,
+.cfp-folder-modal,
+.upload-modal,
+.upload-modal__context-menu,
+.upload-modal__folder-dialog,
+.preview-modal,
+.folder-picker-modal,
+.new-folder-modal,
+.project-detail-view__source-menu,
+.project-instruction-drawer,
+.conversation-search-modal,
+.conversation-context-menu,
 .project-connectors-drawer {
   background: var(--heige-solid) !important;
   /* 常驻表面覆盖动态背景，禁用背景采样以避免滚动和流式输出逐帧重合成 */
+  backdrop-filter: none !important;
+}
+
+/* 归档确认卡片的宿主规则有两个 class 的特异性，并用 !important 把背景绑回透明的
+   --wb-bg-primary。只写 .conversation-archive-dialog > * 会被宿主压住；加上稳定的 body
+   主题根后特异性高一级，仍然只改卡片，不改 60% 黑色遮罩。 */
+body.agent-ui-theme .conversation-archive-dialog > * {
+  background: var(--heige-solid) !important;
   backdrop-filter: none !important;
 }
 
@@ -472,21 +534,31 @@ body {
    又容易被 .menu、.modal、.delete 这种同名普通元素误伤。
    这里按 WorkBuddy 自己的命名规律兜底：模态遮罩统一叫 *-modal-overlay、*__overlay、
    *-editor-overlay、*-dialog-overlay、*-confirm-overlay，遮罩的直接子节点就是那块面板。
-   用 [class$=] 收尾匹配而不是 [class*=] 包含匹配，是为了避开 *-loading-overlay、
+   用 [class$=] 收尾匹配，或用带尾随空格的 [class*=] 匹配非末位 class token，
+   是为了避开 *-loading-overlay、
    *-stencil-overlay、*-startup-overlay 这些同样带 overlay 但不是模态遮罩的元素，
    它们的子节点是转圈图标和图片裁剪框，垫上实底反而糊。
    连字符和 BEM 双下划线两种写法都要列：添加模型框的遮罩叫 panel__editor-overlay，
    只写 -editor-overlay 收尾匹配会漏掉它。
    遮罩自己一律不动，保持半透明黑纱。真机核对自 WorkBuddy 5.3.11 */
 [class$="__overlay"] > *,
+[class*="__overlay "] > *,
 [class$="-modal-overlay"] > *,
+[class*="-modal-overlay "] > *,
 [class$="__modal-overlay"] > *,
+[class*="__modal-overlay "] > *,
 [class$="-dialog-overlay"] > *,
+[class*="-dialog-overlay "] > *,
 [class$="__dialog-overlay"] > *,
+[class*="__dialog-overlay "] > *,
 [class$="-editor-overlay"] > *,
+[class*="-editor-overlay "] > *,
 [class$="__editor-overlay"] > *,
+[class*="__editor-overlay "] > *,
 [class$="-confirm-overlay"] > *,
-[class$="__confirm-overlay"] > * {
+[class*="-confirm-overlay "] > *,
+[class$="__confirm-overlay"] > *,
+[class*="__confirm-overlay "] > * {
   background: var(--heige-solid) !important;
   backdrop-filter: none !important;
 }
