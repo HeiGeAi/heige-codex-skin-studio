@@ -160,39 +160,35 @@ enum ProcessRunner {
 }
 
 final class BrandLogoView: NSView {
-    private let title = NSTextField(labelWithString: "H")
+    private let icon = NSImageView()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.cornerRadius = 14
         layer?.masksToBounds = true
-        let gradient = CAGradientLayer()
-        gradient.colors = [
-            NSColor(calibratedRed: 0.05, green: 0.79, blue: 0.70, alpha: 1).cgColor,
-            NSColor(calibratedRed: 0.25, green: 0.54, blue: 1, alpha: 1).cgColor,
-            NSColor(calibratedRed: 0.85, green: 0.41, blue: 0.91, alpha: 1).cgColor,
-        ]
-        gradient.startPoint = CGPoint(x: 0, y: 1)
-        gradient.endPoint = CGPoint(x: 1, y: 0)
-        layer?.addSublayer(gradient)
-        title.font = .systemFont(ofSize: 20, weight: .heavy)
-        title.textColor = .white
-        title.alignment = .center
-        title.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(title)
+        layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.28).cgColor
+        layer?.borderWidth = 0.5
+
+        if let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns") {
+            icon.image = NSImage(contentsOf: iconURL)
+        } else {
+            icon.image = NSApp.applicationIconImage
+        }
+        icon.imageScaling = .scaleProportionallyUpOrDown
+        icon.imageAlignment = .alignCenter
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        icon.setAccessibilityLabel("初音未来主题图标")
+        addSubview(icon)
         NSLayoutConstraint.activate([
-            title.centerXAnchor.constraint(equalTo: centerXAnchor),
-            title.centerYAnchor.constraint(equalTo: centerYAnchor),
+            icon.leadingAnchor.constraint(equalTo: leadingAnchor),
+            icon.trailingAnchor.constraint(equalTo: trailingAnchor),
+            icon.topAnchor.constraint(equalTo: topAnchor),
+            icon.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
     }
 
     required init?(coder: NSCoder) { nil }
-
-    override func layout() {
-        super.layout()
-        layer?.sublayers?.first?.frame = bounds
-    }
 }
 
 final class ProductCardView: NSView {

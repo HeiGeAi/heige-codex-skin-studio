@@ -36,6 +36,15 @@ test("native launcher source owns the exact two-product AppKit contract", async 
   }
 });
 
+test("native launcher header uses the bundled Miku app icon instead of a letter placeholder", async () => {
+  const source = await readFile(sourceUrl, "utf8");
+
+  assert.match(source, /Bundle\.main\.url\(forResource: "AppIcon", withExtension: "icns"\)/);
+  assert.match(source, /NSImageView/);
+  assert.match(source, /\.scaleProportionallyUpOrDown/);
+  assert.doesNotMatch(source, /labelWithString:\s*"H"/);
+});
+
 test("native launcher build is reproducible for both supported Mac architectures", async () => {
   const script = await readFile(buildUrl, "utf8");
   assert.match(script, /arm64-apple-macos13\.0/);

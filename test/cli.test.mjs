@@ -650,13 +650,13 @@ test("launcher-apply version-binds WorkBuddy while preserving one-shot semantics
       lastTransitionNonce: null,
       revision: 8,
     },
-    readCurrentPackageVersion: async () => "5.5.7",
+    readCurrentPackageVersion: async () => "5.5.8",
   });
 
   const result = await runCli([
     "launcher-apply",
     "--launcher-version",
-    "5.5.7",
+    "5.5.8",
     "--app",
     "workbuddy",
     "--port",
