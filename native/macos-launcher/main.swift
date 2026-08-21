@@ -19,17 +19,17 @@ struct ProductDefinition {
         ProductDefinition(
             id: .codex,
             title: "Codex",
-            badge: "当前会话",
+            badge: "会话皮肤",
             actionTitle: "恢复 Codex 皮肤",
-            note: "是否常驻仍由 Codex 顶部菜单决定。",
+            note: "恢复当前会话，可在 Codex 顶部菜单开启常驻。",
             bundleIdentifier: "com.openai.codex"
         ),
         ProductDefinition(
             id: .workbuddy,
             title: "WorkBuddy",
-            badge: "一次性皮肤",
+            badge: "单次恢复",
             actionTitle: "打开 WorkBuddy 皮肤",
-            note: "重启 WorkBuddy 后需要再次打开。",
+            note: "一次性恢复，重启 WorkBuddy 后可再次打开。",
             bundleIdentifier: "com.workbuddy.workbuddy"
         ),
     ]
@@ -198,14 +198,110 @@ class AppearanceSurfaceView: NSView {
     }
 }
 
+final class LauncherBackdropView: AppearanceSurfaceView {
+    private let cyan = NSColor(red: 0.22, green: 0.84, blue: 0.81, alpha: 1)
+    private let pink = NSColor(red: 0.96, green: 0.55, blue: 0.77, alpha: 1)
+
+    init() {
+        super.init(backgroundColor: .windowBackgroundColor)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        let accentRect = NSRect(x: 0, y: bounds.height - 3, width: bounds.width, height: 3)
+        NSGradient(starting: cyan, ending: pink)?.draw(in: accentRect, angle: 0)
+
+        let cyanGlow = NSBezierPath(ovalIn: NSRect(
+            x: -150,
+            y: bounds.height - 250,
+            width: 470,
+            height: 300
+        ))
+        NSGradient(
+            starting: cyan.withAlphaComponent(0.11),
+            ending: .clear
+        )?.draw(in: cyanGlow, relativeCenterPosition: .zero)
+
+        let pinkGlow = NSBezierPath(ovalIn: NSRect(
+            x: bounds.width - 300,
+            y: bounds.height - 210,
+            width: 420,
+            height: 250
+        ))
+        NSGradient(
+            starting: pink.withAlphaComponent(0.08),
+            ending: .clear
+        )?.draw(in: pinkGlow, relativeCenterPosition: .zero)
+    }
+}
+
+final class StatusPillView: NSView {
+    private let label = NSTextField(labelWithString: "")
+    private var tintColor: NSColor
+
+    init(text: String, tint: NSColor) {
+        tintColor = tint
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = 10
+        layer?.borderWidth = 0.5
+        label.stringValue = text
+        label.font = .systemFont(ofSize: 10, weight: .medium)
+        label.alignment = .center
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            label.topAnchor.constraint(equalTo: topAnchor, constant: 4),
+            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
+            heightAnchor.constraint(equalToConstant: 22),
+        ])
+        applyColors()
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        applyColors()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyColors()
+    }
+
+    func update(text: String, tint: NSColor) {
+        label.stringValue = text
+        tintColor = tint
+        applyColors()
+    }
+
+    private func applyColors() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            label.textColor = tintColor
+            layer?.backgroundColor = tintColor.withAlphaComponent(0.12).cgColor
+            layer?.borderColor = tintColor.withAlphaComponent(0.28).cgColor
+        }
+    }
+}
+
 final class BrandLogoView: AppearanceSurfaceView {
     private let icon = NSImageView()
 
     init() {
         super.init(
-            borderColor: .separatorColor.withAlphaComponent(0.28),
-            cornerRadius: 14,
-            borderWidth: 0.5
+            borderColor: .systemTeal.withAlphaComponent(0.6),
+            cornerRadius: 17,
+            borderWidth: 1
         )
         layer?.masksToBounds = true
 
@@ -234,7 +330,9 @@ final class ProductCardView: AppearanceSurfaceView {
     let definition: ProductDefinition
     var onAction: ((ProductDefinition) -> Void)?
 
-    private let badgeLabel = NSTextField(labelWithString: "读取中")
+    private let accentColor: NSColor
+    private let appIcon = NSImageView()
+    private let statusPill: StatusPillView
     private let themeLabel = NSTextField(labelWithString: "正在读取最近皮肤…")
     private let actionButton = NSButton(title: "读取中…", target: nil, action: nil)
     private let errorLabel = NSTextField(wrappingLabelWithString: "")
@@ -242,94 +340,151 @@ final class ProductCardView: AppearanceSurfaceView {
 
     init(definition: ProductDefinition) {
         self.definition = definition
+        accentColor = definition.id == .codex
+            ? NSColor(red: 0.12, green: 0.76, blue: 0.72, alpha: 1)
+            : NSColor(red: 0.46, green: 0.42, blue: 0.98, alpha: 1)
+        statusPill = StatusPillView(
+            text: "读取中",
+            tint: definition.id == .codex
+                ? NSColor(red: 0.12, green: 0.76, blue: 0.72, alpha: 1)
+                : NSColor(red: 0.46, green: 0.42, blue: 0.98, alpha: 1)
+        )
         super.init(
-            backgroundColor: .windowBackgroundColor,
-            borderColor: .separatorColor.withAlphaComponent(0.55),
-            cornerRadius: 16,
+            backgroundColor: .controlBackgroundColor.withAlphaComponent(0.9),
+            borderColor: accentColor.withAlphaComponent(0.32),
+            cornerRadius: 18,
             borderWidth: 1
         )
 
-        let appMark = NSTextField(labelWithString: definition.id == .codex ? "C" : "W")
-        appMark.font = .systemFont(ofSize: 16, weight: .bold)
-        appMark.textColor = .white
-        appMark.alignment = .center
-        appMark.wantsLayer = true
-        appMark.layer?.cornerRadius = 9
-        appMark.layer?.backgroundColor = definition.id == .codex
-            ? NSColor.black.cgColor
-            : NSColor.systemIndigo.cgColor
-        appMark.translatesAutoresizingMaskIntoConstraints = false
+        let appIconSurface = AppearanceSurfaceView(
+            backgroundColor: .windowBackgroundColor,
+            borderColor: accentColor.withAlphaComponent(0.25),
+            cornerRadius: 14,
+            borderWidth: 0.5
+        )
+        appIconSurface.translatesAutoresizingMaskIntoConstraints = false
+        appIcon.imageScaling = .scaleProportionallyUpOrDown
+        appIcon.imageAlignment = .alignCenter
+        appIcon.contentTintColor = accentColor
+        appIcon.translatesAutoresizingMaskIntoConstraints = false
+        appIcon.setAccessibilityLabel("\(definition.title) 应用图标")
+        appIconSurface.addSubview(appIcon)
         NSLayoutConstraint.activate([
-            appMark.widthAnchor.constraint(equalToConstant: 36),
-            appMark.heightAnchor.constraint(equalToConstant: 36),
+            appIconSurface.widthAnchor.constraint(equalToConstant: 52),
+            appIconSurface.heightAnchor.constraint(equalToConstant: 52),
+            appIcon.leadingAnchor.constraint(equalTo: appIconSurface.leadingAnchor, constant: 4),
+            appIcon.trailingAnchor.constraint(equalTo: appIconSurface.trailingAnchor, constant: -4),
+            appIcon.topAnchor.constraint(equalTo: appIconSurface.topAnchor, constant: 4),
+            appIcon.bottomAnchor.constraint(equalTo: appIconSurface.bottomAnchor, constant: -4),
         ])
 
         let title = NSTextField(labelWithString: definition.title)
-        title.font = .systemFont(ofSize: 15, weight: .semibold)
+        title.font = .systemFont(ofSize: 17, weight: .semibold)
         title.textColor = .labelColor
-        let identity = NSStackView(views: [appMark, title])
+        let target = NSTextField(labelWithString: definition.id == .codex ? "CODING DESKTOP" : "AI WORKSPACE")
+        target.font = .monospacedSystemFont(ofSize: 9, weight: .medium)
+        target.textColor = accentColor
+        let productText = NSStackView(views: [target, title])
+        productText.orientation = .vertical
+        productText.alignment = .leading
+        productText.spacing = 3
+        let identity = NSStackView(views: [appIconSurface, productText])
         identity.orientation = .horizontal
         identity.alignment = .centerY
-        identity.spacing = 10
+        identity.spacing = 12
 
-        badgeLabel.font = .systemFont(ofSize: 10, weight: .medium)
-        badgeLabel.textColor = .secondaryLabelColor
-        let header = NSStackView(views: [identity, badgeLabel])
+        let headerSpacer = NSView()
+        headerSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let header = NSStackView(views: [identity, headerSpacer, statusPill])
         header.orientation = .horizontal
         header.alignment = .centerY
         header.distribution = .fill
 
-        let recentTitle = NSTextField(labelWithString: "最近使用的皮肤")
-        recentTitle.font = .systemFont(ofSize: 11)
+        let themeIcon = NSImageView()
+        themeIcon.image = NSImage(
+            systemSymbolName: "paintpalette.fill",
+            accessibilityDescription: "最近皮肤"
+        )
+        themeIcon.contentTintColor = accentColor
+        themeIcon.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            themeIcon.widthAnchor.constraint(equalToConstant: 24),
+            themeIcon.heightAnchor.constraint(equalToConstant: 24),
+        ])
+        let recentTitle = NSTextField(labelWithString: "最近使用")
+        recentTitle.font = .systemFont(ofSize: 10, weight: .medium)
         recentTitle.textColor = .secondaryLabelColor
-        themeLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        themeLabel.font = .systemFont(ofSize: 14, weight: .semibold)
         themeLabel.textColor = .labelColor
         themeLabel.lineBreakMode = .byTruncatingTail
         let recentContent = NSStackView(views: [recentTitle, themeLabel])
         recentContent.orientation = .vertical
         recentContent.alignment = .leading
-        recentContent.spacing = 4
-        recentContent.translatesAutoresizingMaskIntoConstraints = false
-        let recent = AppearanceSurfaceView(backgroundColor: .controlBackgroundColor, cornerRadius: 10)
-        recent.addSubview(recentContent)
+        recentContent.spacing = 3
+        let recentRow = NSStackView(views: [themeIcon, recentContent])
+        recentRow.orientation = .horizontal
+        recentRow.alignment = .centerY
+        recentRow.spacing = 10
+        recentRow.translatesAutoresizingMaskIntoConstraints = false
+        let recent = AppearanceSurfaceView(
+            backgroundColor: .windowBackgroundColor,
+            borderColor: accentColor.withAlphaComponent(0.14),
+            cornerRadius: 12,
+            borderWidth: 0.5
+        )
+        recent.addSubview(recentRow)
         NSLayoutConstraint.activate([
-            recentContent.leadingAnchor.constraint(equalTo: recent.leadingAnchor, constant: 11),
-            recentContent.trailingAnchor.constraint(equalTo: recent.trailingAnchor, constant: -11),
-            recentContent.topAnchor.constraint(equalTo: recent.topAnchor, constant: 10),
-            recentContent.bottomAnchor.constraint(equalTo: recent.bottomAnchor, constant: -10),
+            recentRow.leadingAnchor.constraint(equalTo: recent.leadingAnchor, constant: 13),
+            recentRow.trailingAnchor.constraint(equalTo: recent.trailingAnchor, constant: -13),
+            recentRow.topAnchor.constraint(equalTo: recent.topAnchor, constant: 11),
+            recentRow.bottomAnchor.constraint(equalTo: recent.bottomAnchor, constant: -11),
         ])
 
         actionButton.target = self
         actionButton.action = #selector(actionClicked)
         actionButton.bezelStyle = .rounded
         actionButton.controlSize = .large
-        actionButton.isEnabled = false
+        actionButton.font = .systemFont(ofSize: 13, weight: .semibold)
+        actionButton.bezelColor = accentColor
+        actionButton.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: nil)
+        actionButton.imagePosition = .imageLeading
+        actionButton.isBordered = false
+        actionButton.wantsLayer = true
+        actionButton.layer?.cornerRadius = 8
+        actionButton.layer?.backgroundColor = accentColor.cgColor
+        actionButton.contentTintColor = .white
+        actionButton.translatesAutoresizingMaskIntoConstraints = false
+        actionButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
+        setActionEnabled(false)
 
         let note = NSTextField(wrappingLabelWithString: definition.note)
-        note.font = .systemFont(ofSize: 10)
+        note.font = .systemFont(ofSize: 10.5)
         note.textColor = .secondaryLabelColor
         errorLabel.font = .systemFont(ofSize: 10, weight: .medium)
         errorLabel.textColor = .systemRed
         errorLabel.maximumNumberOfLines = 2
+        errorLabel.isHidden = true
 
-        let stack = NSStackView(views: [header, recent, actionButton, note, errorLabel])
+        let cardSpacer = NSView()
+        cardSpacer.setContentHuggingPriority(.defaultLow, for: .vertical)
+        let stack = NSStackView(views: [header, recent, actionButton, cardSpacer, note, errorLabel])
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 10
+        stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
-            stack.topAnchor.constraint(equalTo: topAnchor, constant: 16),
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -14),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 18),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -18),
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: 18),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -16),
             header.widthAnchor.constraint(equalTo: stack.widthAnchor),
             recent.widthAnchor.constraint(equalTo: stack.widthAnchor),
             actionButton.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            errorLabel.heightAnchor.constraint(greaterThanOrEqualToConstant: 24),
-            widthAnchor.constraint(equalToConstant: 318),
-            heightAnchor.constraint(equalToConstant: 246),
+            widthAnchor.constraint(equalToConstant: 351),
+            heightAnchor.constraint(equalToConstant: 286),
         ])
+        loadApplicationIcon()
     }
 
     required init?(coder: NSCoder) { nil }
@@ -340,32 +495,65 @@ final class ProductCardView: AppearanceSurfaceView {
 
     func showReady(_ newState: LauncherProductState) {
         state = newState
-        badgeLabel.stringValue = newState.appInstalled ? definition.badge : "未安装"
+        statusPill.update(
+            text: newState.appInstalled ? definition.badge : "未安装",
+            tint: newState.appInstalled ? accentColor : .secondaryLabelColor
+        )
         themeLabel.stringValue = newState.themeName
         actionButton.title = definition.actionTitle
-        actionButton.isEnabled = newState.appInstalled
+        setActionEnabled(newState.appInstalled)
         errorLabel.stringValue = ""
+        errorLabel.isHidden = true
+        loadApplicationIcon(preferredPath: newState.appPath)
     }
 
     func showLoadingFailure(_ message: String) {
         state = nil
-        badgeLabel.stringValue = "读取失败"
+        statusPill.update(text: "读取失败", tint: .systemRed)
         themeLabel.stringValue = "无法读取最近皮肤"
         actionButton.title = "重新读取"
-        actionButton.isEnabled = true
+        setActionEnabled(true)
         errorLabel.stringValue = message
+        errorLabel.isHidden = false
     }
 
     func showRunning() {
+        statusPill.update(text: "恢复中", tint: .systemOrange)
         actionButton.title = "正在恢复…"
-        actionButton.isEnabled = false
+        setActionEnabled(false)
         errorLabel.stringValue = ""
+        errorLabel.isHidden = true
     }
 
     func showActionFailure(_ message: String) {
+        statusPill.update(text: "恢复失败", tint: .systemRed)
         actionButton.title = "恢复失败，点击重试"
-        actionButton.isEnabled = state?.appInstalled == true
+        setActionEnabled(state?.appInstalled == true)
         errorLabel.stringValue = message
+        errorLabel.isHidden = false
+    }
+
+    private func loadApplicationIcon(preferredPath: String? = nil) {
+        let preferredURL = preferredPath.map { URL(fileURLWithPath: $0, isDirectory: true) }
+        let appURL = preferredURL ?? NSWorkspace.shared.urlForApplication(
+            withBundleIdentifier: definition.bundleIdentifier
+        )
+        if let appURL, FileManager.default.fileExists(atPath: appURL.path) {
+            appIcon.image = NSWorkspace.shared.icon(forFile: appURL.path)
+            return
+        }
+        let fallbackSymbol = definition.id == .codex
+            ? "chevron.left.forwardslash.chevron.right"
+            : "person.2.fill"
+        appIcon.image = NSImage(
+            systemSymbolName: fallbackSymbol,
+            accessibilityDescription: "\(definition.title) 应用图标"
+        )
+    }
+
+    private func setActionEnabled(_ enabled: Bool) {
+        actionButton.isEnabled = enabled
+        actionButton.alphaValue = enabled ? 1 : 0.48
     }
 
     var currentState: LauncherProductState? { state }
@@ -412,7 +600,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func buildWindow() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 720, height: 450),
+            contentRect: NSRect(x: 0, y: 0, width: 780, height: 450),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -420,29 +608,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.title = "HeiGe 皮肤启动器"
         window.center()
         window.isReleasedWhenClosed = false
+        window.titlebarAppearsTransparent = true
 
-        let content = AppearanceSurfaceView(backgroundColor: .windowBackgroundColor)
+        let content = LauncherBackdropView()
 
         let logo = BrandLogoView()
         logo.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            logo.widthAnchor.constraint(equalToConstant: 50),
-            logo.heightAnchor.constraint(equalToConstant: 50),
+            logo.widthAnchor.constraint(equalToConstant: 62),
+            logo.heightAnchor.constraint(equalToConstant: 62),
         ])
         let title = NSTextField(labelWithString: "HeiGe 皮肤启动器")
-        title.font = .systemFont(ofSize: 21, weight: .bold)
+        title.font = .systemFont(ofSize: 24, weight: .semibold)
         title.textColor = .labelColor
-        let subtitle = NSTextField(labelWithString: "选择要恢复皮肤的产品")
+        let subtitle = NSTextField(labelWithString: "一键恢复 Codex 与 WorkBuddy 的最近皮肤")
         subtitle.font = .systemFont(ofSize: 12)
         subtitle.textColor = .secondaryLabelColor
         let textStack = NSStackView(views: [title, subtitle])
         textStack.orientation = .vertical
         textStack.alignment = .leading
         textStack.spacing = 4
-        let header = NSStackView(views: [logo, textStack])
+        let brand = NSStackView(views: [logo, textStack])
+        brand.orientation = .horizontal
+        brand.alignment = .centerY
+        brand.spacing = 14
+        let headerSpacer = NSView()
+        headerSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let platform = StatusPillView(
+            text: "MAC 专属 · \(launcherVersion ?? "未知版本")",
+            tint: .systemTeal
+        )
+        let header = NSStackView(views: [brand, headerSpacer, platform])
         header.orientation = .horizontal
         header.alignment = .centerY
-        header.spacing = 13
+        header.distribution = .fill
 
         let definitions = ProductDefinition.all
         let productCards = definitions.map { definition -> ProductCardView in
@@ -454,28 +653,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let cardStack = NSStackView(views: productCards)
         cardStack.orientation = .horizontal
         cardStack.alignment = .top
-        cardStack.spacing = 16
+        cardStack.spacing = 18
 
-        let isolation = NSTextField(labelWithString: "两个产品使用独立状态与端口：Codex 9341，WorkBuddy 9342")
-        isolation.font = .systemFont(ofSize: 10)
-        isolation.textColor = .secondaryLabelColor
-        let diagnostics = NSButton(title: "查看诊断与日志", target: self, action: #selector(openDiagnostics))
+        let safety = StatusPillView(text: "本机安全恢复", tint: .systemGreen)
+        let codexPort = StatusPillView(text: "Codex · 9341", tint: .systemTeal)
+        let workbuddyPort = StatusPillView(text: "WorkBuddy · 9342", tint: .systemIndigo)
+        let footerSpacer = NSView()
+        footerSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let diagnostics = NSButton(title: "诊断与日志", target: self, action: #selector(openDiagnostics))
+        diagnostics.image = NSImage(
+            systemSymbolName: "wrench.and.screwdriver.fill",
+            accessibilityDescription: nil
+        )
+        diagnostics.imagePosition = .imageLeading
         diagnostics.isBordered = false
         diagnostics.contentTintColor = .controlAccentColor
-        let footer = NSStackView(views: [isolation, diagnostics])
+        diagnostics.font = .systemFont(ofSize: 11, weight: .medium)
+        let footer = NSStackView(views: [safety, codexPort, workbuddyPort, footerSpacer, diagnostics])
         footer.orientation = .horizontal
         footer.alignment = .centerY
         footer.distribution = .fill
+        footer.spacing = 8
 
         let stack = NSStackView(views: [header, cardStack, footer])
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 20
+        stack.spacing = 18
         stack.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(stack)
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 26),
-            stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -26),
+            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 30),
+            stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -30),
             stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 24),
             stack.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -20),
             header.widthAnchor.constraint(equalTo: stack.widthAnchor),

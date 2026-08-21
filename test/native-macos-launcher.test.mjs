@@ -25,7 +25,7 @@ test("native launcher source owns the exact two-product AppKit contract", async 
     "ProductCardView",
     "正在恢复",
     "恢复失败",
-    "查看诊断与日志",
+    "诊断与日志",
     "HeiGeInstallRoot",
     "CFBundleShortVersionString",
     "schemaVersion == 1",
@@ -46,14 +46,26 @@ test("native launcher header uses its dedicated Miku logo instead of the Dock ap
   assert.doesNotMatch(source, /labelWithString:\s*"H"/);
 });
 
+test("native launcher uses real product app icons and a polished adaptive visual hierarchy", async () => {
+  const source = await readFile(sourceUrl, "utf8");
+
+  assert.match(source, /NSWorkspace\.shared\.urlForApplication\([\s\S]*?withBundleIdentifier:/);
+  assert.match(source, /NSWorkspace\.shared\.icon\(forFile:/);
+  assert.match(source, /final class LauncherBackdropView/);
+  assert.match(source, /final class StatusPillView/);
+  assert.match(source, /actionButton\.bezelColor = accentColor/);
+  assert.match(source, /NSImage\(systemSymbolName:/);
+  assert.doesNotMatch(source, /labelWithString: definition\.id == \.codex \? "C" : "W"/);
+});
+
 test("native launcher re-resolves every layer surface when macOS appearance changes", async () => {
   const source = await readFile(sourceUrl, "utf8");
 
   assert.match(source, /class AppearanceSurfaceView: NSView/);
   assert.match(source, /override func viewDidChangeEffectiveAppearance\(\)/);
   assert.match(source, /effectiveAppearance\.performAsCurrentDrawingAppearance/);
-  assert.match(source, /AppearanceSurfaceView\(backgroundColor: \.windowBackgroundColor/);
-  assert.match(source, /AppearanceSurfaceView\(backgroundColor: \.controlBackgroundColor/);
+  assert.match(source, /super\.init\(backgroundColor: \.windowBackgroundColor\)/);
+  assert.match(source, /backgroundColor: \.controlBackgroundColor\.withAlphaComponent/);
   assert.match(source, /super\.init\([\s\S]*backgroundColor: \.windowBackgroundColor/);
 
   for (const staleColor of [
