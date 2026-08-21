@@ -59,6 +59,12 @@ test("packaged Swift source has an explicit cross-platform LF contract", async (
   assert.match(attributes, /^\*\.swift text eol=lf$/m);
 });
 
+test("real macOS launcher integration tests are Darwin-gated", async () => {
+  const source = await readFile(new URL("./macos-launcher.test.mjs", import.meta.url), "utf8");
+  assert.match(source, /const macosTest = process\.platform === "darwin" \? test : test\.skip;/);
+  assert.doesNotMatch(source, /^(?:  )?test\(/m);
+});
+
 test("tracked skill artifact is the exact deterministic build of current source", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "heige-tracked-package-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
