@@ -326,6 +326,8 @@ test("浮层一律实底：半透明只给对话区，菜单和弹层透光就�
     ".cfp-preview-modal",
     ".cfp-preview-modal__dropdown",
     ".cfp-card-dropdown",
+    ".cfp-type-dropdown__menu",
+    ".cfp-upload-dropdown__menu",
     ".cfp-version-modal",
     ".cfp-folder-modal",
     ".upload-modal",
@@ -365,6 +367,25 @@ test("浮层一律实底：半透明只给对话区，菜单和弹层透光就�
   const primary = css.match(/^\.wb-button--primary,[\s\S]*?\}/m);
   assert.ok(primary, "缺少强调色按钮的字色接管");
   assert.match(primary[0], /var\(--heige-on-accent\)/, "强调色上的字必须走 --heige-on-accent");
+});
+
+test("WorkBuddy 的 CSS Modules 通用确认框一律覆盖宿主透明主画布背景", () => {
+  const css = buildWorkBuddySkinCss({ theme: THEME, heroDataUrl: HERO });
+
+  // WorkBuddy 5.3.14 的桥接样式会用 [class*=\"dialogContainer\"] 和 !important
+  // 把所有确认框重新绑到透明的 --wb-bg-primary。选择器必须直接对齐这个稳定语义
+  // 片段，并提高一级特异性，不能依赖每次构建都会变化的哈希后缀。
+  assert.match(
+    css,
+    /body\.agent-ui-theme \[class\*=\"dialogContainer\"\] \{[^}]*background: var\(--heige-solid\) !important;[^}]*backdrop-filter: none !important;/,
+    "通用 dialogContainer 必须压过宿主的透明 !important 规则",
+  );
+
+  assert.doesNotMatch(
+    css,
+    /body\.agent-ui-theme \[class\*=\"dialogOverlay\"\] \{/,
+    "只允许给确认框卡片垫实底，外层 60% 黑色遮罩必须保留",
+  );
 });
 
 test("WorkBuddy 主窗口识别放行 hash 路由，但仍按解码后的 pathname 认身份", () => {

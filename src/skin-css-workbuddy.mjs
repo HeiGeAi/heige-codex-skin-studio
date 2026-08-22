@@ -503,6 +503,8 @@ body {
 .cfp-preview-modal,
 .cfp-preview-modal__dropdown,
 .cfp-card-dropdown,
+.cfp-type-dropdown__menu,
+.cfp-upload-dropdown__menu,
 .cfp-version-modal,
 .cfp-folder-modal,
 .upload-modal,
@@ -518,6 +520,16 @@ body {
 .project-connectors-drawer {
   background: var(--heige-solid) !important;
   /* 常驻表面覆盖动态背景，禁用背景采样以避免滚动和流式输出逐帧重合成 */
+  backdrop-filter: none !important;
+}
+
+/* WorkBuddy 的通用桥接样式会用 [class*="dialogContainer"] + !important，
+   把所有 CSS Modules 确认框重新绑到透明的 --wb-bg-primary。权限确认框的类名是
+   _dialogContainer_<构建哈希>，不符合上面的 BEM overlay 命名兜底。这里直接对齐宿主
+   自己的稳定语义片段并提高一级特异性，一次覆盖权限确认、召唤确认等同源对话框；
+   只改卡片容器，不改 [class*="dialogOverlay"]，外层 60% 黑色遮罩继续保留。 */
+body.agent-ui-theme [class*="dialogContainer"] {
+  background: var(--heige-solid) !important;
   backdrop-filter: none !important;
 }
 

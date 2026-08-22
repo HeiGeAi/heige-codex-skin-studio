@@ -28,7 +28,7 @@ const launcherLogoUrl = new URL("../assets/launcher/LauncherLogo.png", import.me
 const launcherBinaryUrl = new URL("../assets/launcher/HeiGeSkinLauncher.bin", import.meta.url);
 const macosTest = process.platform === "darwin" ? test : test.skip;
 
-async function populateRuntime(installRoot, version = "5.5.14") {
+async function populateRuntime(installRoot, version = "5.5.15") {
   const entrypoint = join(installRoot, "scripts", "apply.command");
   const launcherEntrypoint = join(installRoot, "scripts", "launch-skin.command");
   await Promise.all([
@@ -92,7 +92,7 @@ macosTest("creates a Finder-visible schema 5 app with separate Dock icon and win
   assert.match(plist, /HeiGe 皮肤启动器/);
   assert.match(plist, /<key>HeiGeLauncherSchemaVersion<\/key>\s*<integer>5<\/integer>/);
   assert.match(plist, /<key>CFBundleIconFile<\/key>\s*<string>AppIcon\.icns<\/string>/);
-  assert.match(plist, /<key>CFBundleShortVersionString<\/key>\s*<string>5\.5\.14<\/string>/);
+  assert.match(plist, /<key>CFBundleShortVersionString<\/key>\s*<string>5\.5\.15<\/string>/);
   assert.match(plist, /<key>LSMinimumSystemVersion<\/key>\s*<string>13\.0<\/string>/);
   assert.deepEqual(
     await readFile(join(result.appPath, "Contents", "Resources", "AppIcon.icns")),
@@ -215,7 +215,7 @@ macosTest("launcher participant rollback removes a newly published app when no a
   const { home, installRoot } = await fixture(t);
   const participant = JSON.parse(JSON.stringify(await prepareMacosLauncher({ home, installRoot })));
   assert.equal(participant.schemaVersion, 2);
-  assert.equal(participant.afterVersion, "5.5.14");
+  assert.equal(participant.afterVersion, "5.5.15");
   for (const field of [
     "afterExecutableSha256",
     "afterIconSha256",
@@ -233,7 +233,7 @@ macosTest("launcher participant rollback removes a newly published app when no a
 
 macosTest("launcher staging reads release inputs from source while binding the app to the stable target", async (t) => {
   const { root, home } = await fixture(t);
-  const sourceRoot = join(root, "5.5.14 发布源码");
+  const sourceRoot = join(root, "5.5.15 发布源码");
   const targetRoot = join(home, ".codex", "heige-codex-skin-studio-target");
   await populateRuntime(sourceRoot);
 
@@ -248,7 +248,7 @@ macosTest("launcher staging reads release inputs from source while binding the a
   const stagedPlist = await readFile(join(participant.stagePath, "Contents", "Info.plist"), "utf8");
 
   assert.equal(participant.installRoot, targetRoot);
-  assert.equal(participant.afterVersion, "5.5.14");
+  assert.equal(participant.afterVersion, "5.5.15");
   assert.equal(stagedExecutable.readUInt32BE(0), 0xcafebabe);
   assert.match(stagedPlist, new RegExp(targetRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.doesNotMatch(stagedPlist, new RegExp(sourceRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
@@ -396,8 +396,8 @@ for (const legacySchema of [1, 2]) {
     await chmod(join(legacyMacos, "HeiGe Skin Launcher"), 0o755);
     const legacyPlist = renderMacosLauncherPlist(installRoot)
       .replace(/    <key>CFBundleIconFile<\/key>\n    <string>AppIcon\.icns<\/string>\n/, "")
-      .replace("<string>5.5.14</string>", "<string>1.0</string>")
-      .replace("<string>5.5.14</string>", "<string>1</string>")
+      .replace("<string>5.5.15</string>", "<string>1.0</string>")
+      .replace("<string>5.5.15</string>", "<string>1</string>")
       .replace(
         `<key>HeiGeLauncherSchemaVersion</key>\n    <integer>5</integer>`,
         `<key>HeiGeLauncherSchemaVersion</key>\n    <integer>${legacySchema}</integer>`,
@@ -419,7 +419,7 @@ for (const legacySchema of [1, 2]) {
       upgradedPlist,
       new RegExp(`<string>${installRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}<\\/string>`),
     );
-    assert.match(upgradedPlist, /<string>5\.5\.14<\/string>/);
+    assert.match(upgradedPlist, /<string>5\.5\.15<\/string>/);
     await execFileAsync("/usr/bin/codesign", ["--verify", "--deep", "--strict", "--", upgraded.appPath]);
   });
 }
