@@ -16,6 +16,16 @@ One image becomes one theme. After install, switching skins is a single click in
 
 </div>
 
+> ## 🆕 5.5.15 update: a native dual-product launcher for macOS
+>
+> Every macOS install now includes the standalone `HeiGe 皮肤启动器`. It can open or close the current Codex and WorkBuddy skins independently, repair both products in one click, and open isolated diagnostics. After a reboot, client update, or lost skin session, clicking the launcher restores the most recently used skin without rerunning terminal commands.
+>
+> This release also hardens WorkBuddy surfaces. Permission prompts, task archive dialogs, expert summons, and related confirmations now keep a solid theme background, with the remaining file-management dropdowns covered as well.
+
+![Live screenshot: HeiGe Skin Launcher 5.5.15](docs/images/macos-launcher-5.5.15-live.webp)
+
+*Live 5.5.15 screenshot: independent Codex and WorkBuddy controls, open and close actions, one-click repair, diagnostics, and a readable dark appearance.*
+
 > ## 🆕 Major update: WorkBuddy (Tencent CodeBuddy Desktop) is now supported
 >
 > The same engine now skins WorkBuddy, a popular AI coding tool made in China. Session-only skins, instant switching, one-click restore to the native UI. See the [WorkBuddy section](#workbuddy-tencent-codebuddy-desktop).
