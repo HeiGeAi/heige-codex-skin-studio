@@ -373,6 +373,42 @@ body {
   --wb-shadow-lg: 0 4px 16px ${accentMix(18)} !important;
 }
 
+/* WorkBuddy 5.5 把对话区从 cb-* 组件迁到了独立的 cr-* 设计系统。
+   cr-theme 会在自身节点重新声明整套令牌，所以只改 :root/body 无法覆盖；
+   必须在同一个稳定主题根上桥接。internal 令牌也同步写，避免组件在公开令牌和
+   内部令牌之间切换时又退回原生黑白色。真机核对自 WorkBuddy 5.5.2 */
+.cr-theme {
+  --cr-text-primary: var(--heige-text) !important;
+  --cr-internal-text-primary: var(--heige-text) !important;
+  --cr-text-secondary: ${textMix(74)} !important;
+  --cr-internal-text-secondary: ${textMix(74)} !important;
+  --cr-text-tertiary: ${textMix(70)} !important;
+  --cr-internal-text-tertiary: ${textMix(70)} !important;
+  --cr-user-bubble-bg: color-mix(in srgb, var(--heige-accent) 16%, var(--heige-surface)) !important;
+  --cr-internal-user-bubble-bg: color-mix(in srgb, var(--heige-accent) 16%, var(--heige-surface)) !important;
+  --cr-bg-code: color-mix(in srgb, var(--heige-accent) 10%, var(--heige-surface)) !important;
+  --cr-internal-bg-code: color-mix(in srgb, var(--heige-accent) 10%, var(--heige-surface)) !important;
+  --cr-bg-code-header: color-mix(in srgb, var(--heige-accent) 14%, var(--heige-surface)) !important;
+  --cr-internal-bg-code-header: color-mix(in srgb, var(--heige-accent) 14%, var(--heige-surface)) !important;
+  --cr-bg-code-inline: ${accentMix(12)} !important;
+  --cr-internal-bg-code-inline: ${accentMix(12)} !important;
+  --cr-border-default: var(--heige-line-soft) !important;
+  --cr-internal-border-default: var(--heige-line-soft) !important;
+  --cr-popover-bg: var(--heige-solid) !important;
+  --cr-internal-popover-bg: var(--heige-solid) !important;
+  --cr-scrollbar-thumb: ${accentMix(32)} !important;
+  --cr-internal-scrollbar-thumb: ${accentMix(32)} !important;
+}
+
+/* 5.5 的输入框读取 cr-bg-elevated，不再读取旧版 wb 输入令牌。
+   只在输入框主题根内改成半透明表面，浮层仍由 cr-popover-bg 保持实底。 */
+.cr-input-box {
+  --cr-bg-primary: ${surfaceMix(86)} !important;
+  --cr-internal-bg-primary: ${surfaceMix(86)} !important;
+  --cr-bg-elevated: ${surfaceMix(86)} !important;
+  --cr-internal-bg-elevated: ${surfaceMix(86)} !important;
+}
+
 html,
 body {
   background: transparent !important;
@@ -407,6 +443,20 @@ body {
 .conversation-list-footer {
   background: transparent !important;
   /* 常驻表面覆盖动态背景，禁用背景采样以避免滚动和流式输出逐帧重合成 */
+  backdrop-filter: none !important;
+}
+
+/* WorkBuddy 5.5 的 conversation-shell 自己读取一套局部 --wb-home-* 令牌，
+   会在 :root/body 令牌之后重新得到纯白色。稳定语义容器上显式放行主题背景。 */
+.conversation-shell {
+  background: transparent !important;
+  backdrop-filter: none !important;
+}
+
+/* WorkBuddy 5.5.3 的首页路由新增了覆盖整个主区域的纯白底。
+   #root 上的主题图已正确注入，但会被这一层完全遮住，因此在稳定语义容器上放行。 */
+.wb-home-route {
+  background: transparent !important;
   backdrop-filter: none !important;
 }
 
@@ -635,9 +685,26 @@ body.agent-ui-theme .conversation-archive-dialog > * {
   backdrop-filter: none !important;
 }
 
+/* WorkBuddy 5.5 的一条回复由 cr-agent__header 与 cr-agent__body 组成。
+   只给包含非空 cr-agent__content 的 body 垫底，避免虚拟列表里的空消息节点产生色块。 */
+:root[data-heige-readability="on"] .cr-agent__body:has(> .cr-agent__content:not(:empty)) {
+  box-sizing: border-box;
+  color: var(--heige-text) !important;
+  background: ${surfaceMix(90)} !important;
+  border: 1px solid ${accentMix(18)} !important;
+  border-radius: 22px;
+  padding: 14px 24px 12px !important;
+  backdrop-filter: none !important;
+}
+
 /* 回复里的引用块、行内代码和分隔线原生也吃写死的浅色，垫上蒙版后要跟着换成主题色，
    否则深色主题下是浅块压深蒙版，比不垫还刺眼 */
 :root[data-heige-readability="on"] .cb-assistant-message .cb-markdown :is(pre, code, blockquote) {
+  background: ${accentMix(10)} !important;
+  color: var(--heige-text) !important;
+}
+
+:root[data-heige-readability="on"] .cr-agent__body .cr-markdown :is(pre, code, blockquote) {
   background: ${accentMix(10)} !important;
   color: var(--heige-text) !important;
 }
@@ -663,6 +730,13 @@ body.agent-ui-theme .conversation-archive-dialog > * {
 /* 发言人名字在蒙版外面，颜色同样写死 rgb(0,0,0)，而且它任何时候都直接压在主题
    背景图上、没有底可垫，所以换成主题色之后还要补一圈同底色光晕才拉得开对比 */
 .avatar-container .name {
+  color: var(--heige-text) !important;
+  text-shadow:
+    0 0 8px ${surfaceMix(92)},
+    0 0 18px ${surfaceMix(74)};
+}
+
+.cr-agent__name {
   color: var(--heige-text) !important;
   text-shadow:
     0 0 8px ${surfaceMix(92)},
@@ -727,20 +801,6 @@ ${logoDataUrl === null ? "" : `
 }
 .conversation-list-logo > * {
   visibility: hidden;
-}
-`}${polaroidDataUrl === null ? "" : `
-/* 右下角拍立得挂件，点击穿透 */
-body::after {
-  content: "";
-  position: fixed;
-  right: 20px;
-  bottom: 24px;
-  width: 200px;
-  height: 300px;
-  background: url(${JSON.stringify(polaroidDataUrl)}) center / contain no-repeat;
-  pointer-events: none;
-  z-index: 15;
-  filter: drop-shadow(0 12px 26px ${textMix(24)});
 }
 `}`;
 }

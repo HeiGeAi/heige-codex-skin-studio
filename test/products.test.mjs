@@ -18,6 +18,7 @@ import { buildWorkBuddySkinCss } from "../src/skin-css-workbuddy.mjs";
 import { classifyWorkBuddyTarget } from "../src/target-classifier.mjs";
 
 const HERO = "data:image/png;base64,aGVybw==";
+const POLAROID = "data:image/png;base64,cG9sYXJvaWQ=";
 
 const THEME = {
   id: "naruto-sasuke",
@@ -253,6 +254,73 @@ test("AI 回复垫了蒙版就必须一起接管正文和底部文字，只垫�
   }
 });
 
+test("WorkBuddy 5.5 对话画布必须绕过宿主新增的纯白 conversation-shell", () => {
+  const css = buildWorkBuddySkinCss({ theme: THEME, heroDataUrl: HERO });
+
+  assert.match(
+    css,
+    /\.conversation-shell \{[^}]*background:\s*transparent\s*!important;/,
+    "5.5 的 conversation-shell 会写死纯白背景，必须显式恢复主题图",
+  );
+});
+
+test("WorkBuddy 5.5.3 首页路由不能用纯白背景遮住已注入的主题图", () => {
+  const css = buildWorkBuddySkinCss({ theme: THEME, heroDataUrl: HERO });
+
+  assert.match(
+    css,
+    /\.wb-home-route \{[^}]*background:\s*transparent\s*!important;/,
+    "5.5.3 的 wb-home-route 覆盖整块首页，必须显式放行主题图",
+  );
+});
+
+test("WorkBuddy 皮肤不再生成会遮挡右下角功能键的拍立得挂件", () => {
+  const css = buildWorkBuddySkinCss({
+    theme: THEME,
+    heroDataUrl: HERO,
+    polaroidDataUrl: POLAROID,
+  });
+
+  assert.doesNotMatch(css, /body::after\s*\{/);
+  assert.ok(!css.includes(POLAROID), "WorkBuddy CSS 不应继续携带拍立得图片数据");
+});
+
+test("WorkBuddy 5.5 的 cr 令牌必须桥接到主题色且不移除旧版 cb 兼容", () => {
+  const css = buildWorkBuddySkinCss({ theme: THEME, heroDataUrl: HERO });
+
+  assert.match(css, /\.cr-theme \{[\s\S]*?--cr-text-primary:\s*var\(--heige-text\)\s*!important;/);
+  assert.match(css, /\.cr-theme \{[\s\S]*?--cr-user-bubble-bg:[^;]+!important;/);
+  assert.match(css, /\.cr-theme \{[\s\S]*?--cr-border-default:[^;]+!important;/);
+  assert.match(css, /\.cr-theme \{[\s\S]*?--cr-popover-bg:\s*var\(--heige-solid\)\s*!important;/);
+  assert.ok(css.includes(".cb-assistant-message .cb-markdown"), "5.3 的 cb 选择器仍要保留");
+});
+
+test("WorkBuddy 5.5 助手回复只给非空 cr 内容垫阅读蒙版", () => {
+  const css = buildWorkBuddySkinCss({ theme: THEME, heroDataUrl: HERO });
+
+  assert.doesNotMatch(
+    css,
+    /:root\[data-heige-readability="on"\] \.cr-agent \{[^}]*background:/,
+    "不能给整条 cr 消息外壳加背景，否则虚拟列表空节点会变成色块",
+  );
+  assert.match(
+    css,
+    /:root\[data-heige-readability="on"\] \.cr-agent__body:has\(> \.cr-agent__content:not\(:empty\)\) \{[^}]*background:[^}]*padding:/,
+    "5.5 的阅读蒙版必须落在含真实内容的 cr-agent__body 上",
+  );
+  assert.match(css, /\.cr-agent__name \{[^}]*text-shadow:/, "回复名称仍直接压在背景图上，需要可读性光晕");
+});
+
+test("WorkBuddy 5.5 输入框继续使用半透明主题表面", () => {
+  const css = buildWorkBuddySkinCss({ theme: THEME, heroDataUrl: HERO });
+
+  assert.match(
+    css,
+    /\.cr-input-box \{[\s\S]*?--cr-bg-elevated:\s*color-mix\(in srgb, var\(--heige-surface\) 86%, transparent\)\s*!important;/,
+    "5.5 输入框不能退回纯白底",
+  );
+});
+
 test("浮层一律实底：半透明只给对话区，菜单和弹层透光就会跟底下正文叠字", () => {
   const css = buildWorkBuddySkinCss({ theme: THEME, heroDataUrl: HERO });
 
@@ -388,17 +456,17 @@ test("WorkBuddy 的 CSS Modules 通用确认框一律覆盖宿主透明主画布
   );
 });
 
-test("WorkBuddy 主窗口识别放行 hash 路由，但仍按解码后的 pathname 认身份", () => {
+test("WorkBuddy 主窗口识别放行 5.5.2 启动参数和 hash 路由，但仍按解码后的 pathname 认身份", () => {
   const main = "file:///Applications/WorkBuddy.app/Contents/Resources/app.asar/renderer/index.html";
   // 打开设置弹层就会把地址变成 index.html#，连 # 都拒会让皮肤在正常使用中途认不出主窗口
-  for (const url of [main, `${main}#`, `${main}#/settings/models`]) {
+  const current = `${main}?locale=zh-CN&accountSnapshot=%257B%2522version%2522%253A1%257D`;
+  for (const url of [main, `${main}#`, `${main}#/settings/models`, current, `${current}#/settings/models`]) {
     assert.equal(classifyWorkBuddyTarget({ type: "page", url }), "main", `应认出：${url}`);
   }
   // 放行 fragment 不等于放行伪造：身份只看 pathname，fragment 影响不到它
   for (const url of [
     `file:///tmp/evil.html#${main.slice("file://".length)}`,
     `file:///tmp/evil.html#/WorkBuddy.app/Contents/Resources/app.asar/renderer/index.html`,
-    `${main}?a=1`,
     "file:///Applications/WorkBuddy.app/Contents/Resources/app.asar/renderer/%2e%2e/index.html",
     "file:///Applications/Evil.app/Contents/Resources/app.asar/renderer/index.html",
   ]) {

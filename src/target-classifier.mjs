@@ -68,14 +68,12 @@ export function classifyWorkBuddyTarget(target) {
     url.hostname ||
     url.username ||
     url.password ||
-    url.port ||
-    url.search
+    url.port
   ) {
     return "unknown";
   }
-  // fragment 一律放行，不参与身份判断。WorkBuddy 用 hash 路由，光是打开设置弹层
-  // 就会把地址变成 index.html#，之前连 `#` 都拒会让皮肤在正常使用中途突然认不出主窗口。
-  // 放行是安全的：身份只看下面这个解码后的 pathname，而 fragment 影响不到 url.pathname，
+  // query 和 fragment 一律放行，不参与身份判断。WorkBuddy 5.5.2 会用 query 传启动快照，
+  // 并继续用 hash 路由。身份只看下面这个解码后的 pathname，两者都影响不到 url.pathname，
   // 也从不落到文件系统。像 file:///tmp/evil.html#/WorkBuddy.app/…/index.html 这种构造，
   // pathname 仍然是 /tmp/evil.html，照样被后缀检查挡掉。真机核对自 WorkBuddy 5.3.11
   // 解码后再比对，挡住 %2e%2e 之类绕过后缀检查的构造
