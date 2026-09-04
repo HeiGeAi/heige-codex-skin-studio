@@ -54,6 +54,26 @@
 
 </div>
 
+## 赞助与推荐
+
+<table>
+  <tr>
+    <td width="190" align="center">
+      <a href="https://heyroute.ai/vip" target="_blank" rel="noopener noreferrer">
+        <img src="https://heyroute.ai/brand/heyroute-logo.png?v=rounded-rect" width="163" alt="HeyRoute">
+      </a>
+    </td>
+    <td>
+      <strong>HeyRoute｜AI 编程与多模态 API 入口</strong><br><br>
+      💻&nbsp;<strong>AI 编程接入：</strong>一个 API Key 可接入 Codex、Claude Code、Cursor 及 OpenAI 兼容客户端，替换 Base URL 即可开始。<br>
+      🎨&nbsp;<strong>多模态创作：</strong>支持语言模型、AI 生图、生视频和图像编辑，适合内容创作、应用开发与 Agent 工作流。<br>
+      🧠&nbsp;<strong>多模型入口：</strong>覆盖 OpenAI、Claude、Gemini、Grok、DeepSeek、Kimi、Qwen、GLM 等模型系列，具体可用模型以平台实时页面为准。<br>
+      📊&nbsp;<strong>调用记录可查：</strong>统一管理 API Key、用量与调用记录，方便测试不同模型并核对实际消耗。<br>
+      🎁&nbsp;<strong>注册福利：</strong>通过 <a href="https://heyroute.ai/vip" target="_blank" rel="noopener noreferrer"><strong>专属注册链接</strong></a> 完成注册，即送 <strong>US$15 试用额度</strong>。先跑通真实任务，再决定是否充值。
+    </td>
+  </tr>
+</table>
+
 > ## 🆕 5.5.15 更新：Mac 专属双产品皮肤启动器
 >
 > macOS 安装后会得到独立的「HeiGe 皮肤启动器」。它能分别打开或关闭 Codex、WorkBuddy 的当前皮肤，并提供一键修复和诊断日志入口。电脑重启、客户端更新或皮肤意外丢失后，无需重新执行命令，点击启动器即可恢复最近使用的皮肤。
