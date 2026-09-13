@@ -114,7 +114,21 @@ async function legacyFixture(t) {
   return { root, home, sourceRoot, targetRoot };
 }
 
+async function hasPublicMarkerlessCommit() {
+  try {
+    await execFileAsync("git", [
+      "cat-file",
+      "-e",
+      PUBLIC_MARKERLESS_COMMIT + "^{commit}",
+    ], { cwd: repoRoot });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function publicMarkerlessLegacyFixture(t) {
+  if (!await hasPublicMarkerlessCommit()) return null;
   const fixture = await sourceFixture(t);
   const archivePath = join(fixture.root, `${PUBLIC_MARKERLESS_COMMIT}.tar`);
   await mkdir(fixture.targetRoot, { recursive: true });
@@ -423,6 +437,10 @@ test("rejects a legacy tree whose strict option 1 deprecated enable entrypoint w
 
 test("migrates the real markerless tree installed by public commit 79b03dc", async (t) => {
   const fixture = await publicMarkerlessLegacyFixture(t);
+  if (fixture === null) {
+    t.skip("public commit " + PUBLIC_MARKERLESS_COMMIT + " is missing (shallow clone); fetch full history to run this test");
+    return;
+  }
 
   const { stdout } = await execLegacyInstall(fixture);
 
@@ -435,6 +453,10 @@ test("migrates the real markerless tree installed by public commit 79b03dc", asy
 
 test("a precommit failure restores the real markerless public tree", async (t) => {
   const fixture = await publicMarkerlessLegacyFixture(t);
+  if (fixture === null) {
+    t.skip("public commit " + PUBLIC_MARKERLESS_COMMIT + " is missing (shallow clone); fetch full history to run this test");
+    return;
+  }
   const beforeRoot = await lstat(fixture.targetRoot);
   const beforeCli = await readFile(join(fixture.targetRoot, "src", "cli.mjs"));
 
