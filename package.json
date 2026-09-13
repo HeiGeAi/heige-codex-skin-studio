@@ -6,6 +6,7 @@
   "engines": {
     "node": ">=22"
   },
+  "packageManager": "npm@10.9.8",
   "bin": {
     "heige-codex-skin": "src/cli.mjs"
   },
