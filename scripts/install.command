@@ -92,17 +92,25 @@ else
   fi
 fi
 
+install_failed() {
+  print -u2 -- "HeiGe Codex Skin Studio：安装失败，可执行以下命令排查："
+  print -u2 -- "  \"$NODE\" \"$TARGET/src/cli.mjs\" doctor"
+  print -u2 -- "  \"$NODE\" \"$TARGET/src/cli.mjs\" status"
+  exit 1
+}
+
 if [[ "$(uname -s)" == "Darwin" ]]; then
   "$NODE" "$SOURCE/src/macos-install-coordinator.mjs" \
     --source "$SOURCE" \
-    --target "$TARGET"
+    --target "$TARGET" || install_failed
 else
   "$NODE" "$SOURCE/src/install-transaction.mjs" install \
     --source "$SOURCE" \
-    --target "$TARGET"
+    --target "$TARGET" || install_failed
 fi
 
 echo "HeiGe Codex Skin Studio 已安装到：$TARGET"
 if [[ "${HEIGE_SKIP_APPLY:-0}" != "1" ]]; then
   open "$TARGET/scripts/apply.command"
+  print -- "注入已在新 Terminal 窗口执行；若该窗口报失败，请运行：\"$NODE\" \"$TARGET/src/cli.mjs\" doctor"
 fi
