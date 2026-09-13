@@ -647,7 +647,7 @@ export async function productionMacosInstallDependencies({
       return observed?.pid === expected?.pid && observed?.startedAt === expected?.startedAt;
     },
     awaitExactReady: async ({ expectedState, outerTransaction, port }) => {
-      const { stdout } = await execFile(process.execPath, [
+      const pending = execFile(process.execPath, [
         join(targetRoot, "src", "cli.mjs"),
         "set-persistence",
         "true",
@@ -655,20 +655,20 @@ export async function productionMacosInstallDependencies({
         String(expectedState.revision),
         "--port",
         String(port),
+        "--install-authorization-stdin",
       ], {
-        env: {
-          ...process.env,
-          HEIGE_MACOS_INSTALL_AUTHORIZATION: JSON.stringify({
-            role: "macos-install-ready-foreground",
-            transactionId: outerTransaction.transactionId,
-            journalPath: outerTransaction.journalPath,
-            expectedRevision: expectedState.revision,
-            expectedControlToken: expectedState.controlToken,
-          }),
-        },
         timeout: 15_000,
         maxBuffer: 256 * 1024,
       });
+      // 授权 JSON 走 stdin 管道，避免控制 token 经环境变量暴露给同用户进程。
+      pending.child.stdin.end(JSON.stringify({
+        role: "macos-install-ready-foreground",
+        transactionId: outerTransaction.transactionId,
+        journalPath: outerTransaction.journalPath,
+        expectedRevision: expectedState.revision,
+        expectedControlToken: expectedState.controlToken,
+      }));
+      const { stdout } = await pending;
       try { return JSON.parse(stdout); } catch (cause) {
         throw new Error("controller readiness command returned invalid JSON", { cause });
       }

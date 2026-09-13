@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { execFile as execFileCallback, spawn } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
-import { realpathSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, normalize, posix, relative, resolve, win32 } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
@@ -108,7 +108,14 @@ import {
 
 const execFile = promisify(execFileCallback);
 const repositoryRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
-const BOOLEAN_FLAGS = new Set(["background", "ephemeral", "once", "prefer-stored", "restart"]);
+const BOOLEAN_FLAGS = new Set([
+  "background",
+  "ephemeral",
+  "install-authorization-stdin",
+  "once",
+  "prefer-stored",
+  "restart",
+]);
 const COMMAND_OPTIONS = new Map([
   ["help", new Set()],
   // list / create 只碰主题目录不碰宿主进程，但用户主题目录按产品隔离，
@@ -122,7 +129,7 @@ const COMMAND_OPTIONS = new Map([
   ["launcher-repair", new Set(["launcher-version", "port", "app"])],
   ["launcher-state", new Set(["app"])],
   ["enable-skin", new Set(["port", "theme", "app"])],
-  ["set-persistence", new Set(["port", "revision", "app"])],
+  ["set-persistence", new Set(["app", "install-authorization-stdin", "port", "revision"])],
   ["pause", new Set(["port", "app"])],
   ["resume", new Set(["port", "app"])],
   ["restore", new Set(["port", "app"])],
@@ -954,7 +961,7 @@ export function parseMacosInstallAuthorization(value) {
   try {
     parsed = JSON.parse(value);
   } catch (cause) {
-    throw new Error("HEIGE_MACOS_INSTALL_AUTHORIZATION is not valid JSON", { cause });
+    throw new Error("macOS install authorization is not valid JSON", { cause });
   }
   const keys = [
     "expectedControlToken",
@@ -980,7 +987,7 @@ export function parseMacosInstallAuthorization(value) {
     Buffer.from(parsed.expectedControlToken, "base64url").toString("base64url") !==
       parsed.expectedControlToken
   ) {
-    throw new Error("HEIGE_MACOS_INSTALL_AUTHORIZATION schema is invalid");
+    throw new Error("macOS install authorization schema is invalid");
   }
   return Object.freeze({ ...parsed });
 }
@@ -2885,9 +2892,13 @@ export async function runCli(argv, overrides = {}) {
   const selectedControllerPlatform = command === "controller"
     ? controllerPlatform(args.platform)
     : (overrides.platform ?? process.platform);
+  // 安装授权只经 stdin 管道传递（--install-authorization-stdin），
+  // 不再走环境变量：同用户进程可用 ps eww / proc_pidinfo 读到 env。
   const installAuthorization = command === "controller"
     ? null
-    : parseMacosInstallAuthorization(process.env.HEIGE_MACOS_INSTALL_AUTHORIZATION);
+    : parseMacosInstallAuthorization(
+      args["install-authorization-stdin"] === true ? readFileSync(0, "utf8") : undefined,
+    );
   if (
     installAuthorization !== null &&
     (
