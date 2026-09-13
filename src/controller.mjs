@@ -1669,12 +1669,26 @@ export function createSkinController(input) {
       name,
       ...(colors === undefined ? {} : { colors }),
     });
-    return setThemeSelection({
-      expectedRevision,
-      themeId: created.id,
-      requestId,
-      signal,
-    });
+    try {
+      return await setThemeSelection({
+        expectedRevision,
+        themeId: created.id,
+        requestId,
+        signal,
+      });
+    } catch (error) {
+      // 补偿清理：CAS 冲突或请求在创建与选择之间 abort 时，
+      // 已落盘的用户主题目录会变成孤儿，这里按 id 回收；
+      // 清理失败只记日志，原始错误优先抛回调用方。
+      if (typeof deps.removeUserTheme === "function" && typeof created?.id === "string") {
+        try {
+          await deps.removeUserTheme({ id: created.id });
+        } catch (cleanupError) {
+          await safeLog(deps.logger, "warn", "user_theme_publish_cleanup_failed", cleanupError);
+        }
+      }
+      throw error;
+    }
   };
 
   const deleteUserTheme = async ({

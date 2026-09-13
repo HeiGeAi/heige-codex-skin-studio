@@ -2166,3 +2166,73 @@ test("a relaunch that restores CDP refills the budget for the next native start"
   assert.equal((await controller.tick()).action, "relaunch");
   assert.equal(fx.calls.restart.length, 2);
 });
+
+test("a publish that loses the revision race removes the orphaned user theme", async () => {
+  const fx = fixture({ state: { revision: 2 } });
+  const createdThemes = [];
+  const removedThemes = [];
+  fx.deps.createUserThemeFromBytes = async (input) => {
+    createdThemes.push(clone(input));
+    return { id: "user-orphaned-theme" };
+  };
+  fx.deps.removeUserTheme = async ({ id }) => {
+    removedThemes.push(id);
+    return { removed: true };
+  };
+  const controller = createSkinController(fx.deps);
+  await controller.start();
+  const image = "data:image/png;base64," +
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]).toString("base64");
+  // renderer 以 revision 1 发起发布，控制器状态已前进到 revision 2：CAS 必冲突。
+  fx.setHealth(rendererRequestHealth({
+    schemaVersion: 1,
+    requestId: "d".repeat(32),
+    action: "publish-user-theme",
+    capability: CONTROL_TOKEN,
+    expectedRevision: 1,
+    name: "冲突的主题",
+    image,
+  }));
+
+  await controller.tick();
+
+  assert.equal(createdThemes.length, 1, "the theme is written to disk before the CAS");
+  assert.deepEqual(removedThemes, ["user-orphaned-theme"], "the orphan must be compensated");
+  assert.equal(fx.state.selectedThemeId, DEFAULT_THEME_ID);
+  assert.ok(
+    fx.calls.logs.some((entry) => entry.event === "renderer_control_request_failed"),
+    "the original publish failure must still surface",
+  );
+});
+
+test("a failed orphan cleanup is logged without masking the publish error", async () => {
+  const fx = fixture({ state: { revision: 2 } });
+  fx.deps.createUserThemeFromBytes = async () => ({ id: "user-stuck-theme" });
+  fx.deps.removeUserTheme = async () => {
+    throw new Error("cleanup failed");
+  };
+  const controller = createSkinController(fx.deps);
+  await controller.start();
+  const image = "data:image/png;base64," +
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]).toString("base64");
+  fx.setHealth(rendererRequestHealth({
+    schemaVersion: 1,
+    requestId: "e".repeat(32),
+    action: "publish-user-theme",
+    capability: CONTROL_TOKEN,
+    expectedRevision: 1,
+    name: "清理失败的主题",
+    image,
+  }));
+
+  await controller.tick();
+
+  assert.ok(
+    fx.calls.logs.some((entry) => entry.event === "user_theme_publish_cleanup_failed"),
+    "cleanup failure must be logged",
+  );
+  assert.ok(
+    fx.calls.logs.some((entry) => entry.event === "renderer_control_request_failed"),
+    "the publish error must not be masked by the cleanup failure",
+  );
+});
