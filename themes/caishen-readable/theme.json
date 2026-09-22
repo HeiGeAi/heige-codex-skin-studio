@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "caishen-readable",
+  "name": "财神 · 清爽可读",
+  "hero": "hero.webp",
+  "appearance": "light",
+  "previewFocus": { "x": 69, "y": 46 },
+  "thumbnailFocus": { "x": 70, "y": 46 },
+  "thumbnailZoom": 190,
+  "colors": {
+    "accent": "#D96B42",
+    "secondary": "#B77B24",
+    "surface": "#FFFDFA",
+    "text": "#35251C"
+  },
+  "copy": {
+    "brand": "Caishen",
+    "headline": "今天先把项目搞赚钱。",
+    "tagline": "Soft fortune artwork with readable light surfaces."
+  }
+}
