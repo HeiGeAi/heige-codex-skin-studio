@@ -52,5 +52,6 @@
 | `themes/naruto-sasuke/hero.webp` | Naruto Sasuke 主题主视觉 | 来源证据缺失，授权未验证 | 未知 | 项目所有者确认公开发布 | 后续可替换为权利记录更完整的素材 |
 | `themes/wuthering-echo/hero.webp` | Wuthering Echo 主题主视觉 | 来源证据缺失，授权未验证 | 未知 | 项目所有者确认公开发布 | 后续可替换为权利记录更完整的素材 |
 | `themes/wuthering-tide/hero.webp` | Wuthering Tide 主题主视觉 | 来源证据缺失，授权未验证 | 未知 | 项目所有者确认公开发布 | 后续可替换为权利记录更完整的素材 |
+| `themes/caishen-readable/hero.webp` | 财神清爽可读主题主视觉 | 来源为 `ChannelerH/codex-skin-packs` 的 `packs/caishen-readable/background.png`；该源仓库标注为 public-safe 公开素材，本次使用 ffmpeg/cwebp 适配为 1600x900 WebP | MIT License in source repository; visual rights record follows the source package | 项目所有者确认公开发布 | 保留上游链接与转换记录；后续可替换为原始生成记录更完整的素材 |
 
 MIT 许可证只适用于软件代码，不自动改变第三方可能拥有的素材权利。项目所有者确认发布表示接受当前发布决定及其风险。新增、替换或删除图片后，必须运行 `node scripts/check-asset-provenance.mjs --check`，并在同一变更中同步本表。
