@@ -2508,11 +2508,25 @@ async function prepareWindowsStateRoot(stateRoot, security) {
     throw lockError("LOCK_PATH_INVALID", `Windows state root must be a real directory: ${stateRoot}`);
   }
   try {
+    if (created) {
+      await windowsSecurityBatch(security, [
+        { action: "protect-directory", path: stateRoot },
+        { action: "verify-directory", path: stateRoot },
+      ]);
+      return;
+    }
+    try {
+      // 正常运行时状态根已是精确私有 ACL。先只读验证，避免每次抢锁都
+      // Set-Acl/icacls 重写同一目录，造成前后台控制器互相阻塞。
+      await security.verifyDirectory(stateRoot);
+      if (!created && await canProtectExistingWindowsStateRoot(stateRoot)) return;
+    } catch {
+      // 旧版本或手工改动留下的非精确 ACL 仍走带所有者/写权限前置检查的迁移。
+    }
+    // 目录内混入未知文件时不接受接管：继续走 migrate 前置检查，
+    // 由它按 LOCK_ACL_UNTRUSTED 拒绝，语义与原实现一致。
     await windowsSecurityBatch(security, [
-      {
-        action: created ? "protect-directory" : "migrate-directory",
-        path: stateRoot,
-      },
+      { action: "migrate-directory", path: stateRoot },
       { action: "verify-directory", path: stateRoot },
     ]);
   } catch (cause) {
