@@ -174,6 +174,10 @@ Windows 用 `scripts\windows\install.bat` 安装；日常入口是 `scripts/wind
 - 安全边界：CDP 即使只绑定本机回环也无认证，本机同权限进程在威胁边界内，完整说明见 [SECURITY.md](SECURITY.md)；素材来源逐文件登记在 [ASSET_PROVENANCE.md](ASSET_PROVENANCE.md)。
 - 命令行、主题 JSON 格式、常驻细节、全部 FAQ 和设计边界，都在[完整手册](docs/manual.md)。
 
+## 投稿与贡献
+
+想提主题预设或改代码，先看[贡献指南](CONTRIBUTING.md)。一句话版本：基于最新 main 开发，主题预设必须登记素材来源，代码改动先开 issue 对齐范围，本地 `npm test` 全绿再提交。
+
 ## 交流群
 
 微信群「Codex 皮肤共创交流」已满 200 人上限，扫码加我微信，我手动拉你进群。加好友记得备注：codex。纯技术交流，非盈利，互相学习，分享你做的主题、聊实现、提问题都欢迎。
