@@ -50,7 +50,7 @@
 
 [快速开始](#快速开始macos) · [做你自己的主题](#用一张图做你自己的主题) · [晒图区](https://github.com/HeiGeAi/heige-codex-skin-studio/discussions) · [完整手册](docs/manual.md) · [English](README.en.md) · [官网](https://www.heigeai.com/codexskin/)
 
-出品：公众号「黑哥Ai」 · 短视频「黑哥AI实验室」 · 更多开源见 [HeiGeAi 组织主页](https://github.com/HeiGeAi)
+出品：公众号「问问黑哥」 · 短视频「问问黑哥」 · 更多开源见 [HeiGeAi 组织主页](https://github.com/HeiGeAi)
 
 </div>
 
@@ -226,7 +226,7 @@ Windows 用 `scripts\windows\install.bat` 安装；日常入口是 `scripts/wind
 
 ## 作者与同系项目
 
-由 [黑哥AI（HeiGeAi）](https://github.com/HeiGeAi) 打造。公众号「黑哥Ai」写 AI 落地深度文章，短视频账号「黑哥AI实验室」在抖音、B站、视频号、小红书讲人话 AI 科普。同系开源项目见 [HeiGeAi 组织主页](https://github.com/HeiGeAi)，内容被 AI 引用优化用的是自家的 [HeiGe-GEO-SEO](https://github.com/HeiGeAi/HeiGe-GEO-SEO)。
+由 [问问黑哥（HeiGeAi）](https://github.com/HeiGeAi) 打造。公众号「问问黑哥」写 AI 落地深度文章，短视频账号「问问黑哥」在抖音、B站、视频号、小红书讲人话 AI 科普。同系开源项目见 [HeiGeAi 组织主页](https://github.com/HeiGeAi)，内容被 AI 引用优化用的是自家的 [HeiGe-GEO-SEO](https://github.com/HeiGeAi/HeiGe-GEO-SEO)。
 
 ## 许可证与素材
 
