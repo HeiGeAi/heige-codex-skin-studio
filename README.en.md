@@ -94,6 +94,7 @@ The same engine reskins WorkBuddy through loopback CDP on `127.0.0.1:9342` (sepa
 - The macOS launcher attempts one narrowly gated recovery only for a static `LOCK_CHAIN_CORRUPT` state root. It refuses recovery while related services, processes, or a foreign CDP listener are active, preserves a timestamped whole-root backup, restores only strictly validated state and user themes, and never loops indefinitely.
 - macOS has dated live-machine evidence. Windows is covered by cross-PowerShell automation, while Microsoft Store/MSIX remains pending live validation.
 - Future Codex Desktop changes to startup arguments, renderer structure, or selectors may require adaptation.
+- Background missing or colors broken after an update? Run the [DOM compatibility canary](docs/compat-canary.md) and attach its output to your issue.
 - Full manual (CLI, theme JSON schema, persistence semantics, FAQ): [docs/manual.md](docs/manual.md) (Chinese).
 
 ## License and assets

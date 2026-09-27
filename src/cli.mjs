@@ -23,6 +23,7 @@ import {
   parseCodexProcessTable,
   resolveCodexApp,
   runtimeDiagnostics,
+  readCodexVersion,
   sameProcessIdentity,
 } from "./codex-app.mjs";
 import {
@@ -31,6 +32,7 @@ import {
   NATIVE_THEME_ID,
   resolveStudioPaths,
 } from "./constants.mjs";
+import { runCompat, formatCompatReport } from "./compat.mjs";
 import { createSkinController } from "./controller.mjs";
 import {
   applySkin,
@@ -113,6 +115,7 @@ const BOOLEAN_FLAGS = new Set([
   "ephemeral",
   "install-authorization-stdin",
   "once",
+  "json",
   "prefer-stored",
   "restart",
 ]);
@@ -145,6 +148,7 @@ const COMMAND_OPTIONS = new Map([
   ])],
   ["status", new Set(["port", "app"])],
   ["doctor", new Set(["port", "app"])],
+  ["compat", new Set(["port", "json", "app"])],
   ["install-pet", new Set(["source"])],
 ]);
 const WINDOWS_PRODUCTION_TASK = "HeiGe Codex Skin Studio Controller";
@@ -2959,6 +2963,7 @@ export async function runCli(argv, overrides = {}) {
         "controller",
         "status",
         "doctor",
+        "compat [--port 9341] [--json]",
         "install-pet [--source PATH]",
       ],
     };
@@ -3187,6 +3192,27 @@ export async function runCli(argv, overrides = {}) {
       await ephemeralLease?.release();
     }
   }
+  if (command === "compat") {
+    if (productId !== "codex") throw new Error("compat 目前只支持 Codex 的皮肤锚点");
+    const port = portFrom(args.port ?? process.env.HEIGE_CODEX_SKIN_PORT, profile.defaultCdpPort);
+    return (deps.runCompat ?? runCompat)({
+      port,
+      deps: {
+        ...deps.compatDeps,
+        readVersion: deps.compatDeps?.readVersion ?? (async () => {
+          const app = selectedControllerPlatform === "win32"
+            ? (await deps.queryWindowsRuntime({ port })).app
+            : await (deps.resolveCodexApp ?? resolveCodexApp)({ product: productId });
+          return readCodexVersion({
+            platform: selectedControllerPlatform,
+            appPath: app.appPath,
+            executablePath: app.executablePath,
+            packageFullName: app.packageFullName,
+          });
+        }),
+      },
+    });
+  }
   if (command === "status") return deps.skinStatus({ port: portFrom(args.port, profile.defaultCdpPort) });
   if (command === "install-pet") {
     return deps.installPet({
@@ -3266,6 +3292,7 @@ export async function runCli(argv, overrides = {}) {
         cdpPort: selectedPort,
         ...runtime,
         diagnosis: classifyInjection(runtime),
+        compatHint: "发现背景异常时可运行 node src/cli.mjs compat 巡检。",
       };
     }
     const discovery = await (deps.discoverCodex ?? discoverCodex)({ product: productId });
@@ -3281,6 +3308,7 @@ export async function runCli(argv, overrides = {}) {
       cdpPort: selectedPort,
       ...runtime,
       diagnosis: classifyInjection(runtime, { product: productId }),
+      compatHint: "发现背景异常时可运行 node src/cli.mjs compat 巡检。",
     };
   }
   throw new Error(`未知命令：${command}`);
@@ -3297,11 +3325,23 @@ function isMainEntry() {
   return pathToFileURL(real).href === import.meta.url;
 }
 
-if (isMainEntry()) {
-  runCli(process.argv.slice(2))
-    .then((result) => process.stdout.write(`${JSON.stringify(result, null, 2)}\n`))
-    .catch((error) => {
-      process.stderr.write(`HeiGe Codex Skin Studio：${error.message}\n`);
-      process.exitCode = 1;
-    });
+// 与主入口共用输出和退出码逻辑，测试可注入 fake CDP 而不连接真实应用。
+export async function executeCli(argv, overrides = {}, io = process) {
+  try {
+    const result = await runCli(argv, overrides);
+    const compat = argv[0] === "compat";
+    io.stdout.write(compat && !argv.includes("--json")
+      ? formatCompatReport(result) + "\n"
+      : JSON.stringify(result, null, 2) + "\n");
+    if (compat && !result.ok) io.exitCode = 1;
+  } catch (error) {
+    if (argv[0] === "compat" && argv.includes("--json")) {
+      io.stdout.write(JSON.stringify({ ok: false, codexVersion: null, timestamp: new Date().toISOString(), error: error.message }) + "\n");
+    } else {
+      io.stderr.write(`HeiGe Codex Skin Studio：${error.message}\n`);
+    }
+    io.exitCode = 1;
+  }
 }
+
+if (isMainEntry()) await executeCli(process.argv.slice(2));

@@ -174,6 +174,7 @@ Windows 用 `scripts\windows\install.bat` 安装；日常入口是 `scripts/wind
 - 整窗突然变卡（帧率骤降、输入滚动全局迟滞）：跑 `scripts/apply.command --restart` 先彻底退出 Codex 再拉起注入；健康会话下直接重跑 apply 是幂等的，不会重启进程。
 - 支持范围：macOS 有日期化真机验证；Windows 走跨 PowerShell 自动化，Microsoft Store/MSIX 真机待验证；使用系统 Node 时要求 Node.js 22 或更新版本。
 - 安全边界：CDP 即使只绑定本机回环也无认证，本机同权限进程在威胁边界内，完整说明见 [SECURITY.md](SECURITY.md)；素材来源逐文件登记在 [ASSET_PROVENANCE.md](ASSET_PROVENANCE.md)。
+- 更新后背景消失或配色异常：运行 [DOM 兼容巡检](docs/compat-canary.md)，随 issue 附上巡检输出。
 - 命令行、主题 JSON 格式、常驻细节、全部 FAQ 和设计边界，都在[完整手册](docs/manual.md)。
 
 ## 投稿与贡献
