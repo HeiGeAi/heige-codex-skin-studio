@@ -23,7 +23,7 @@ test("builds one fast generic skin from a theme and image data URL", () => {
   );
   assert.match(
     css,
-    /:root\[data-heige-readability="on"\]\s+\[data-response-annotation-conversation\]\s*\{[^}]*var\(--heige-surface\) 90%/s,
+    /:root\[data-heige-readability="on"\]\s+\[data-response-annotation-conversation\]\s*\{[^}]*var\(--heige-surface\) var\(--heige-readability-opacity, 90%\)/s,
   );
   assert.doesNotMatch(
     css,
@@ -43,11 +43,11 @@ test("builds one fast generic skin from a theme and image data URL", () => {
   );
   assert.match(
     css,
-    /\.composer-surface-chrome,[\s\S]*background:\s*color-mix\(in srgb, var\(--heige-surface\) 80%, transparent\)/,
+    /\.composer-surface-chrome,[\s\S]*background:\s*color-mix\(in srgb, var\(--heige-surface\) var\(--heige-composer-opacity, 80%\), transparent\)/,
   );
   assert.match(
     css,
-    /\.browser-main-surface,\s*\[data-app-shell-main-surface="default"\]\s*\{[^}]*var\(--heige-surface\) 74%/s,
+    /\.browser-main-surface,\s*\[data-app-shell-main-surface="default"\]\s*\{[^}]*var\(--heige-surface\) var\(--heige-main-opacity, 74%\)/s,
     "新版 Codex 主内容容器必须保留旧版背景透明渐变",
   );
   assert.match(
@@ -127,4 +127,17 @@ test("rejects 5 and 7 digit hex colors that CSS cannot parse", () => {
       `${good} 应通过`,
     );
   }
+});
+
+
+test("generic opacity fallbacks preserve every pre-slider surface percentage", () => {
+  const css = buildSkinCss({ theme: { id: "baseline" }, heroDataUrl: "data:image/png;base64,AAAA" });
+  const expected = {
+    surface: 90, panel: 94, "root-side": 96, "root-bottom": 78,
+    sidebar: 88, main: 74, readability: 90, composer: 80,
+  };
+  const matches = [...css.matchAll(/var\(--heige-([a-z-]+)-opacity, (\d+)%\)/g)];
+  assert.deepEqual(Object.fromEntries(matches.map(([, name, value]) => [name, Number(value)])), expected);
+  assert.equal(matches.length, 8);
+  assert.doesNotMatch(css, /var\(--heige-surface\) \d+%/);
 });

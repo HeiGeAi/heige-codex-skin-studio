@@ -53,7 +53,8 @@ A local skin switcher for OpenAI Codex Desktop. It injects themes at runtime thr
 - **Optional pet**: the package ships an independent `Miku Future` animated desktop pet. Installing it is your call.
 - **Native macOS launcher**: every macOS install creates or upgrades `$HOME/Applications/HeiGe 皮肤启动器.app`. Click its Miku icon after a reboot, a Codex update, or a native launch to start or safely relaunch official Codex Desktop with loopback CDP and restore the most recent non-native theme.
 - **User-controlled persistence**: the top-menu switch is the only supported way to enable next-launch persistence. Turning it off keeps the current session skinned and restores the native UI on the next launch.
-- **Readability by default**: final and in-progress assistant responses use one consistent 90% theme-aware surface with balanced inset spacing. The Theme Center switch can turn it off, and the implementation avoids live blur, shadows, observers, scroll listeners, and background requests.
+- **Readability by default**: at the default slider value of 50, final and in-progress assistant responses use one consistent 90% theme-aware surface with balanced inset spacing. The Theme Center switch can turn it off, and the implementation avoids live blur, shadows, observers, scroll listeners, and background requests.
+- **UI transparency**: the Theme Center slider ranges from 0 to 100, with 50 preserving the original appearance; higher values reveal more background while mask opacity stays at or above 60%. Disabling readability still leaves responses fully transparent. Preferences persist locally and sync across windows. It applies to every Codex theme; the WorkBuddy skin does not show the slider.
 
 ## Quick start
 

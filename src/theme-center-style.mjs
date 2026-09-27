@@ -68,7 +68,7 @@ export const THEME_CENTER_STYLE = String.raw`
   min-width: min(760px,calc(100vw - 32px));
   height: min(760px,calc(100vh - 72px));
   display: grid;
-  grid-template-rows: 76px minmax(0,1fr) 58px;
+  grid-template-rows: 76px minmax(0,1fr) auto;
   overflow: hidden;
   border: 1px solid rgba(255,255,255,.82);
   border-radius: 26px;
@@ -93,7 +93,41 @@ export const THEME_CENTER_STYLE = String.raw`
 }
 [data-heige-role="theme-center-footer"] {
   position: relative;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  padding-top: 10px;
+  padding-bottom: 10px;
   border-top: 1px solid rgba(23,77,102,.1);
+}
+[data-heige-role="transparency-section"] {
+  display: grid;
+  grid-template-columns: auto minmax(0,1fr) 76px;
+  align-items: center;
+  gap: 4px 12px;
+  flex: 1 0 100%;
+  min-width: 0;
+  color: #17344f;
+  font-weight: 750;
+}
+[data-heige-role="transparency-slider"] {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  accent-color: #087d8a;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+[data-heige-role="transparency-slider"]:focus-visible {
+  outline: 2px solid #087d8a;
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+[data-heige-role="transparency-value"] { text-align: right; font-size: 11px; }
+[data-heige-role="transparency-help"] {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  font-weight: 400;
+  color: rgba(23,52,79,.78);
 }
 [data-heige-role="readability-section"] {
   display: flex;
@@ -318,6 +352,8 @@ export const THEME_CENTER_STYLE = String.raw`
   [data-heige-role="quick-actions"] { grid-template-columns: 1fr; }
   [data-heige-role="theme-center-header"],
   [data-heige-role="theme-center-footer"] { padding-right: 14px; padding-left: 14px; }
+  [data-heige-role="readability-section"] { flex: 1 0 100%; min-width: 0; padding-right: 0; border-right: 0; }
+  [data-heige-role="persistence-section"] { flex: 1 1 180px; }
   [data-heige-role="theme-center-scroll"] { padding: 14px; }
   [data-heige-role="hide-trigger"] span:last-child { font-size: 0; }
   [data-heige-role="hide-trigger"] span:last-child::after { content: "隐藏入口"; font-size: 11px; }

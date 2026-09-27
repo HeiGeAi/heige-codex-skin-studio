@@ -1,5 +1,22 @@
 import { HEX_COLOR } from "./constants.mjs";
 
+// 50 档是旧版视觉基准；数值越大，遮罩越通透。百分比下限保护文字阅读。
+export const TRANSPARENCY = {
+  defaultValue: 50,
+  minOpacity: 60,
+  factor: 0.4,
+  surfaces: {
+    surface: 90,
+    panel: 94,
+    "root-side": 96,
+    "root-bottom": 78,
+    sidebar: 88,
+    main: 74,
+    readability: 90,
+    composer: 80,
+  },
+};
+
 const DEFAULT_COLORS = {
   accent: "#24c9d7",
   secondary: "#ef8fd3",
@@ -45,8 +62,8 @@ export function buildSkinCss({ theme, heroDataUrl, logoDataUrl = null, polaroidD
   --heige-surface: ${colors.surface};
   --heige-text: ${colors.text};
   --heige-native-light-ink: #172033;
-  --color-background-surface: color-mix(in srgb, var(--heige-surface) 90%, transparent) !important;
-  --color-background-panel: color-mix(in srgb, var(--heige-surface) 94%, transparent) !important;
+  --color-background-surface: color-mix(in srgb, var(--heige-surface) var(--heige-surface-opacity, 90%), transparent) !important;
+  --color-background-panel: color-mix(in srgb, var(--heige-surface) var(--heige-panel-opacity, 94%), transparent) !important;
   --color-background-button-primary: var(--heige-accent) !important;
   --color-text-foreground: var(--heige-text) !important;
   --color-border: color-mix(in srgb, var(--heige-accent) 45%, transparent) !important;
@@ -55,8 +72,8 @@ export function buildSkinCss({ theme, heroDataUrl, logoDataUrl = null, polaroidD
 #root {
   color: var(--heige-text) !important;
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--heige-surface) 96%, transparent) 0 22%, transparent 46%),
-    linear-gradient(180deg, transparent 0 45%, color-mix(in srgb, var(--heige-surface) 78%, transparent) 78% 100%),
+    linear-gradient(90deg, color-mix(in srgb, var(--heige-surface) var(--heige-root-side-opacity, 96%), transparent) 0 22%, transparent 46%),
+    linear-gradient(180deg, transparent 0 45%, color-mix(in srgb, var(--heige-surface) var(--heige-root-bottom-opacity, 78%), transparent) 78% 100%),
     /* 不用 fixed 背景附着：流式输出/滚动时会强制整视口逐帧重绘 */
     url(${JSON.stringify(heroDataUrl)}) right center / cover no-repeat !important;
 }
@@ -87,7 +104,7 @@ export function buildSkinCss({ theme, heroDataUrl, logoDataUrl = null, polaroidD
 }
 
 .app-shell-left-panel {
-  background: color-mix(in srgb, var(--heige-surface) 88%, transparent) !important;
+  background: color-mix(in srgb, var(--heige-surface) var(--heige-sidebar-opacity, 88%), transparent) !important;
   border-right: 1px solid color-mix(in srgb, var(--heige-accent) 45%, transparent) !important;
   /* 常驻侧栏覆盖动态背景，禁用背景采样以避免滚动和流式输出逐帧重合成。 */
   backdrop-filter: none !important;
@@ -96,7 +113,7 @@ export function buildSkinCss({ theme, heroDataUrl, logoDataUrl = null, polaroidD
 .main-surface,
 .browser-main-surface,
 [data-app-shell-main-surface="default"] {
-  background: linear-gradient(180deg, transparent 0 40%, color-mix(in srgb, var(--heige-surface) 74%, transparent) 100%) !important;
+  background: linear-gradient(180deg, transparent 0 40%, color-mix(in srgb, var(--heige-surface) var(--heige-main-opacity, 74%), transparent) 100%) !important;
 }
 
 [data-local-conversation-final-assistant],
@@ -110,7 +127,7 @@ export function buildSkinCss({ theme, heroDataUrl, logoDataUrl = null, polaroidD
 :root[data-heige-readability="on"] [data-response-annotation-conversation] {
   box-sizing: border-box;
   color: var(--heige-text) !important;
-  background: color-mix(in srgb, var(--heige-surface) 90%, transparent) !important;
+  background: color-mix(in srgb, var(--heige-surface) var(--heige-readability-opacity, 90%), transparent) !important;
   border: 1px solid color-mix(in srgb, var(--heige-accent) 18%, transparent) !important;
   border-radius: 22px;
   padding: 14px 16px 12px;
@@ -124,7 +141,7 @@ export function buildSkinCss({ theme, heroDataUrl, logoDataUrl = null, polaroidD
   color: var(--heige-text) !important;
   border: 1px solid color-mix(in srgb, var(--heige-accent) 24%, transparent) !important;
   /* 半透明色保留层次，禁用 blur：气泡移动和流式输出时不能持续采样背景。 */
-  background: color-mix(in srgb, var(--heige-surface) 80%, transparent) !important;
+  background: color-mix(in srgb, var(--heige-surface) var(--heige-composer-opacity, 80%), transparent) !important;
   box-shadow: 0 8px 24px color-mix(in srgb, var(--heige-accent) 12%, transparent) !important;
   backdrop-filter: none !important;
 }

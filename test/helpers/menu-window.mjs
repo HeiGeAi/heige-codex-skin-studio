@@ -64,6 +64,7 @@ export async function menuWindow({
   }],
   fetch,
   electronBridgeFactory,
+  transparencyControl,
 } = {}) {
   const window = new Window({ url: "app://-/index.html" });
   if (electronBridgeFactory) {
@@ -123,6 +124,7 @@ export async function menuWindow({
       token: CONTROL_TOKEN,
       launcherName: "HeiGe 皮肤启动器",
     },
+    ...(transparencyControl === undefined ? {} : { transparencyControl }),
   };
   const inject = () => window.eval(buildSkinMenuScript(buildOptions));
   inject();

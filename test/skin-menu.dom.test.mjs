@@ -1994,3 +1994,155 @@ test("a newer persistence revision cancels a queued delete without permanently b
   await page.flush();
   assert.equal(page.window.__heigeCodexSkinRuntime.status().controlRequest?.action, "delete-user-theme");
 });
+
+
+const baselineOpacities = {
+  surface: 90, panel: 94, "root-side": 96, "root-bottom": 78,
+  sidebar: 88, main: 74, readability: 90, composer: 80,
+};
+const transparencySlider = (page) => page.document.querySelector('[data-heige-role="transparency-slider"]');
+const opacity = (page, name) => page.document.documentElement.style.getPropertyValue("--heige-" + name + "-opacity");
+
+test("transparency defaults preserve old appearance and range input persists across reinjection", async (t) => {
+  const page = await menuWindow();
+  t.after(() => page.close());
+  const slider = transparencySlider(page);
+  assert.equal(slider.type, "range");
+  assert.equal(slider.min, "0");
+  assert.equal(slider.max, "100");
+  assert.equal(slider.step, "1");
+  assert.equal(slider.getAttribute("tabindex"), "0");
+  assert.equal(slider.value, "50");
+  assert.equal(slider.getAttribute("aria-valuenow"), "50");
+  assert.match(slider.getAttribute("aria-valuetext"), /默认/);
+  assert.equal(page.document.getElementById(slider.getAttribute("aria-labelledby")).textContent, "界面通透度");
+  assert.match(page.document.getElementById(slider.getAttribute("aria-describedby")).textContent, /关闭阅读增强/);
+  assert.equal(page.window.__heigeCodexSkin.state.transparency, 50);
+  assert.equal(page.window.localStorage.getItem("heigeCodexTransparency"), null);
+  for (const [name, base] of Object.entries(baselineOpacities)) assert.equal(opacity(page, name), base + "%");
+  slider.value = "75";
+  slider.dispatchEvent(new page.window.Event("input", { bubbles: true }));
+  assert.equal(page.window.localStorage.getItem("heigeCodexTransparency"), "75");
+  assert.equal(page.window.__heigeCodexSkin.state.transparency, 75);
+  assert.equal(slider.getAttribute("aria-valuenow"), "75");
+  assert.equal(opacity(page, "readability"), "80%");
+  await page.toggleReadability();
+  assert.equal(page.readabilityEnabled, false);
+  page.window.__heigeCodexSkin.setTransparency(100);
+  assert.equal(page.readabilityEnabled, false, "slider cannot enable an explicitly transparent response background");
+  await page.injectAgain();
+  assert.equal(page.window.__heigeCodexSkin.state.transparency, 100);
+  assert.equal(transparencySlider(page).value, "100");
+  assert.equal(page.readabilityEnabled, false);
+  await page.toggleReadability();
+  assert.equal(opacity(page, "readability"), "70%", "re-enabling readability uses the selected opacity");
+});
+
+test("transparency slider is hidden for skin profiles without opacity variables", async (t) => {
+  const page = await menuWindow({ transparencyControl: false });
+  t.after(() => page.close());
+  const section = page.document.querySelector('[data-heige-role="transparency-section"]');
+  assert.equal(section.hidden, true);
+  assert.equal(page.window.__heigeCodexSkin.state.transparency, 50);
+});
+
+test("transparency API rejects malformed values and keeps all masks within readable bounds", async (t) => {
+  const page = await menuWindow();
+  t.after(() => page.close());
+  const api = page.window.__heigeCodexSkin;
+  for (const value of [-1, 101, 50.5, NaN, Infinity, "50", null, undefined, true, {}, []]) {
+    assert.equal(api.setTransparency(value), false);
+    assert.equal(api.state.transparency, 50);
+  }
+  for (let value = 0; value <= 100; value++) {
+    assert.equal(api.setTransparency(value), true);
+    for (const name of Object.keys(baselineOpacities)) {
+      const current = Number.parseFloat(opacity(page, name));
+      assert.ok(current >= 60 && current <= 100, name + " at " + value);
+    }
+  }
+  api.setTransparency(0);
+  assert.equal(opacity(page, "main"), "94%");
+  api.setTransparency(100);
+  assert.equal(opacity(page, "main"), "60%");
+  const snapshot = api.state;
+  snapshot.transparency = 1;
+  assert.equal(api.state.transparency, 100, "state is a snapshot, not an unvalidated write path");
+});
+
+test("invalid saved transparency falls back to the exact default", async () => {
+  for (const value of ["", "-1", "101", "1.5", "NaN", "null", " 50", "050", "1e2"]) {
+    const page = await menuWindow({ initialStorage: { heigeCodexTransparency: value } });
+    try { assert.equal(page.window.__heigeCodexSkin.state.transparency, 50, value); }
+    finally { page.close(); }
+  }
+});
+
+test("transparency broadcasts sync windows without echoes and reject invalid envelopes and values", async (t) => {
+  SharedBroadcastChannel.reset();
+  const left = await menuWindow({ BroadcastChannelClass: SharedBroadcastChannel });
+  const right = await menuWindow({ BroadcastChannelClass: SharedBroadcastChannel });
+  const sender = new SharedBroadcastChannel("heige-codex-skin-v2");
+  t.after(() => { left.close(); right.close(); sender.close(); SharedBroadcastChannel.reset(); });
+  left.window.__heigeCodexSkin.setTransparency(75);
+  await right.flush();
+  assert.equal(right.window.__heigeCodexSkin.state.transparency, 75);
+  assert.equal(right.window.localStorage.getItem("heigeCodexTransparency"), "75");
+  assert.equal(transparencySlider(right).value, "75");
+  assert.equal(SharedBroadcastChannel.messages.length, 1);
+  const envelope = { schemaVersion: 1, senderGeneration: "a".repeat(32), sequence: 1, kind: "transparency", value: 25 };
+  for (const value of [-1, 101, 1.5, NaN, Infinity, "25", null, true, {}, []]) sender.postMessage({ ...envelope, value });
+  sender.postMessage({ ...envelope, extra: true });
+  sender.postMessage({ ...envelope, schemaVersion: 2 });
+  sender.postMessage({ ...envelope, senderGeneration: "invalid" });
+  sender.postMessage({ ...envelope, sequence: 0 });
+  await right.flush();
+  assert.equal(right.window.__heigeCodexSkin.state.transparency, 75);
+  sender.postMessage(envelope);
+  await right.flush();
+  assert.equal(right.window.__heigeCodexSkin.state.transparency, 25, "invalid messages do not consume the sequence");
+  sender.postMessage({ ...envelope, value: 99 });
+  sender.postMessage({ ...envelope, senderGeneration: right.runtime.generation, sequence: 999, value: 99 });
+  await right.flush();
+  assert.equal(right.window.__heigeCodexSkin.state.transparency, 25, "replays and self messages are rejected");
+});
+
+test("transparency storage events validate canonical values and reset removed preferences", async (t) => {
+  SharedBroadcastChannel.reset();
+  const page = await menuWindow({ BroadcastChannelClass: SharedBroadcastChannel });
+  t.after(() => { page.close(); SharedBroadcastChannel.reset(); });
+  const storage = (value) => {
+    const event = new page.window.Event("storage");
+    Object.defineProperties(event, { key: { value: "heigeCodexTransparency" }, newValue: { value } });
+    page.window.dispatchEvent(event);
+  };
+  storage("80");
+  assert.equal(page.window.__heigeCodexSkin.state.transparency, 80);
+  for (const value of ["", "101", "-1", "10.5", " 20", "020", "1e2"]) storage(value);
+  assert.equal(page.window.__heigeCodexSkin.state.transparency, 80);
+  storage(null);
+  assert.equal(page.window.__heigeCodexSkin.state.transparency, 50);
+  assert.equal(SharedBroadcastChannel.messages.length, 0);
+  assert.equal(page.window.localStorage.getItem("heigeCodexTransparency"), null, "storage events do not write back");
+});
+
+test("dispose removes transparency properties and listeners and invalidates the old API", async (t) => {
+  const page = await menuWindow();
+  t.after(() => page.close());
+  const api = page.window.__heigeCodexSkin;
+  const slider = transparencySlider(page);
+  api.setTransparency(80);
+  page.document.documentElement.style.setProperty("--unrelated-property", "keep");
+  page.runtime.dispose();
+  for (const name of Object.keys(baselineOpacities)) assert.equal(opacity(page, name), "");
+  assert.equal(page.document.documentElement.style.getPropertyValue("--unrelated-property"), "keep");
+  assert.equal(transparencySlider(page), null);
+  assert.throws(() => api.setTransparency(50), /disposed/);
+  const event = new page.window.Event("storage");
+  Object.defineProperties(event, { key: { value: "heigeCodexTransparency" }, newValue: { value: "25" } });
+  page.window.dispatchEvent(event);
+  slider.value = "10";
+  slider.dispatchEvent(new page.window.Event("input"));
+  assert.equal(opacity(page, "sidebar"), "");
+  assert.equal(page.window.localStorage.getItem("heigeCodexTransparency"), "80", "dispose retains the saved preference");
+});

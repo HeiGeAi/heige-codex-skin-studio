@@ -262,6 +262,7 @@ export async function applySkin({
     control,
     appearanceHelp: profile.menuAppearanceHelp,
     nativeLabel: profile.menuNativeLabel,
+    transparencyControl: profile.id === "codex",
   });
   const classified = await waitForMainTargets(wait, port, profile, {
     timeoutMs: deps.waitTimeoutMs ?? 20_000,
