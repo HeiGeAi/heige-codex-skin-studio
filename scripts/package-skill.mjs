@@ -7,6 +7,7 @@ import {
   mkdir,
   open,
   readdir,
+  readFile,
   realpath,
   rename,
   rm,
@@ -505,7 +506,7 @@ function archiveMode(destination) {
   ) ? 0o100755 : 0o100644;
 }
 
-async function writeArchive(output, files, epoch, parentCapability) {
+async function writeArchive(output, files, epoch, parentCapability, check) {
   await assertOutputParentUnchanged(output, parentCapability);
   const temporary = join(dirname(output), `.${output.split(sep).at(-1)}.${process.pid}.${Date.now()}.tmp`);
   const zip = new yazl.ZipFile();
@@ -533,6 +534,16 @@ async function writeArchive(output, files, epoch, parentCapability) {
     zip.end();
     await writing;
     await normalizeZipDosTimestamps(temporary, epoch, files);
+    const candidate = await readFile(temporary);
+    const current = await readFile(output).catch((error) => {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    });
+    if (current?.equals(candidate)) {
+      await rm(temporary);
+      return;
+    }
+    if (check) throw new Error("tracked .skill is stale or missing");
     await chmod(temporary, 0o644);
     await assertOutputParentUnchanged(output, parentCapability);
     await rename(temporary, output);
@@ -546,6 +557,7 @@ async function writeArchive(output, files, epoch, parentCapability) {
 
 export async function packageSkill(output, {
   sourceDateEpoch,
+  check = false,
   allowTrackedOutput = process.env.HEIGE_ALLOW_TRACKED_PACKAGE_OUTPUT === "1",
 } = {}) {
   if (typeof output !== "string" || !isAbsolute(output) || output.includes("\0")) {
@@ -559,7 +571,7 @@ export async function packageSkill(output, {
     allowTrackedOutput,
   });
   await physicalOutputPolicy(output, allowTrackedOutput);
-  await mkdir(dirname(output), { recursive: true, mode: 0o700 });
+  if (!check) await mkdir(dirname(output), { recursive: true, mode: 0o700 });
   const parent = await physicalOutputPolicy(output, allowTrackedOutput);
   if (parent.missing.length !== 0) throw new Error("output parent 创建后仍不存在");
   const parentCapability = { path: parent.path, dev: parent.info.dev, ino: parent.info.ino };
@@ -571,7 +583,7 @@ export async function packageSkill(output, {
   }
   const manifest = parseManifest(JSON.parse((await readStableFile(manifestPath, "skill package manifest")).toString("utf8")));
   const files = await collectFiles(manifest, await trackedSourceIndex());
-  await writeArchive(output, files, epoch, parentCapability);
+  await writeArchive(output, files, epoch, parentCapability, check);
   return output;
 }
 
@@ -579,11 +591,17 @@ function parseArguments(argv, environment) {
   let output = null;
   let epoch = environment.SOURCE_DATE_EPOCH ?? null;
   let explicitEpoch = false;
-  for (let index = 0; index < argv.length; index += 2) {
+  let check = false;
+  for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
-    const value = argv[index + 1];
+    if (flag === "--check") {
+      if (check) throw new TypeError("duplicate check argument");
+      check = true;
+      continue;
+    }
+    const value = argv[++index];
     if (value === undefined || (flag !== "--output" && flag !== "--source-date-epoch")) {
-      throw new TypeError("usage: package-skill.mjs --output /absolute/file.skill --source-date-epoch SECONDS");
+      throw new TypeError("usage: package-skill.mjs --output /absolute/file.skill --source-date-epoch SECONDS [--check]");
     }
     if (flag === "--output") {
       if (output !== null) throw new TypeError("duplicate output argument");
@@ -595,13 +613,13 @@ function parseArguments(argv, environment) {
     }
   }
   if (output === null || epoch === null) throw new TypeError("output and source date epoch are required");
-  return { output, epoch };
+  return { output, epoch, check };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   try {
-    const { output, epoch } = parseArguments(process.argv.slice(2), process.env);
-    console.log(await packageSkill(output, { sourceDateEpoch: epoch }));
+    const { output, epoch, check } = parseArguments(process.argv.slice(2), process.env);
+    console.log(await packageSkill(output, { sourceDateEpoch: epoch, check }));
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 64;

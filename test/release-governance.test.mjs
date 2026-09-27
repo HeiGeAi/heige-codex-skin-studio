@@ -98,7 +98,11 @@ test("public Release accepts the project owner's explicit distribution decision"
       encoding: "utf8",
     },
   );
-  assert.match(stdout, /public release provenance accepted: 45 visual assets/i);
+  const tracked = (await gitLines("ls-files")).filter((path) => (
+    /^(?:assets|themes|custom-pet|docs\/images)\/.*\.(?:png|jpe?g|webp|icns)$/i.test(path)
+  ));
+  assert.ok(tracked.length > 0, "the tracked visual inventory must not be empty");
+  assert.equal(stdout.trim(), `public release provenance accepted: ${tracked.length} visual assets`);
 });
 
 test("notice does not pretend a disclaimer grants redistribution rights", async () => {

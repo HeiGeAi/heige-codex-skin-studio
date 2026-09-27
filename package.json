@@ -12,6 +12,7 @@
   },
   "scripts": {
     "test": "node --test",
+    "sync": "node scripts/sync-derived.mjs",
     "release:check": "node --test && node scripts/check-asset-provenance.mjs --release",
     "doctor": "node src/cli.mjs doctor",
     "status": "node src/cli.mjs status",
