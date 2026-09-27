@@ -71,7 +71,7 @@ open "$HOME/Applications/HeiGe 皮肤启动器.app"
 
 The launcher uses the stable installation tree, does not download code, request administrator rights, create a new login item, or change `persistenceEnabled` to `true`. Failures produce a native macOS alert and a size-limited local `launcher.log`. Its local ad hoc signature detects bundle tampering, but it is not an Apple Developer ID signature or notarization.
 
-Windows: run `scripts\windows\install.bat`, then use `scripts/windows/apply.ps1`, the session-only compatibility entry `scripts/windows/enable-skin.bat`, `scripts/windows/pause.ps1`, `scripts/windows/resume.ps1`, `scripts/windows/restore.ps1`, and `scripts/windows/enable-loopback.bat` if a Store/MSIX session reports AppContainer loopback isolation. Microsoft Store/MSIX activation and loopback exemption are implemented but still pending live-machine validation.
+Windows: run `scripts\windows\install.bat`, then use `scripts/windows/apply.ps1`, the session-only compatibility entry `scripts/windows/enable-skin.bat`, `scripts/windows/pause.ps1`, `scripts/windows/resume.ps1`, `scripts/windows/restore.ps1`, and `scripts/windows/enable-loopback.bat` if a Store/MSIX session reports AppContainer loopback isolation. Microsoft Store/MSIX activation and loopback exemption are implemented but still pending live-machine validation. Windows feature status, known issues, and self-service troubleshooting (Chinese) are in [docs/windows-compat.md](docs/windows-compat.md).
 
 Applying a skin quits Codex normally and relaunches it with a local debug port, so save your work first. A system Node runtime must be Node.js 22 or newer.
 

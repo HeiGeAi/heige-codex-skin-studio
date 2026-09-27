@@ -117,7 +117,7 @@ open "$HOME/Applications/HeiGe 皮肤启动器.app"
 
 Codex 卡片只恢复当前会话，不会擅自打开「皮肤常驻」；WorkBuddy 卡片保持一次性皮肤，不创建常驻服务。「关闭皮肤」只暂停当前会话，保留最近主题和常驻选择。「一键修复」会重启已安装的目标 APP，但不会修改 `app.asar`。启动器不会创建新的登录项、联网下载代码或请求管理员权限。运行失败会在卡片内显示并允许重试，「诊断与日志」可打开两个产品各自隔离的状态目录。
 
-Windows 用 `scripts\windows\install.bat` 安装；日常入口是 `scripts/windows/apply.ps1`、兼容名 `scripts/windows/enable-skin.bat`（只恢复当前会话）、`scripts/windows/pause.ps1`、`scripts/windows/resume.ps1`、`scripts/windows/restore.ps1`、`scripts/windows/close-codex.bat`（只安全完整退出 Codex/GPT 桌面端并保持关闭，不改常驻、不自动重启）和 `scripts/windows/enable-loopback.bat`（商店版回环隔离时一次性提权豁免，不在每次 apply 时弹 UAC）。彻底移除时运行 `scripts\windows\uninstall.bat`：它会注销当前用户计划任务、移除开始菜单入口、清理 AppData 状态和稳定安装目录。即使稳定安装目录已被手动删除，也可从源码目录运行该卸载入口清理残留。Microsoft Store/MSIX 真机待验证，细节见[完整手册](docs/manual.md)。
+Windows 用 `scripts\windows\install.bat` 安装；日常入口是 `scripts/windows/apply.ps1`、兼容名 `scripts/windows/enable-skin.bat`（只恢复当前会话）、`scripts/windows/pause.ps1`、`scripts/windows/resume.ps1`、`scripts/windows/restore.ps1`、`scripts/windows/close-codex.bat`（只安全完整退出 Codex/GPT 桌面端并保持关闭，不改常驻、不自动重启）和 `scripts/windows/enable-loopback.bat`（商店版回环隔离时一次性提权豁免，不在每次 apply 时弹 UAC）。彻底移除时运行 `scripts\windows\uninstall.bat`：它会注销当前用户计划任务、移除开始菜单入口、清理 AppData 状态和稳定安装目录。即使稳定安装目录已被手动删除，也可从源码目录运行该卸载入口清理残留。Microsoft Store/MSIX 真机待验证，细节见[完整手册](docs/manual.md)。Windows 各功能的验证状态、已知问题和自助排查见 [Windows 兼容状态](docs/windows-compat.md)。
 
 ## 用一张图做你自己的主题
 
