@@ -48,6 +48,8 @@ function sameSnapshot(info, snapshot) {
 }
 
 async function syncDirectory(path) {
+  // Windows 不支持对只读打开的目录句柄 fsync，与仓库其他原子写保持一致跳过。
+  if (process.platform === "win32") return;
   const handle = await open(path, "r");
   try { await handle.sync(); } finally { await handle.close(); }
 }
