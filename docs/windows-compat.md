@@ -30,7 +30,7 @@
 | `LOCK_STAGING_WRITE_FAILED` | 「could not create Windows owner staging」 | 状态目录的临时锁目录创建或加权限失败 | 与上一行同一组 ACL 修复相关，建议先升级 | 关掉所有 HeiGe 相关窗口后重跑 apply；反复出现时删除 `%APPDATA%\HeiGeCodexSkinStudio` 后重新安装 |
 | 皮肤常驻一直「正在等待后台确认」 | 「后台控制器未确认，请重试」 | 后台控制器没有在时限内确认皮肤生效 | 5.4.5 修复常驻检查占用调试端口导致的卡住 | 重试一次（apply 会自动重试一次）；仍失败查看 `%APPDATA%\HeiGeCodexSkinStudio\injector.log` 里有没有 `BACKGROUND_START_FAILED` 或 `LOCK_MALFORMED`，附在 issue 里 |
 | 开启常驻后登录不恢复，计划任务立即退出 | 「未找到 Node.js 运行时。请安装 Node.js 22 或更高版本。」 | 计划任务启动时找不到 Node | 见 [CHANGELOG](../CHANGELOG.md) | 安装 Node.js 22 或更新版本（或改用官方独立版 Codex），然后关掉再打开一次「皮肤常驻」 |
-| 更新 Codex 后背景变白或消失 | 皮肤配色还在，背景图不见了 | Codex 改了内部界面结构，皮肤依赖的锚点失配 | 按版本逐个适配 | 运行 [compat 巡检](compat-canary.md)（如果你的版本已包含），把输出附在 issue 里 |
+| 更新 Codex 后背景变白或消失 | 皮肤配色还在，背景图不见了 | Codex 改了内部界面结构，皮肤依赖的锚点失配 | 按版本逐个适配 | 在 PowerShell 里运行 `scripts\windows\compat-canary.ps1` 做 [compat 巡检](compat-canary.md)，把输出附在 issue 里 |
 
 ## 3. 自助排查三步
 
