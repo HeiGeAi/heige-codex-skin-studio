@@ -17,33 +17,29 @@ git switch -c your-branch origin/main
 
 1. 新建 `themes/<theme-id>/`，包含 `theme.json`（对照现有主题填写 `schemaVersion`、`id`、`name`、`hero`、`appearance`、`colors`）与主视觉图片。
 2. 在 `ASSET_PROVENANCE.md` 里为每个图片素材登记一行，六个字段都要填，来源与授权必须如实。**素材来源不明或授权无法说明的图，不要提交。**
-3. 同步内置主题数量口径：`README.md`、`README.en.md`、`docs/manual.md` 三处都要跟着改。
-4. 跑 `node scripts/sync-llms.mjs` 同步 `llms-full.txt`。
-5. 跑 `npm test`，并确认 `node scripts/check-asset-provenance.mjs --check` 通过。资产表与 Git 跟踪文件必须一一对应，多一行少一行都会失败。
-6. 接受一条判断标准：**与已有预设视觉或命名高度接近的主题不会同时内置**，请说明新主题与现有预设的差异点。
+3. 跑 `npm run sync`，自动同步三份文档的主题数量、`llms-full.txt`、确定性 `.skill` 安装包与发布哈希。
+4. 跑 `npm test`。素材来源表与 Git 跟踪文件必须一一对应，多一行少一行都会失败；也可单独跑 `node scripts/check-asset-provenance.mjs --check` 检查来源表。
+
+首次准备环境先跑 `npm ci`。新建的主题目录和图片需要先用 `git add themes/<theme-id>/ ASSET_PROVENANCE.md` 加入 Git 暂存区，再运行同步命令；打包器只接纳 Git 已跟踪的文件，不会自动暂存你的改动。同步后提交所有变更，包括生成的安装包与发布哈希。`npm run sync -- --check` 只校验，不改写派生产物；发现漂移时会提示重新同步。
+
+**与已有预设视觉或命名高度接近的主题不会同时内置**，请说明新主题与现有预设的差异点。
 
 ## 代码贡献
 
 1. 先开 issue 对齐范围，说明现象、复现步骤、预期行为。
 2. 基于最新 main 开发，改动尽量聚焦在一个模块。
-3. 本地必须全绿：
+3. 本地必须全绿（新增文件先用 `git add` 加入暂存区）：
 
 ```bash
 npm ci
+npm run sync
 npm test
 node scripts/check-asset-provenance.mjs --check
 node scripts/check-asset-provenance.mjs --release
-node scripts/sync-llms.mjs
+npm run sync -- --check
 ```
 
-4. 改了 `src/` 之后，被跟踪的 `.skill` 产物会失效，需要重建并同步哈希：
-
-```bash
-HEIGE_ALLOW_TRACKED_PACKAGE_OUTPUT=1 node scripts/package-skill.mjs \
-  --output "$(pwd)/output/heige-codex-skin-studio.skill" --source-date-epoch 1704067200
-```
-
-然后把 `docs/release/2026-07-16-audit-hardening-disposition.md` 里唯一的 `heige-package-sha256` 标记替换为新值。CI 会校验这两者一致。
+4. 改了 `src/` 或其他打包内容后，统一跑 `npm run sync`。它会以固定时间戳 `1704067200` 和 `HEIGE_ALLOW_TRACKED_PACKAGE_OUTPUT=1` 重建 `.skill`，并更新发布记录里唯一的 `heige-package-sha256` 标记。无需手工替换哈希，CI 会校验全部派生产物一致。
 
 5. 改动 `scripts/windows/` 时，本地没有 Windows 环境就明确说明，Windows 侧以 CI 的 `windows-2025` 任务（PowerShell 5.1 与 7 双跑）为准。**不要把只做过静态检查的改动描述成已验证。**
 6. 行为改动请补测试。安全相关路径（ACL、路径校验、进程身份、调试端口）的改动尤其需要覆盖失败路径。

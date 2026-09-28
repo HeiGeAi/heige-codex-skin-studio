@@ -49,11 +49,12 @@ A local skin switcher for OpenAI Codex Desktop. It injects themes at runtime thr
 - **One-click switching**: a 🎨 menu appears at the top of Codex; every installed theme and the native UI switch instantly, with light/dark appearance synced automatically.
 - **One image, one theme**: any PNG, JPG, JPEG, or WebP becomes a full skin (palette + backdrop).
 - **AI-generated themes**: hand `output/heige-codex-skin-studio.skill` to Codex and say "generate a cyberpunk hero image, then turn it into a skin". No extra API key needed.
-- **13 built-in presets**: the high-detail `Miku 488137`, two lightweight themes each for Genshin Impact, Wuthering Waves, Naruto, and Love and Deepspace, two Dragon Ball themes, a public-safe `Caishen Readable` light theme, plus one easter-egg preset.
+- **<!-- heige-bundled-theme-count -->13 built-in presets**: the high-detail `Miku 488137`, two lightweight themes each for Genshin Impact, Wuthering Waves, Naruto, and Love and Deepspace, two Dragon Ball themes, a public-safe `Caishen Readable` light theme, plus one easter-egg preset.
 - **Optional pet**: the package ships an independent `Miku Future` animated desktop pet. Installing it is your call.
 - **Native macOS launcher**: every macOS install creates or upgrades `$HOME/Applications/HeiGe 皮肤启动器.app`. Click its Miku icon after a reboot, a Codex update, or a native launch to start or safely relaunch official Codex Desktop with loopback CDP and restore the most recent non-native theme.
 - **User-controlled persistence**: the top-menu switch is the only supported way to enable next-launch persistence. Turning it off keeps the current session skinned and restores the native UI on the next launch.
-- **Readability by default**: final and in-progress assistant responses use one consistent 90% theme-aware surface with balanced inset spacing. The Theme Center switch can turn it off, and the implementation avoids live blur, shadows, observers, scroll listeners, and background requests.
+- **Readability by default**: at the default slider value of 50, final and in-progress assistant responses use one consistent 90% theme-aware surface with balanced inset spacing. The Theme Center switch can turn it off, and the implementation avoids live blur, shadows, observers, scroll listeners, and background requests.
+- **UI transparency**: the Theme Center slider ranges from 0 to 100, with 50 preserving the original appearance; higher values reveal more background while mask opacity stays at or above 60%. Disabling readability still leaves responses fully transparent. Preferences persist locally and sync across windows. It applies to every Codex theme; the WorkBuddy skin does not show the slider.
 
 ## Quick start
 
@@ -93,6 +94,7 @@ The same engine reskins WorkBuddy through loopback CDP on `127.0.0.1:9342` (sepa
 - The macOS launcher attempts one narrowly gated recovery only for a static `LOCK_CHAIN_CORRUPT` state root. It refuses recovery while related services, processes, or a foreign CDP listener are active, preserves a timestamped whole-root backup, restores only strictly validated state and user themes, and never loops indefinitely.
 - macOS has dated live-machine evidence. Windows is covered by cross-PowerShell automation, while Microsoft Store/MSIX remains pending live validation.
 - Future Codex Desktop changes to startup arguments, renderer structure, or selectors may require adaptation.
+- Background missing or colors broken after an update? Run the [DOM compatibility canary](docs/compat-canary.md) and attach its output to your issue.
 - Full manual (CLI, theme JSON schema, persistence semantics, FAQ): [docs/manual.md](docs/manual.md) (Chinese).
 
 ## License and assets

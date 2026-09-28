@@ -202,6 +202,38 @@ export async function listCodexProcesses({ app, exec = execFileAsync, product = 
   return parseCodexProcessTable(stdout, app, { product });
 }
 
+// 只读取安装元数据，不启动应用，也不探测或重启进程。
+export async function readCodexVersion({
+  platform = process.platform,
+  appPath,
+  executablePath,
+  packageFullName,
+  exec = execFileAsync,
+  env = process.env,
+} = {}) {
+  try {
+    if (platform === "darwin" && appPath) {
+      const { stdout } = await exec("/usr/bin/defaults", [
+        "read", posix.join(appPath, "Contents", "Info"), "CFBundleShortVersionString",
+      ]);
+      return stdout.trim() || null;
+    }
+    if (platform === "win32") {
+      const packageVersion = /_([0-9]+(?:\.[0-9]+){3})_/.exec(packageFullName ?? "");
+      if (packageVersion) return packageVersion[1];
+      if (executablePath) {
+        const literal = "'" + executablePath.replaceAll("'", "''") + "'";
+        const { stdout } = await exec(trustedWindowsPowerShellPath(env), [
+          "-NoProfile", "-NonInteractive", "-Command",
+          `(Get-Item -LiteralPath ${literal}).VersionInfo.ProductVersion`,
+        ], { env: isolatedWindowsPowerShellEnvironment(env) });
+        return stdout.trim() || null;
+      }
+    }
+  } catch {}
+  return null;
+}
+
 // 运行态诊断：版本号、进程是否带调试参数、端口是否开放。
 // 报障时一份 JSON 说清「参数被接管丢弃 / 版本禁用端口 / 未运行」三类问题。
 export async function runtimeDiagnostics({
@@ -224,14 +256,7 @@ export async function runtimeDiagnostics({
   };
 
   if (platform === "darwin") {
-    try {
-      const { stdout } = await exec("/usr/bin/defaults", [
-        "read",
-        posix.join(appPath, "Contents", "Info"),
-        "CFBundleShortVersionString",
-      ]);
-      result.appVersion = stdout.trim() || null;
-    } catch {}
+    result.appVersion = await readCodexVersion({ platform, appPath, exec, env });
     try {
       const { stdout } = await exec("/bin/ps", ["-axo", "command"]);
       const mainPrefix = posix.join(appPath, "Contents", "MacOS") + "/";

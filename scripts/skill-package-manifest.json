@@ -44,6 +44,18 @@
       "exclude": []
     },
     {
+      "source": "src/compat-anchors.mjs",
+      "destination": "payload/src/compat-anchors.mjs",
+      "recursive": false,
+      "exclude": []
+    },
+    {
+      "source": "src/compat.mjs",
+      "destination": "payload/src/compat.mjs",
+      "recursive": false,
+      "exclude": []
+    },
+    {
       "source": "src/constants.mjs",
       "destination": "payload/src/constants.mjs",
       "recursive": false,
@@ -280,6 +292,7 @@
         "package-skill.command",
         "package-skill.mjs",
         "skill-package-manifest.json",
+        "sync-derived.mjs",
         "sync-llms.mjs",
         "update-release-hash.mjs"
       ]

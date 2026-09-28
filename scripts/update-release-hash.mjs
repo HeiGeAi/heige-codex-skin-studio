@@ -48,11 +48,13 @@ function sameSnapshot(info, snapshot) {
 }
 
 async function syncDirectory(path) {
+  // Windows 不支持对只读打开的目录句柄 fsync，与仓库其他原子写保持一致跳过。
+  if (process.platform === "win32") return;
   const handle = await open(path, "r");
   try { await handle.sync(); } finally { await handle.close(); }
 }
 
-export async function updateReleaseHash({ artifact, disposition } = {}) {
+export async function updateReleaseHash({ artifact, disposition, check = false } = {}) {
   artifact = requirePath(artifact, "artifact");
   disposition = requirePath(disposition, "disposition");
   const artifactInfo = await lstat(artifact);
@@ -77,6 +79,8 @@ export async function updateReleaseHash({ artifact, disposition } = {}) {
     throw new Error(`disposition 必须恰好包含一个 ${MARKER.trim()} marker`);
   }
   const updated = text.replace(MARKER_PATTERN, `${MARKER}${digest}`);
+  if (updated === text) return digest;
+  if (check) throw new Error("发布哈希与安装包不一致");
   const temporary = `${disposition}.${process.pid}.${randomUUID()}.tmp`;
   try {
     await writeFile(temporary, updated, {

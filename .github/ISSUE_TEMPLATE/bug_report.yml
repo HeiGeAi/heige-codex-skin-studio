@@ -49,6 +49,14 @@ body:
       description: 运行 `node src/cli.mjs doctor` 或已安装目录下的 CLI，贴结果前去掉用户名等隐私信息
       render: text
   - type: textarea
+    id: compat
+    attributes:
+      label: compat 巡检输出（可选）
+      description: 在侧栏展开且已有完整问答的对话页运行 `node src/cli.mjs compat --json`，贴结果前检查并去掉隐私信息
+      render: json
+    validations:
+      required: false
+  - type: textarea
     id: screenshot
     attributes:
       label: 截图（可选）

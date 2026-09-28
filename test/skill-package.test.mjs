@@ -237,7 +237,7 @@ test("archive is a strict runtime allowlist with fixed metadata", async (t) => {
     "heige-codex-skin-studio/payload/package.json",
   ]) assert.ok(names.includes(required), required);
   assert.equal(
-    names.some((name) => /\.before-|reports\/|package-skill|check-asset-provenance|sync-llms|update-release-hash|\.git\/|node_modules\/|test\//.test(name)),
+    names.some((name) => /\.before-|reports\/|package-skill|check-asset-provenance|sync-derived|sync-llms|update-release-hash|\.git\/|node_modules\/|test\//.test(name)),
     false,
   );
   const executableArchiveEntry = (name) => (

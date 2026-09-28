@@ -131,6 +131,7 @@ Windows 用 `scripts\windows\install.bat` 安装；日常入口是 `scripts/wind
 
 一个实话：菜单新上传会写入本机用户主题库并记入启动器，和内置主题一样可在「皮肤常驻」下跨重启复现（同名同图幂等覆盖）。只有旧版 `custom-upload` 是本地兼容槽，可由 renderer 本地存储继续显示；新上传不再以该快捷槽作为权威存储。也可用第 2 / 第 3 条路从文件或 AI 生成主题。
 
+<!-- heige-bundled-theme-count -->
 ## 内置 13 套主题
 
 高精度定制的 `Miku 488137` 打底，原神、鸣潮、火影忍者、恋与深空各两款轻量主题，再加入「龙珠 · 筋斗云」「龙珠 · 超级赛亚人」「财神 · 清爽可读」和彩蛋预设「大佬 · 点烟」。预设主题会同步切换 Codex 自身的浅色或深色外观。安装包里还带可选的 `Miku Future` 动画桌面宠物，装不装由你，不覆盖 Codex 内置宠物。
@@ -165,13 +166,15 @@ Windows 用 `scripts\windows\install.bat` 安装；日常入口是 `scripts/wind
 
 - 注入走本机回环 CDP（`127.0.0.1:9341`），不修改 `app.asar`、应用二进制或签名资源；未来 Codex Desktop 改变启动参数或界面结构时，本项目仍可能需要适配。
 - 常驻由你决定：顶部菜单「皮肤常驻」开关是唯一受支持的开启常驻入口，关闭时会先确认，并提示「关闭后本次继续使用；下次启动恢复原生界面」。
-- 阅读增强默认开启：最终回复和过程回复都使用 90％ 主题自适应半透明底色，并保留对称留白保护文字可读性；可在主题中心随时关闭，不使用大面积实时模糊、阴影、观察器、滚动监听或后台请求。
+- 阅读增强默认开启：默认 50 档时，最终回复和过程回复都使用 90％ 主题自适应半透明底色，并保留对称留白保护文字可读性；可在主题中心随时关闭，不使用大面积实时模糊、阴影、观察器、滚动监听或后台请求。
+- 界面通透度：主题中心滑杆支持 0 至 100 档，50 档保持原有观感，越大越通透且遮罩不透明度不低于 60％；关闭阅读增强时回答背景仍完全通透，偏好本地保存并跨窗口同步；对 Codex 全部主题生效，WorkBuddy 换肤不显示该滑杆。
 - 想让皮肤重启后一直在：先打开「HeiGe 皮肤启动器」恢复当前会话，再到顶部菜单打开开关进入常驻。开启成功时开关应在数秒内变绿，且状态与计划任务或 LaunchAgent 已写入；失败会立刻提示，不会长时间停在「正在等待后台确认」。常驻开启后，正常重启 Codex 也会由后台控制器接管并恢复皮肤（Windows 与 macOS 均支持；Store 若屏蔽调试端口则无法接管）。
 - macOS 每次安装都会生成或升级 Schema 5 原生「HeiGe 皮肤启动器」。启动器使用独立的初音未来窗口 Logo，并自动读取 Codex 与 WorkBuddy 的本机真实 APP 图标；universal AppKit 二进制、Dock 图标、窗口 Logo 和入口均纳入本地 ad hoc 完整性签名，并注册到 LaunchServices。ad hoc 签名用于发现本地篡改，不等于 Apple Developer ID 签名或公证，也不承诺绕过未来系统安全策略。
 - 「HeiGe 皮肤启动器」按产品走专用 `launch-skin.command`、`close-skin.command`、`repair-skin.command` 和版本绑定的内部路由。Codex 使用 9341，WorkBuddy 使用 9342，各自优先恢复最近一次非原生主题；关闭只暂停当前会话，一键修复会干净重启并恢复最近皮肤。没有历史选择时才使用 `miku-488137`。`enable-skin.command` 仍是 session-only 兼容入口；`enable-persist.command` 是弃用的非零退出入口。
 - 整窗突然变卡（帧率骤降、输入滚动全局迟滞）：跑 `scripts/apply.command --restart` 先彻底退出 Codex 再拉起注入；健康会话下直接重跑 apply 是幂等的，不会重启进程。
 - 支持范围：macOS 有日期化真机验证；Windows 走跨 PowerShell 自动化，Microsoft Store/MSIX 真机待验证；使用系统 Node 时要求 Node.js 22 或更新版本。
 - 安全边界：CDP 即使只绑定本机回环也无认证，本机同权限进程在威胁边界内，完整说明见 [SECURITY.md](SECURITY.md)；素材来源逐文件登记在 [ASSET_PROVENANCE.md](ASSET_PROVENANCE.md)。
+- 更新后背景消失或配色异常：运行 [DOM 兼容巡检](docs/compat-canary.md)，随 issue 附上巡检输出。
 - 命令行、主题 JSON 格式、常驻细节、全部 FAQ 和设计边界，都在[完整手册](docs/manual.md)。
 
 ## 投稿与贡献

@@ -1,5 +1,24 @@
 # 更新日志
 
+## Unreleased
+
+### 新增
+
+- 主题中心新增「界面通透度」滑杆，支持键盘操作、本地保存和跨窗口同步；50 档精确保持原有通用主题遮罩值，遮罩不透明度最低为 60％，关闭阅读增强仍保留回答背景完全通透的语义。
+- 暴露 `window.__heigeCodexSkin.state.transparency` 与 `setTransparency(value)`，严格校验同步消息，并在卸载时清理样式和监听器。Codex 内置主题与自定义主题均生效；WorkBuddy 换肤的 CSS 档案未接入该变量，主题中心不显示滑杆。
+- 感谢 [yanfeng666](https://github.com/yanfeng666/heige-codex-skin-studios) 的 MIT 社区分支提供可调界面通透度的思路。
+- 新增只读 `compat` DOM 兼容巡检，检查 7 项皮肤关键锚点，支持人类可读和 JSON 输出、逐候选计数、版本与时间，缺失或检查失败时非零退出。复用现有 CDP 客户端和主窗口分类。
+- 新增 macOS 与 Windows 巡检入口、使用文档及可选 issue 字段，doctor 增加巡检提示。测试使用 fake CDP 与 happy-dom；Windows 入口仅做静态检查，未实机验证。
+
+### 维护
+
+- 新增 `npm run sync`，一键同步内置主题数量、llms 全文、确定性 `.skill` 安装包与发布哈希。支持只校验漂移的 `npm run sync -- --check`，并接入 CI。
+- 主题投稿无需手工维护主题数与素材计数；素材门禁继续校验来源表与 Git 跟踪文件一一对应，贡献指南统一使用同步命令。
+
+### 致谢
+
+- 5.5.18 中「Windows 抢锁不再每次重写状态根 ACL」的定位与测试思路来自 @xipfs 的 PR #23。
+
 ## 5.5.18 - 2026-09-22
 
 ### 新增

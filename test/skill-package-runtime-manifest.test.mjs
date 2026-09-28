@@ -53,6 +53,7 @@ test("skill package carries the macOS launcher icon and recursive launcher scrip
         "package-skill.command",
         "package-skill.mjs",
         "skill-package-manifest.json",
+        "sync-derived.mjs",
         "sync-llms.mjs",
         "update-release-hash.mjs",
       ],

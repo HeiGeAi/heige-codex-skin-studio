@@ -1,3 +1,4 @@
+import { TRANSPARENCY } from "./skin-css.mjs";
 import { HEX_COLOR } from "./constants.mjs";
 import { RESOURCE_LIMITS } from "./resource-limits.mjs";
 import { THEME_CENTER_STYLE } from "./theme-center-style.mjs";
@@ -84,6 +85,7 @@ export function buildSkinMenuScript({
   control = null,
   appearanceHelp = DEFAULT_APPEARANCE_HELP,
   nativeLabel = DEFAULT_NATIVE_LABEL,
+  transparencyControl = true,
 }) {
   if (!Array.isArray(entries) || entries.length === 0) {
     throw new Error("皮肤菜单至少需要一个主题");
@@ -153,6 +155,10 @@ export function buildSkinMenuScript({
     hiddenKey: "heigeCodexSkinMenuHidden",
     panelOpenKey: "heigeCodexThemeCenterOpen",
     readabilityKey: "heigeCodexReadabilityEnabled",
+    transparencyKey: "heigeCodexTransparency",
+    transparency: TRANSPARENCY,
+    // 只有接入 --heige-*-opacity 变量的皮肤 CSS 档案才显示通透度滑杆
+    transparencyControl: transparencyControl === true,
     selectedKey: "heigeCodexSkinSelected",
     nativeSel: "__heige_native__",
     preferStored,
@@ -260,6 +266,9 @@ export function buildSkinMenuScript({
     if (window.__heigeCodexSkinRuntime === runtime) {
       delete document.documentElement.dataset.heigeCodexSkin;
       delete document.documentElement.dataset.heigeReadability;
+      for (const name of Object.keys(data.transparency.surfaces)) {
+        document.documentElement.style.removeProperty("--heige-" + name + "-opacity");
+      }
       try { delete window.__heigeCodexSkin; } catch { window.__heigeCodexSkin = undefined; }
       try { delete window.__heigeCodexSkinRuntime; } catch { window.__heigeCodexSkinRuntime = undefined; }
     }
@@ -418,6 +427,68 @@ export function buildSkinMenuScript({
   footer.dataset.heigeRole = "theme-center-footer";
   panel.append(header, scroll, footer);
   backdrop.appendChild(panel);
+
+  const validTransparency = (value) => Number.isInteger(value) && value >= 0 && value <= 100;
+  const parseTransparency = (value) => {
+    if (value === null) return data.transparency.defaultValue;
+    if (typeof value !== "string" || !/^(?:0|[1-9][0-9]?|100)$/.test(value)) return null;
+    return Number(value);
+  };
+  const readTransparency = () => {
+    try { return parseTransparency(localStorage.getItem(data.transparencyKey)) ?? data.transparency.defaultValue; }
+    catch { return data.transparency.defaultValue; }
+  };
+  const transparencySection = document.createElement("section");
+  transparencySection.dataset.heigeRole = "transparency-section";
+  const transparencyLabel = document.createElement("label");
+  transparencyLabel.id = data.menuId + "-transparency-title";
+  transparencyLabel.htmlFor = data.menuId + "-transparency";
+  transparencyLabel.textContent = "界面通透度";
+  const transparencyValue = document.createElement("output");
+  transparencyValue.setAttribute("for", transparencyLabel.htmlFor);
+  transparencyValue.dataset.heigeRole = "transparency-value";
+  const transparencySlider = document.createElement("input");
+  transparencySlider.id = transparencyLabel.htmlFor;
+  transparencySlider.type = "range";
+  transparencySlider.min = "0";
+  transparencySlider.max = "100";
+  transparencySlider.step = "1";
+  transparencySlider.setAttribute("tabindex", "0");
+  transparencySlider.dataset.heigeRole = "transparency-slider";
+  transparencySlider.setAttribute("aria-labelledby", transparencyLabel.id);
+  transparencySlider.setAttribute("aria-valuemin", "0");
+  transparencySlider.setAttribute("aria-valuemax", "100");
+  const transparencyHelp = document.createElement("div");
+  transparencyHelp.id = data.menuId + "-transparency-help";
+  transparencyHelp.dataset.heigeRole = "transparency-help";
+  transparencyHelp.textContent = "越大越通透，50 为默认。关闭阅读增强后，回答背景保持完全通透。";
+  transparencySlider.setAttribute("aria-describedby", transparencyHelp.id);
+  transparencySection.append(transparencyLabel, transparencySlider, transparencyValue, transparencyHelp);
+  footer.appendChild(transparencySection);
+  transparencySection.hidden = !data.transparencyControl;
+  let transparency = data.transparency.defaultValue;
+  const setTransparency = (value, persist = true, broadcast = true) => {
+    assertCurrent();
+    if (!validTransparency(value)) return false;
+    transparency = value;
+    for (const [name, base] of Object.entries(data.transparency.surfaces)) {
+      const opacity = Math.max(data.transparency.minOpacity, Math.min(100,
+        base - (value - data.transparency.defaultValue) * data.transparency.factor));
+      document.documentElement.style.setProperty("--heige-" + name + "-opacity", Number(opacity.toFixed(1)) + "%");
+    }
+    transparencySlider.value = String(value);
+    transparencySlider.setAttribute("aria-valuenow", String(value));
+    transparencySlider.setAttribute("aria-valuetext", value + "，" + (value === 50 ? "默认" : "越大越通透"));
+    transparencyValue.textContent = value + (value === 50 ? "（默认）" : "");
+    if (persist) {
+      try { localStorage.setItem(data.transparencyKey, String(value)); } catch {}
+    }
+    if (broadcast) publish("transparency", value);
+    return true;
+  };
+  // 原生 range 提供方向键、Home/End 和辅助技术语义，input 同时覆盖拖动与键盘。
+  listen(transparencySlider, "input", () => setTransparency(Number(transparencySlider.value)));
+  setTransparency(readTransparency(), false, false);
 
   const readReadability = () => {
     assertCurrent();
@@ -2329,7 +2400,7 @@ export function buildSkinMenuScript({
       || message.senderGeneration === generation
       || !Number.isSafeInteger(message.sequence)
       || message.sequence < 1
-      || !["theme", "menu-hidden", "persistence", "readability"].includes(message.kind)
+      || !["theme", "menu-hidden", "persistence", "readability", "transparency"].includes(message.kind)
     ) return null;
     if (message.kind === "theme") {
       if (
@@ -2342,6 +2413,8 @@ export function buildSkinMenuScript({
       ) return null;
     } else if (message.kind === "menu-hidden") {
       if (typeof message.value !== "boolean") return null;
+    } else if (message.kind === "transparency") {
+      if (!validTransparency(message.value)) return null;
     } else if (message.kind === "readability") {
       if (typeof message.value !== "boolean") return null;
     } else if (
@@ -2368,6 +2441,8 @@ export function buildSkinMenuScript({
         setTheme(message.value, true, false);
       } else if (message.kind === "menu-hidden") {
         setHidden(message.value, true, false);
+      } else if (message.kind === "transparency") {
+        setTransparency(message.value, true, false);
       } else if (message.kind === "readability") {
         setReadability(message.value, true, false);
       } else {
@@ -2387,6 +2462,9 @@ export function buildSkinMenuScript({
         } else if (themes.some((theme) => theme.id === event.newValue)) {
           setTheme(event.newValue, false, false);
         }
+      } else if (event.key === data.transparencyKey) {
+        const value = parseTransparency(event.newValue);
+        if (value !== null) setTransparency(value, false, false);
       } else if (event.key === data.hiddenKey && (event.newValue === "1" || event.newValue === null)) {
         setHidden(event.newValue === "1", false, false);
       } else if (
@@ -2453,6 +2531,11 @@ export function buildSkinMenuScript({
     deleteCustom,
     setHidden,
     setReadability,
+    setTransparency,
+    get state() {
+      assertCurrent();
+      return { transparency, readabilityEnabled };
+    },
     getPersistenceState,
   };
   return true;
