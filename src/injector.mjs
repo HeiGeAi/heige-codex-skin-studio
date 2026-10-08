@@ -1,6 +1,6 @@
 import { extname } from "node:path";
 
-import { CdpSession, fetchRendererTargets, waitForRendererTargets } from "./cdp-client.mjs";
+import { CDP_UPLOAD_RESPONSE_BYTES, CdpSession, fetchRendererTargets, waitForRendererTargets } from "./cdp-client.mjs";
 import { NATIVE_THEME_ID } from "./constants.mjs";
 import { productProfile } from "./products.mjs";
 import { buildSkinCss } from "./skin-css.mjs";
@@ -95,7 +95,7 @@ async function bringTargetToFront(session) {
   } catch {}
 }
 
-async function evaluateTargets(targets, expression, Session, { bringToFront = true } = {}) {
+async function evaluateTargets(targets, expression, Session, { bringToFront = true, maxResponseBytes } = {}) {
   const succeeded = [];
   const failed = [];
   for (const target of targets) {
@@ -104,7 +104,7 @@ async function evaluateTargets(targets, expression, Session, { bringToFront = tr
       session = new Session(target.webSocketDebuggerUrl);
       await session.open();
       if (bringToFront) await bringTargetToFront(session);
-      succeeded.push(safeTarget(target, { value: await session.evaluate(expression) }));
+      succeeded.push(safeTarget(target, { value: await session.evaluate(expression, { maxResponseBytes }) }));
     } catch (error) {
       failed.push(safeTarget(target, { error: safeEvaluationError(error) }));
     } finally {
@@ -504,7 +504,10 @@ export async function skinStatus({ port, includeControlRequest = false, product 
       resultsFor(classified, { succeeded: [], failed: [] }, new Set(["main"]), profile.label),
     );
   }
-  const evaluated = await evaluateTargets(targets, expression, Session, { bringToFront: false });
+  const evaluated = await evaluateTargets(targets, expression, Session, {
+    bringToFront: false,
+    ...(includeControlRequest ? { maxResponseBytes: CDP_UPLOAD_RESPONSE_BYTES } : {}),
+  });
   const results = resultsFor(classified, evaluated, new Set(["main"]), profile.label);
   if (evaluated.succeeded.length === 0) {
     throw targetError(
