@@ -2167,7 +2167,7 @@ test("a relaunch that restores CDP refills the budget for the next native start"
   assert.equal(fx.calls.restart.length, 2);
 });
 
-test("a publish that loses the revision race removes the orphaned user theme", async () => {
+test("a stale publication is rejected before any theme-store mutation", async () => {
   const fx = fixture({ state: { revision: 2 } });
   const createdThemes = [];
   const removedThemes = [];
@@ -2196,8 +2196,8 @@ test("a publish that loses the revision race removes the orphaned user theme", a
 
   await controller.tick();
 
-  assert.equal(createdThemes.length, 1, "the theme is written to disk before the CAS");
-  assert.deepEqual(removedThemes, ["user-orphaned-theme"], "the orphan must be compensated");
+  assert.equal(createdThemes.length, 0, "revision is validated under the lease before publication");
+  assert.deepEqual(removedThemes, [], "a stale publication must never remove an existing theme");
   assert.equal(fx.state.selectedThemeId, DEFAULT_THEME_ID);
   assert.ok(
     fx.calls.logs.some((entry) => entry.event === "renderer_control_request_failed"),
@@ -2205,7 +2205,7 @@ test("a publish that loses the revision race removes the orphaned user theme", a
   );
 });
 
-test("a failed orphan cleanup is logged without masking the publish error", async () => {
+test("stale publication does not invoke destructive cleanup", async () => {
   const fx = fixture({ state: { revision: 2 } });
   fx.deps.createUserThemeFromBytes = async () => ({ id: "user-stuck-theme" });
   fx.deps.removeUserTheme = async () => {
@@ -2228,8 +2228,8 @@ test("a failed orphan cleanup is logged without masking the publish error", asyn
   await controller.tick();
 
   assert.ok(
-    fx.calls.logs.some((entry) => entry.event === "user_theme_publish_cleanup_failed"),
-    "cleanup failure must be logged",
+    !fx.calls.logs.some((entry) => entry.event === "user_theme_publish_cleanup_failed"),
+    "no cleanup should run for a rejected stale request",
   );
   assert.ok(
     fx.calls.logs.some((entry) => entry.event === "renderer_control_request_failed"),
