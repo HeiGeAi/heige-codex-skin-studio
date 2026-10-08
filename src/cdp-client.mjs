@@ -1,3 +1,5 @@
+import { RESOURCE_LIMITS } from "./resource-limits.mjs";
+
 const MIN_PORT = 1024;
 const MAX_PORT = 65535;
 const DEFAULT_WAIT_TIMEOUT_MS = 5000;
@@ -8,6 +10,10 @@ const DEFAULT_DISCOVERY_TIMEOUT_MS = 5000;
 const MAX_DISCOVERY_BODY_BYTES = 1024 * 1024;
 const MAX_DISCOVERY_TARGETS = 256;
 const MAX_CDP_MESSAGE_BYTES = 1024 * 1024;
+// One bounded base64 upload plus the ordinary status/JSON envelope. Opt-in per
+// command: discovery, events and all other responses retain their 1 MiB budget.
+export const CDP_UPLOAD_RESPONSE_BYTES = 4 * Math.ceil(RESOURCE_LIMITS.assetBytes / 3)
+  + MAX_CDP_MESSAGE_BYTES;
 
 function validatePort(port) {
   if (!Number.isInteger(port) || port < MIN_PORT || port > MAX_PORT) {
@@ -448,7 +454,7 @@ export class CdpSession {
     return this.openPromise;
   }
 
-  send(method, params = {}, { timeoutMs = this.commandTimeoutMs } = {}) {
+  send(method, params = {}, { timeoutMs = this.commandTimeoutMs, maxResponseBytes = MAX_CDP_MESSAGE_BYTES } = {}) {
     if (this.closed) {
       return Promise.reject(this.terminalError ?? new Error("CDP session is closed"));
     }
@@ -461,6 +467,10 @@ export class CdpSession {
 
     try {
       validateDuration(timeoutMs, "timeoutMs", { allowZero: false });
+      if (!Number.isSafeInteger(maxResponseBytes) || maxResponseBytes < 1
+        || maxResponseBytes > CDP_UPLOAD_RESPONSE_BYTES) {
+        throw new RangeError("maxResponseBytes exceeds the bounded CDP response budget");
+      }
     } catch (error) {
       return Promise.reject(error);
     }
@@ -473,7 +483,7 @@ export class CdpSession {
         this.pending.delete(id);
         reject(new Error(`CDP ${method} timed out after ${timeoutMs}ms`));
       }, timeoutMs);
-      this.pending.set(id, { method, resolve, reject, timer });
+      this.pending.set(id, { method, resolve, reject, timer, maxResponseBytes });
 
       try {
         this.socket.send(JSON.stringify({ id, method, params }));
@@ -489,7 +499,7 @@ export class CdpSession {
     });
   }
 
-  async evaluate(expression, { timeoutMs = this.commandTimeoutMs } = {}) {
+  async evaluate(expression, { timeoutMs = this.commandTimeoutMs, maxResponseBytes = MAX_CDP_MESSAGE_BYTES } = {}) {
     if (typeof expression !== "string") {
       throw new TypeError("Runtime.evaluate expression must be a string");
     }
@@ -501,7 +511,7 @@ export class CdpSession {
         awaitPromise: true,
         returnByValue: true,
       },
-      { timeoutMs },
+      { timeoutMs, maxResponseBytes },
     );
 
     if (response?.exceptionDetails) {
@@ -523,11 +533,13 @@ export class CdpSession {
       this.closeSocket();
       return;
     }
-    if (
-      event.data.length > MAX_CDP_MESSAGE_BYTES
-      || Buffer.byteLength(event.data) > MAX_CDP_MESSAGE_BYTES
-    ) {
-      this.terminate(new RangeError(`received CDP message larger than ${MAX_CDP_MESSAGE_BYTES} bytes`));
+    const messageBytes = Buffer.byteLength(event.data);
+    let receiveBudget = MAX_CDP_MESSAGE_BYTES;
+    for (const entry of this.pending.values()) {
+      receiveBudget = Math.max(receiveBudget, entry.maxResponseBytes ?? MAX_CDP_MESSAGE_BYTES);
+    }
+    if (event.data.length > receiveBudget || messageBytes > receiveBudget) {
+      this.terminate(new RangeError(`received CDP message larger than ${receiveBudget} bytes`));
       this.closeSocket();
       return;
     }
@@ -545,12 +557,21 @@ export class CdpSession {
       return;
     }
 
-    if (!Number.isInteger(message?.id)) return;
-    const pending = this.pending.get(message.id);
-    if (!pending) return;
+    const pending = Number.isInteger(message?.id) ? this.pending.get(message.id) : undefined;
+    if (!pending) {
+      if (messageBytes > MAX_CDP_MESSAGE_BYTES) {
+        this.terminate(new RangeError("unsolicited CDP message exceeds its budget"));
+        this.closeSocket();
+      }
+      return;
+    }
 
     this.pending.delete(message.id);
     clearTimeout(pending.timer);
+    if (messageBytes > (pending.maxResponseBytes ?? MAX_CDP_MESSAGE_BYTES)) {
+      pending.reject(new RangeError("CDP response exceeds its command budget"));
+      return;
+    }
     if (message.error) {
       pending.reject(buildCdpError(pending.method, message.error));
       return;

@@ -22,6 +22,15 @@ import { validateImageMetadata } from "./image-metadata.mjs";
 import { parseBoundedJson, readBoundedFile, RESOURCE_LIMITS } from "./resource-limits.mjs";
 import { loadTheme } from "./theme-schema.mjs";
 
+// The state write may have committed even though its durability check failed.
+// Preserve both publication versions until that outcome can be established.
+export class ThemeCommitOutcomeUnknownError extends Error {
+  constructor(cause) {
+    super("theme state commit outcome is unknown; published and previous files were retained", { cause });
+    this.code = "THEME_COMMIT_OUTCOME_UNKNOWN";
+  }
+}
+
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
 // 单张源图上限：base64 后要内联进一条 CDP Runtime.evaluate，过大易触发 5 秒命令超时
 const MAX_SOURCE_IMAGE_BYTES = RESOURCE_LIMITS.assetBytes;
@@ -163,7 +172,9 @@ export async function createSingleImageThemeFromBytes({
   storeRoot,
   colors = {},
   hooks = {},
+  commit = async () => {},
 }) {
+  if (typeof commit !== "function") throw new TypeError("commit must be a function");
   name = validThemeName(name);
   const normalizedExtension = typeof extension === "string" && extension.startsWith(".")
     ? extension.toLowerCase()
@@ -246,7 +257,10 @@ export async function createSingleImageThemeFromBytes({
       || installed.manifest.name !== name
       || !installed.assetBuffers.hero.equals(bytes)
     ) throw new Error("发布后的主题与已验证输入不一致");
+    // Keep the previous directory until the caller commits authoritative state.
+    await commit({ id, path: destination, manifest });
   } catch (error) {
+    if (error instanceof ThemeCommitOutcomeUnknownError) throw error;
     const rollbackErrors = [];
     const failed = join(storeRoot, `.${id}.failed-${transactionId}`);
     if (published) {
@@ -264,8 +278,10 @@ export async function createSingleImageThemeFromBytes({
     throw error;
   }
   if (existingRetired) {
-    await rm(retired, { recursive: true });
-    await syncDirectory(storeRoot);
+    // State has committed. A cleanup failure must never roll it back or report
+    // publication failure; a hidden retired directory is safe to retain.
+    await rm(retired, { recursive: true }).catch(() => {});
+    await syncDirectory(storeRoot).catch(() => {});
   }
   return { id, path: destination, manifest };
 }
@@ -300,7 +316,8 @@ export async function createSingleImageTheme({ imagePath, name, storeRoot, color
 /**
  * 仅删除 userThemesRoot 下已归属的用户主题目录；不碰内置 themes/。
  */
-export async function removeUserTheme({ storeRoot, id }) {
+export async function removeUserTheme({ storeRoot, id, commit = async () => {} }) {
+  if (typeof commit !== "function") throw new TypeError("commit must be a function");
   if (
     typeof id !== "string" ||
     id.length === 0 ||
@@ -317,8 +334,24 @@ export async function removeUserTheme({ storeRoot, id }) {
   if (existing === null) {
     throw new Error(`找不到主题：${id}`);
   }
-  await rm(destination, { recursive: true, force: false });
-  await syncDirectory(storeRoot);
+  const retired = join(storeRoot, `.${id}.deleted-${randomUUID()}`);
+  await rename(destination, retired);
+  try {
+    await syncDirectory(storeRoot);
+    await commit();
+  } catch (error) {
+    try {
+      await rename(retired, destination);
+      await syncDirectory(storeRoot);
+    } catch (rollbackError) {
+      throw new AggregateError([error, rollbackError], "theme deletion rollback failed");
+    }
+    throw error;
+  }
+  // The authoritative state no longer references this directory. Cleanup is
+  // best effort and cannot turn a committed deletion into a reported failure.
+  await rm(retired, { recursive: true, force: false }).catch(() => {});
+  await syncDirectory(storeRoot).catch(() => {});
   return { id, removed: true };
 }
 
@@ -387,7 +420,7 @@ export async function listThemes({ roots }) {
       throw error;
     }
     for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
+      if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
       try {
         const { bytes } = await readBoundedFile(join(root, entry.name, "theme.json"), {
           maxBytes: RESOURCE_LIMITS.manifestBytes,
