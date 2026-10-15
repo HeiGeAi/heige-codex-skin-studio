@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
 import { inflateRawSync } from "node:zlib";
+import { Readable } from "node:stream";
 import yazl from "yazl";
 
 import {
@@ -90,6 +91,29 @@ function archiveContents(buffer) {
     const dataStart = local + 30 + localNameLength + localExtraLength;
     const compressedSize = buffer.readUInt32LE(offset + 20);
     const method = buffer.readUInt16LE(offset + 10);
+    const flags = buffer.readUInt16LE(offset + 8);
+    const crc = buffer.readUInt32LE(offset + 16);
+    const size = buffer.readUInt32LE(offset + 24);
+    assert.equal(buffer.readUInt16LE(local + 6), flags, "ZIP local flags");
+    assert.equal(buffer.readUInt16LE(local + 8), method, "ZIP local compression method");
+    const expectedFields = [crc, compressedSize, size];
+    const localFields = [14, 18, 22].map((field) => buffer.readUInt32LE(local + field));
+    if (flags & 8) {
+      // Streaming writers defer CRC/sizes to the data descriptor. Local values
+      // may be placeholders or already known, but must never contradict it.
+      localFields.forEach((value, field) => assert.ok(
+        value === 0 || value === expectedFields[field], "ZIP local deferred CRC/size",
+      ));
+      let descriptor = dataStart + compressedSize;
+      if (buffer.readUInt32LE(descriptor) === 0x08074b50) descriptor += 4;
+      assert.deepEqual(
+        [0, 4, 8].map((field) => buffer.readUInt32LE(descriptor + field)),
+        expectedFields,
+        "ZIP data descriptor CRC/sizes",
+      );
+    } else {
+      assert.deepEqual(localFields, expectedFields, "ZIP local CRC/sizes");
+    }
     assert.ok(method === 0 || method === 8, "supported ZIP compression");
     const compressed = buffer.subarray(dataStart, dataStart + compressedSize);
     const data = method === 8 ? inflateRawSync(compressed) : compressed;
@@ -113,11 +137,13 @@ function archiveContents(buffer) {
   return entries;
 }
 
-async function syntheticArchive(content, compressionLevel, mode = 0o100644) {
+async function syntheticArchive(content, compressionLevel, mode = 0o100644, streamed = false) {
   const zip = new yazl.ZipFile();
-  zip.addBuffer(Buffer.from(content), "example.txt", {
+  const options = {
     mtime: new Date(TRACKED_PACKAGE_SOURCE_DATE_EPOCH * 1000), mode, compressionLevel,
-  });
+  };
+  if (streamed) zip.addReadStream(Readable.from([Buffer.from(content)]), "example.txt", options);
+  else zip.addBuffer(Buffer.from(content), "example.txt", options);
   zip.end();
   const chunks = [];
   for await (const chunk of zip.outputStream) chunks.push(chunk);
@@ -132,6 +158,29 @@ test("archive comparison ignores compressed representation but detects content a
   assert.deepEqual(archiveContents(first), archiveContents(second));
   assert.notDeepEqual(archiveContents(first), archiveContents(await syntheticArchive("stale source", 9)));
   assert.notDeepEqual(archiveContents(first), archiveContents(await syntheticArchive(text, 9, 0o100755)));
+});
+
+test("archive comparison rejects contradictory local CRC/sizes and streaming descriptors", async () => {
+  for (const streamed of [false, true]) {
+    const valid = await syntheticArchive("valid content".repeat(100), 9, 0o100644, streamed);
+    assert.equal(Boolean(valid.readUInt16LE(6) & 8), streamed);
+    assert.doesNotThrow(() => archiveContents(valid));
+    for (const field of [14, 18, 22]) {
+      const damaged = Buffer.from(valid);
+      damaged.writeUInt32LE((damaged.readUInt32LE(field) + 1) >>> 0, field);
+      assert.throws(() => archiveContents(damaged), /ZIP local.*CRC\/size/);
+    }
+    if (streamed) {
+      const end = valid.length - 22;
+      const central = valid.readUInt32LE(end + 16);
+      const dataStart = 30 + valid.readUInt16LE(26) + valid.readUInt16LE(28);
+      const descriptor = dataStart + valid.readUInt32LE(central + 20);
+      const crcOffset = descriptor + (valid.readUInt32LE(descriptor) === 0x08074b50 ? 4 : 0);
+      const damaged = Buffer.from(valid);
+      damaged.writeUInt32LE((damaged.readUInt32LE(crcOffset) + 1) >>> 0, crcOffset);
+      assert.throws(() => archiveContents(damaged), /ZIP data descriptor CRC\/sizes/);
+    }
+  }
 });
 
 test("tracked skill artifact matches current source content and metadata", async (t) => {
