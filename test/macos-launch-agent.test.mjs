@@ -383,7 +383,10 @@ async function fixture(t, overrides = {}) {
     faultAt: overrides.faultAt,
     hardCrashAt: overrides.hardCrashAt,
     rollbackFaultAt: overrides.rollbackFaultAt,
-    processExists: overrides.processExists,
+    // Model only fixture services, never unrelated real processes with the same PID.
+    processExists: overrides.processExists ?? ((pid) => (
+      [...loaded].some((label) => overrides.printPid?.(label) === pid)
+    )),
     readProcessIdentity: overrides.readProcessIdentity ?? (async (pid) => ({
       pid,
       startedAt: `start-${pid}`,
@@ -391,6 +394,15 @@ async function fixture(t, overrides = {}) {
     wait: overrides.wait,
   };
 }
+
+test("fixture process existence follows simulated services even for a live OS PID", async (t) => {
+  const deps = await fixture(t, { printPid: () => process.pid });
+  assert.equal(deps.processExists(process.pid), deps.loaded.size > 0);
+  deps.loaded.add(deps.label);
+  assert.equal(deps.processExists(process.pid), true);
+  deps.loaded.clear();
+  assert.equal(deps.processExists(process.pid), false);
+});
 
 async function installKnownHermesController(deps, {
   extraArguments = [],

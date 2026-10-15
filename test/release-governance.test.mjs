@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
+import { inflateRawSync } from "node:zlib";
+import yazl from "yazl";
 
 import {
   packageSkill,
@@ -65,20 +67,84 @@ test("real macOS launcher integration tests are Darwin-gated", async () => {
   assert.doesNotMatch(source, /^(?:  )?test\(/m);
 });
 
-test("tracked skill artifact is the exact deterministic build of current source", async (t) => {
+// Compare archive semantics across supported Node/zlib versions. Byte-for-byte
+// reproducibility within one toolchain is covered by skill-package.test.mjs.
+function archiveContents(buffer) {
+  const end = buffer.length - 22;
+  assert.equal(buffer.readUInt32LE(end), 0x06054b50, "ZIP EOCD without comment");
+  const count = buffer.readUInt16LE(end + 10);
+  let offset = buffer.readUInt32LE(end + 16);
+  const entries = [];
+  for (let i = 0; i < count; i++) {
+    assert.equal(buffer.readUInt32LE(offset), 0x02014b50, "ZIP central header");
+    const nameLength = buffer.readUInt16LE(offset + 28);
+    const extraLength = buffer.readUInt16LE(offset + 30);
+    const commentLength = buffer.readUInt16LE(offset + 32);
+    const nameStart = offset + 46;
+    const name = buffer.subarray(nameStart, nameStart + nameLength);
+    const local = buffer.readUInt32LE(offset + 42);
+    assert.equal(buffer.readUInt32LE(local), 0x04034b50, "ZIP local header");
+    const localNameLength = buffer.readUInt16LE(local + 26);
+    const localExtraLength = buffer.readUInt16LE(local + 28);
+    assert.deepEqual(buffer.subarray(local + 30, local + 30 + localNameLength), name);
+    const dataStart = local + 30 + localNameLength + localExtraLength;
+    const compressedSize = buffer.readUInt32LE(offset + 20);
+    const method = buffer.readUInt16LE(offset + 10);
+    assert.ok(method === 0 || method === 8, "supported ZIP compression");
+    const compressed = buffer.subarray(dataStart, dataStart + compressedSize);
+    const data = method === 8 ? inflateRawSync(compressed) : compressed;
+    assert.equal(data.length, buffer.readUInt32LE(offset + 24), "uncompressed size");
+    entries.push({
+      name: name.toString("utf8"),
+      flags: buffer.readUInt16LE(offset + 8),
+      method,
+      timestamp: buffer.subarray(offset + 12, offset + 16).toString("hex"),
+      crc: buffer.readUInt32LE(offset + 16),
+      attributes: buffer.subarray(offset + 36, offset + 42).toString("hex"),
+      extra: buffer.subarray(nameStart + nameLength, nameStart + nameLength + extraLength).toString("hex"),
+      comment: buffer.subarray(nameStart + nameLength + extraLength, nameStart + nameLength + extraLength + commentLength).toString("hex"),
+      localMetadata: buffer.subarray(local + 4, local + 14).toString("hex"),
+      localExtra: buffer.subarray(local + 30 + localNameLength, dataStart).toString("hex"),
+      contentHash: createHash("sha256").update(data).digest("hex"),
+    });
+    offset = nameStart + nameLength + extraLength + commentLength;
+  }
+  assert.equal(offset, end, "complete ZIP central directory");
+  return entries;
+}
+
+async function syntheticArchive(content, compressionLevel, mode = 0o100644) {
+  const zip = new yazl.ZipFile();
+  zip.addBuffer(Buffer.from(content), "example.txt", {
+    mtime: new Date(TRACKED_PACKAGE_SOURCE_DATE_EPOCH * 1000), mode, compressionLevel,
+  });
+  zip.end();
+  const chunks = [];
+  for await (const chunk of zip.outputStream) chunks.push(chunk);
+  return Buffer.concat(chunks);
+}
+
+test("archive comparison ignores compressed representation but detects content and mode drift", async () => {
+  const text = "same source content".repeat(100);
+  const first = await syntheticArchive(text, 1);
+  const second = await syntheticArchive(text, 9);
+  assert.equal(first.equals(second), false);
+  assert.deepEqual(archiveContents(first), archiveContents(second));
+  assert.notDeepEqual(archiveContents(first), archiveContents(await syntheticArchive("stale source", 9)));
+  assert.notDeepEqual(archiveContents(first), archiveContents(await syntheticArchive(text, 9, 0o100755)));
+});
+
+test("tracked skill artifact matches current source content and metadata", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "heige-tracked-package-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const candidate = join(directory, "candidate.skill");
   await packageSkill(candidate, { sourceDateEpoch: TRACKED_PACKAGE_SOURCE_DATE_EPOCH });
   const expected = await readFile(candidate);
   const tracked = await readFile(new URL("../output/heige-codex-skin-studio.skill", import.meta.url));
-  const expectedHash = createHash("sha256").update(expected).digest("hex");
-  const trackedHash = createHash("sha256").update(tracked).digest("hex");
-
-  assert.equal(
-    tracked.equals(expected),
-    true,
-    `tracked .skill is stale; expected ${expectedHash}, observed ${trackedHash}`,
+  assert.deepEqual(
+    archiveContents(tracked),
+    archiveContents(expected),
+    "tracked .skill content or metadata is stale; rebuild with package-skill.mjs",
   );
 });
 
