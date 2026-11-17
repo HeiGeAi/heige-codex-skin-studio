@@ -80,7 +80,7 @@ export function buildSkinCss({ theme, heroDataUrl, logoDataUrl = null, polaroidD
 
 #root::before {
   position: fixed;
-  z-index: 20;
+  z-index: 0;
   top: 76px;
   left: max(380px, 24vw);
   content: ${copy(theme.copy?.brand)};
@@ -92,7 +92,7 @@ export function buildSkinCss({ theme, heroDataUrl, logoDataUrl = null, polaroidD
 
 #root::after {
   position: fixed;
-  z-index: 20;
+  z-index: 0;
   top: 120px;
   left: max(380px, 24vw);
   max-width: 42vw;
@@ -104,6 +104,8 @@ export function buildSkinCss({ theme, heroDataUrl, logoDataUrl = null, polaroidD
 }
 
 .app-shell-left-panel {
+  position: relative;
+  z-index: 2;
   background: color-mix(in srgb, var(--heige-surface) var(--heige-sidebar-opacity, 88%), transparent) !important;
   border-right: 1px solid color-mix(in srgb, var(--heige-accent) 45%, transparent) !important;
   /* 常驻侧栏覆盖动态背景，禁用背景采样以避免滚动和流式输出逐帧重合成。 */
@@ -113,6 +115,8 @@ export function buildSkinCss({ theme, heroDataUrl, logoDataUrl = null, polaroidD
 .main-surface,
 .browser-main-surface,
 [data-app-shell-main-surface="default"] {
+  position: relative;
+  z-index: 1;
   background: linear-gradient(180deg, transparent 0 40%, color-mix(in srgb, var(--heige-surface) var(--heige-main-opacity, 74%), transparent) 100%) !important;
 }
 
@@ -133,6 +137,20 @@ export function buildSkinCss({ theme, heroDataUrl, logoDataUrl = null, polaroidD
   padding: 14px 16px 12px;
   box-shadow: none !important;
   backdrop-filter: none !important;
+}
+
+/* 保护代码块结构边界与操作按钮清晰度，防止命令与正文混成一大块 */
+[data-response-annotation-conversation] pre,
+[data-local-conversation-final-assistant] pre {
+  box-sizing: border-box;
+  background-color: color-mix(in srgb, var(--color-background-surface), #000 8%) !important;
+  border: 1px solid color-mix(in srgb, var(--heige-accent) 20%, transparent) !important;
+  border-radius: 8px;
+}
+
+[data-response-annotation-conversation] pre button,
+[data-local-conversation-final-assistant] pre button {
+  color: var(--heige-native-light-ink) !important;
 }
 
 .composer-surface-chrome,
