@@ -13,6 +13,7 @@ One image becomes one theme. After install, switching skins is a single click in
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-black)
 ![Codex Desktop](https://img.shields.io/badge/Codex-Desktop-10a37f)
+[![Featured on Agent Skins](https://agentskins.app/badge/creator/heigeai.svg)](https://agentskins.app/creators/heigeai)
 
 </div>
 
