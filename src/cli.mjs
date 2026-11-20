@@ -1663,19 +1663,20 @@ export async function productionController({
         return false;
       }
     },
-    createUserThemeFromBytes: async ({ bytes, extension, name, colors }) => {
+    createUserThemeFromBytes: async ({ bytes, extension, name, colors, commit }) => {
       const create = deps.createSingleImageThemeFromBytes ?? createSingleImageThemeFromBytes;
       return create({
         bytes,
         extension,
         name,
         storeRoot: paths.userThemesRoot,
+        commit,
         ...(colors === undefined ? {} : { colors }),
       });
     },
-    removeUserTheme: async ({ id }) => {
+    removeUserTheme: async ({ id, commit }) => {
       const remove = deps.removeUserThemeFromStore ?? removeUserThemeFromStore;
-      return remove({ storeRoot: paths.userThemesRoot, id });
+      return remove({ storeRoot: paths.userThemesRoot, id, commit });
     },
     injectSkin: async ({ themeId, control, targetIds, preferStored: requestPreference }) => {
       const state = await readStudioState(paths.statePath);

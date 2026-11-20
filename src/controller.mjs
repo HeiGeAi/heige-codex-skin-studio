@@ -1,4 +1,7 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
+
+import { ThemeCommitOutcomeUnknownError } from "./theme-store.mjs";
 
 import { CODEX_RENDERER_ORIGIN, DEFAULT_THEME_ID, NATIVE_THEME_ID } from "./constants.mjs";
 import { sameProcessIdentity } from "./codex-app.mjs";
@@ -1502,11 +1505,37 @@ export function createSkinController(input) {
     rendererCapability: request.capability,
   });
 
+  const commitThemeState = async (state, mutate, lease) => {
+    const intended = { ...mutate(structuredClone(state)), revision: state.revision + 1 };
+    try {
+      return validateControlState(await deps.compareAndUpdate({
+        expectedRevision: state.revision,
+        mutate: () => intended,
+      }, lease));
+    } catch (error) {
+      // CAS can rename state.json successfully and then fail its fsync or
+      // Windows verification. Determine the authoritative outcome while the
+      // same lease still excludes competing writers, before rolling back files.
+      let observed;
+      try {
+        observed = validateControlState(await deps.readState());
+      } catch (readError) {
+        throw new ThemeCommitOutcomeUnknownError(new AggregateError([error, readError]));
+      }
+      if (isDeepStrictEqual(observed, intended)) {
+        await safeLog(deps.logger, "warn", "theme_state_commit_recovered", error);
+        return observed;
+      }
+      if (isDeepStrictEqual(observed, state)) throw error;
+      throw new ThemeCommitOutcomeUnknownError(error);
+    }
+  };
+
   const executeThemeSelection = async ({
     expectedRevision,
     themeId,
     signal,
-  } = {}, { rendererCapability = null } = {}) => {
+  } = {}, { rendererCapability = null, lease: heldLease = null } = {}) => {
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
       throw new Error("expectedRevision must be a non-negative safe integer");
     }
@@ -1528,7 +1557,7 @@ export function createSkinController(input) {
         elapsedMs: Math.round(performance.now() - from),
       });
     };
-    return deps.withLease("controller:set-theme-selection", async (lease) => {
+    const commitSelection = async (lease) => {
       const leaseAt = performance.now();
       mark("lease", startedAt);
       const state = validateControlState(await deps.readState());
@@ -1556,14 +1585,12 @@ export function createSkinController(input) {
       }
       mark("theme_validation", themeAt);
       const stateAt = performance.now();
-      const updated = validateControlState(await deps.compareAndUpdate({
-        expectedRevision,
-        mutate: (current) => ({
-          ...current,
-          selectedThemeId: themeId,
-          ...(themeId === NATIVE_THEME_ID ? {} : { lastNonNativeThemeId: themeId }),
-        }),
-      }, lease));
+      if (signal?.aborted) throw signal.reason ?? new Error("theme selection request aborted");
+      const updated = await commitThemeState(state, (current) => ({
+        ...current,
+        selectedThemeId: themeId,
+        ...(themeId === NATIVE_THEME_ID ? {} : { lastNonNativeThemeId: themeId }),
+      }), lease);
       lastKnownState = updated;
       mark("state_write", stateAt);
       const sessionAt = performance.now();
@@ -1586,14 +1613,15 @@ export function createSkinController(input) {
         elapsedMs: Math.round(performance.now() - startedAt),
       });
       return publicThemeState(updated);
-    });
+    };
+    return heldLease === null
+      ? deps.withLease("controller:set-theme-selection", commitSelection)
+      : commitSelection(heldLease);
   };
 
-  const setThemeSelection = async (request = {}, options = {}) => {
-    const requestId = normalizeThemeRequestId(request.requestId);
-    if (requestId === null) {
-      return executeThemeSelection(request, options);
-    }
+  const withThemeCommit = async (id, action) => {
+    const requestId = normalizeThemeRequestId(id);
+    if (requestId === null) return action();
     const existing = themeCommitRegistry.get(requestId);
     if (existing !== undefined) {
       existing.joinedOnly = true;
@@ -1608,7 +1636,7 @@ export function createSkinController(input) {
     };
     entry.promise = (async () => {
       try {
-        const value = await executeThemeSelection(request, options);
+        const value = await action();
         entry.result = value;
         return value;
       } catch (error) {
@@ -1626,6 +1654,9 @@ export function createSkinController(input) {
     themeCommitRegistry.set(requestId, entry);
     return entry.promise;
   };
+  const setThemeSelection = (request = {}, options = {}) => withThemeCommit(
+    request.requestId, () => executeThemeSelection(request, options),
+  );
   setThemeSelectionPublic = (request) => setThemeSelection(request);
   setThemeSelectionFromRenderer = (request) => setThemeSelection(request, {
     rendererCapability: request.capability,
@@ -1650,7 +1681,7 @@ export function createSkinController(input) {
     return { bytes, extension };
   };
 
-  const publishUserTheme = async ({
+  const executePublishUserTheme = async ({
     expectedRevision,
     name,
     imageBytes,
@@ -1663,35 +1694,29 @@ export function createSkinController(input) {
       throw new Error("user theme publishing is unavailable");
     }
     if (signal?.aborted) throw signal.reason ?? new Error("user theme publish aborted");
-    const created = await deps.createUserThemeFromBytes({
-      bytes: imageBytes,
-      extension,
-      name,
-      ...(colors === undefined ? {} : { colors }),
-    });
-    try {
-      return await setThemeSelection({
-        expectedRevision,
-        themeId: created.id,
-        requestId,
-        signal,
-      });
-    } catch (error) {
-      // 补偿清理：CAS 冲突或请求在创建与选择之间 abort 时，
-      // 已落盘的用户主题目录会变成孤儿，这里按 id 回收；
-      // 清理失败只记日志，原始错误优先抛回调用方。
-      if (typeof deps.removeUserTheme === "function" && typeof created?.id === "string") {
-        try {
-          await deps.removeUserTheme({ id: created.id });
-        } catch (cleanupError) {
-          await safeLog(deps.logger, "warn", "user_theme_publish_cleanup_failed", cleanupError);
-        }
-      }
-      throw error;
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+      throw new Error("expectedRevision must be a non-negative safe integer");
     }
+    return deps.withLease("controller:publish-user-theme", async (lease) => {
+      const state = validateControlState(await deps.readState());
+      if (state.revision !== expectedRevision) throw new ControllerTransitionError(
+        "REVISION_CONFLICT", `state revision is ${state.revision}`, state,
+      );
+      let result;
+      await deps.createUserThemeFromBytes({
+        bytes: imageBytes, extension, name,
+        ...(colors === undefined ? {} : { colors }),
+        commit: async (created) => {
+          result = await executeThemeSelection({
+            expectedRevision, themeId: created.id, signal,
+          }, { lease });
+        },
+      });
+      return result;
+    });
   };
 
-  const deleteUserTheme = async ({
+  const executeDeleteUserTheme = async ({
     expectedRevision,
     themeId,
     requestId,
@@ -1712,69 +1737,59 @@ export function createSkinController(input) {
     ) {
       throw new Error("themeId is invalid");
     }
-    const state = validateControlState(await deps.readState());
-    lastKnownState = state;
-    if (state.revision !== expectedRevision) {
-      throw new ControllerTransitionError(
-        "REVISION_CONFLICT",
-        `state revision is ${state.revision}`,
-        state,
+    return deps.withLease("controller:delete-user-theme", async (lease) => {
+      const state = validateControlState(await deps.readState());
+      lastKnownState = state;
+      if (state.revision !== expectedRevision) throw new ControllerTransitionError(
+        "REVISION_CONFLICT", `state revision is ${state.revision}`, state,
       );
-    }
-    await deps.removeUserTheme({ id: themeId });
-    if (state.selectedThemeId === themeId) {
-      let fallback = DEFAULT_THEME_ID;
-      if (
-        state.lastNonNativeThemeId !== themeId &&
-        await deps.validateThemeSelection(state.lastNonNativeThemeId) === true
-      ) {
-        fallback = state.lastNonNativeThemeId;
-      } else if (await deps.validateThemeSelection(DEFAULT_THEME_ID) !== true) {
-        throw new Error("no fallback theme available after delete");
+      let fallback = null;
+      let replacement = null;
+      if (state.selectedThemeId === themeId) {
+        fallback = state.lastNonNativeThemeId !== themeId
+          && await deps.validateThemeSelection(state.lastNonNativeThemeId) === true
+          ? state.lastNonNativeThemeId : DEFAULT_THEME_ID;
+        if (await deps.validateThemeSelection(fallback) !== true) {
+          throw new Error("no fallback theme available after delete");
+        }
+      } else if (state.lastNonNativeThemeId === themeId) {
+        replacement = state.selectedThemeId === NATIVE_THEME_ID
+          ? DEFAULT_THEME_ID : state.selectedThemeId;
+        if (await deps.validateThemeSelection(replacement) !== true) {
+          throw new Error("no replacement lastNonNative theme after delete");
+        }
       }
-      return setThemeSelection({
-        expectedRevision,
-        themeId: fallback,
-        requestId,
-        signal,
-      });
-    }
-    if (state.lastNonNativeThemeId === themeId) {
-      const replacement = state.selectedThemeId === NATIVE_THEME_ID
-        ? DEFAULT_THEME_ID
-        : state.selectedThemeId;
-      if (await deps.validateThemeSelection(replacement) !== true) {
-        throw new Error("no replacement lastNonNative theme after delete");
+      let result = publicThemeState(state);
+      await deps.removeUserTheme({ id: themeId, commit: async () => {
+        if (signal?.aborted) throw signal.reason ?? new Error("user theme delete aborted");
+        if (fallback !== null) {
+          result = await executeThemeSelection({
+            expectedRevision, themeId: fallback, signal,
+          }, { lease });
+        } else if (replacement !== null) {
+          const updated = await commitThemeState(state, (current) => ({
+            ...current, lastNonNativeThemeId: replacement,
+          }), lease);
+          lastKnownState = updated;
+          result = publicThemeState(updated);
+        }
+      }});
+      // Refresh is derived work after commit. Its failure must not undo deletion.
+      try {
+        await reconcile({ lease, includeHealthCount: true, forceRepair: true, preferStored: false });
+      } catch (error) {
+        await safeLog(deps.logger, "warn", "user_theme_delete_refresh_failed", error);
       }
-      return deps.withLease("controller:delete-user-theme-last", async (lease) => {
-        const updated = validateControlState(await deps.compareAndUpdate({
-          expectedRevision,
-          mutate: (current) => ({
-            ...current,
-            lastNonNativeThemeId: replacement,
-          }),
-        }));
-        lastKnownState = updated;
-        await reconcile({
-          lease,
-          includeHealthCount: true,
-          forceRepair: true,
-          preferStored: false,
-        });
-        return publicThemeState(updated);
-      });
-    }
-    await deps.withLease("controller:delete-user-theme-refresh", async (lease) => {
-      await reconcile({
-        lease,
-        includeHealthCount: true,
-        forceRepair: true,
-        preferStored: false,
-      });
+      return result;
     });
-    return publicThemeState(state);
   };
 
+  const publishUserTheme = (request = {}) => withThemeCommit(
+    request.requestId, () => executePublishUserTheme(request),
+  );
+  const deleteUserTheme = (request = {}) => withThemeCommit(
+    request.requestId, () => executeDeleteUserTheme(request),
+  );
   publishUserThemePublic = (request) => publishUserTheme(request);
   deleteUserThemePublic = (request) => deleteUserTheme(request);
 

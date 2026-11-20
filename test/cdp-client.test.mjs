@@ -486,3 +486,36 @@ test("close is idempotent", async () => {
 
   assert.equal(socket.closeCalls, 1);
 });
+
+test("upload response budget admits supported base64 images without widening ordinary commands", async () => {
+  const { CDP_UPLOAD_RESPONSE_BYTES } = await import("../src/cdp-client.mjs");
+  for (const size of [768 * 1024 - 1, 768 * 1024 + 1, 1024 * 1024, 8 * 1024 * 1024]) {
+    const { session, socket } = await openFakeSession({ commandTimeoutMs: 5000 });
+    const promise = session.evaluate("upload status", { maxResponseBytes: CDP_UPLOAD_RESPONSE_BYTES });
+    const request = socket.sent.at(-1);
+    const value = { controlRequest: { action: "publish-user-theme", image: "data:image/png;base64," + Buffer.alloc(size).toString("base64") } };
+    socket.respond(request.id, { result: { type: "object", value } });
+    assert.deepEqual(await promise, value);
+    assert.equal(session.closed, false);
+    const ordinary = session.evaluate("ordinary");
+    socket.respond(socket.sent.at(-1).id, { result: { type: "number", value: 42 } });
+    assert.equal(await ordinary, 42);
+    session.close();
+  }
+});
+
+test("ordinary responses cannot borrow a pending upload command's larger budget", async () => {
+  const { CDP_UPLOAD_RESPONSE_BYTES } = await import("../src/cdp-client.mjs");
+  const { session, socket } = await openFakeSession({ commandTimeoutMs: 5000 });
+  const upload = session.evaluate("upload", { maxResponseBytes: CDP_UPLOAD_RESPONSE_BYTES });
+  const uploadId = socket.sent.at(-1).id;
+  const ordinary = session.evaluate("ordinary");
+  socket.respond(socket.sent.at(-1).id, { result: { type: "string", value: "x".repeat(1024 * 1024) } });
+  await assert.rejects(ordinary, /command budget/);
+  socket.respond(uploadId, { result: { type: "boolean", value: true } });
+  assert.equal(await upload, true);
+  assert.equal(session.closed, false);
+  await assert.rejects(session.evaluate("unbounded", { maxResponseBytes: Infinity }), /bounded CDP/);
+  await assert.rejects(session.evaluate("oversized", { maxResponseBytes: CDP_UPLOAD_RESPONSE_BYTES + 1 }), /bounded CDP/);
+  session.close();
+});
