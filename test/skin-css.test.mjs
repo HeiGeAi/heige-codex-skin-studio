@@ -102,6 +102,21 @@ test("builds one fast generic skin from a theme and image data URL", () => {
     /\[data-pip-obstacle="thread-summary-panel"\]\s+\*\s*\{/,
     "原生浅色面板不得用通配规则覆盖增删统计等语义颜色",
   );
+  assert.match(
+    css,
+    /#root::before\s*\{[^}]*z-index:\s*0/s,
+    "品牌文字必须处于底层装饰层，避免滚动时悬浮遮挡会话内容",
+  );
+  assert.match(
+    css,
+    /\[data-response-annotation-conversation\]\s+pre,[\s\S]*\[data-local-conversation-final-assistant\]\s+pre\s*\{[^}]*border-radius:\s*8px/s,
+    "代码块必须具备明确边界容器，防止命令与正文混淆",
+  );
+  assert.match(
+    css,
+    /\[data-response-annotation-conversation\]\s+pre\s+button,[\s\S]*\[data-local-conversation-final-assistant\]\s+pre\s+button\s*\{[^}]*color:\s*var\(--heige-native-light-ink\)/s,
+    "代码块操作按钮必须具备足够的对比度",
+  );
   assert.doesNotMatch(css, /https?:\/\//);
 });
 

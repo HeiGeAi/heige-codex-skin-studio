@@ -495,17 +495,20 @@ function rawSlowHeaderRequest(server) {
   });
 }
 
-function rawKeepAliveRequest(server) {
+function rawKeepAliveRequest(server, onResponse = () => {}) {
   return new Promise((resolve, reject) => {
     const socket = net.createConnection({ host: server.host, port: server.port });
     const chunks = [];
     const safetyTimeout = setTimeout(() => {
       socket.destroy();
       reject(new Error("IDLE_CONNECTION_TIMEOUT_NOT_ENFORCED"));
-    }, 250);
+    }, 5000);
     let unexpectedError;
     socket.setEncoding("utf8");
-    socket.on("data", (chunk) => chunks.push(chunk));
+    socket.on("data", (chunk) => {
+      chunks.push(chunk);
+      onResponse(chunks.join(""));
+    });
     socket.on("error", (error) => {
       if (error.code !== "ECONNRESET") unexpectedError = error;
     });
@@ -1104,10 +1107,19 @@ test("times out a connection that never completes request headers", async (t) =>
   assert.equal(rawResponse.includes(CONTROL_TOKEN), false);
 });
 
-test("closes an idle keep-alive socket without an unsolicited response", async (t) => {
+test("closes an idle keep-alive socket without an unsolicited response", { timeout: 5000 }, async (t) => {
+  // Advance the server's deadline only after it has actually sent the response.
+  // A 50 ms wall-clock deadline can expire before TCP delivery on a busy runner.
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const { server } = await startFixture(t, { requestTimeoutMs: 50 });
-
-  const rawResponse = await rawKeepAliveRequest(server);
+  let advanced = false;
+  const rawResponse = await rawKeepAliveRequest(server, (response) => {
+    if (!advanced && response.includes('"revision":4')) {
+      advanced = true;
+      t.mock.timers.tick(50);
+    }
+  });
+  assert.equal(advanced, true, "the idle timer advances after the successful response");
 
   assert.equal(rawResponse.match(/HTTP\/1\.1/g)?.length, 1);
   assert.match(rawResponse, /^HTTP\/1\.1 200 /);
@@ -1495,7 +1507,7 @@ test("shutdown waits for an active persistence commit before closing sockets", a
   await assert.rejects(request(server));
 });
 
-test("shutdown cancels queued persistence work without cancelling the active commit", async (t) => {
+test("shutdown cancels queued persistence work without cancelling the active commit", { timeout: 10_000 }, async (t) => {
   let releaseCommit;
   let markCommitStarted;
   let readCalls = 0;
@@ -1508,6 +1520,7 @@ test("shutdown cancels queued persistence work without cancelling the active com
   t.after(() => releaseCommit());
   const { server } = await startFixture(t, {
     maxPendingRequests: 2,
+    requestTimeoutMs: 10_000,
     readState: async () => {
       readCalls += 1;
       return { persistenceEnabled: true, revision: 3 };
@@ -1522,28 +1535,19 @@ test("shutdown cancels queued persistence work without cancelling the active com
   const activeResponse = request(server);
   await commitStarted;
   const queuedResponse = request(server);
-  await new Promise((resolve) => setTimeout(resolve, 30));
+  // Closing before the server receives the second request can reset the TCP
+  // connection. A busy preflight proves that both request slots are occupied.
+  let probe = await preflight(server);
+  while (probe.status === 204) probe = await preflight(server);
+  assert.equal(probe.status, 503);
+  assert.equal(responseJson(probe).code, "CONTROL_BUSY");
   assert.equal(readCalls, 1, "the second request must be queued behind the active commit");
 
   let closeSettled = false;
   const closePromise = server.close().then(() => {
     closeSettled = true;
   });
-  let queueTimer;
-  let cancelledResponse;
-  try {
-    cancelledResponse = await Promise.race([
-      queuedResponse,
-      new Promise((_, reject) => {
-        queueTimer = setTimeout(
-          () => reject(new Error("QUEUED_REQUEST_NOT_CANCELLED_BY_CLOSE")),
-          100,
-        );
-      }),
-    ]);
-  } finally {
-    clearTimeout(queueTimer);
-  }
+  const cancelledResponse = await queuedResponse;
 
   assert.equal(cancelledResponse.status, 503);
   assert.deepEqual(responseJson(cancelledResponse), {

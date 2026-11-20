@@ -161,7 +161,8 @@ function slugify(value) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
-    .slice(0, 40);
+    .slice(0, 40)
+    .replace(/-+$/, "");
   return slug || "custom-skin";
 }
 

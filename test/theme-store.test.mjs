@@ -53,6 +53,20 @@ test("creates a theme from one local image without a build pipeline", async () =
   assert.deepEqual((await listThemes({ roots: [join(root, "themes")] })).map((item) => item.id), [created.id]);
 });
 
+test("a name cut at a separator produces a valid theme id", async () => {
+  const storeRoot = await temporaryRoot("heige-long-name-");
+  const name = "Cozy Autumn Sunset Over The Golden Lake Wallpaper";
+  const created = await createSingleImageThemeFromBytes({
+    bytes: png(640, 360),
+    extension: ".png",
+    name,
+    storeRoot,
+  });
+
+  assert.match(created.id, /^cozy-autumn-sunset-over-the-golden-lake-[a-f0-9]+$/);
+  assert.equal((await listThemes({ roots: [storeRoot] }))[0].name, name);
+});
+
 test("createSingleImageThemeFromBytes matches path-based create and is idempotent", async () => {
   const root = await temporaryRoot("heige-theme-bytes-");
   const storeRoot = join(root, "themes");
