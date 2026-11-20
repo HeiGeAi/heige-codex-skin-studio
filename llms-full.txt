@@ -47,6 +47,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-black)
 ![Codex Desktop](https://img.shields.io/badge/Codex-Desktop-10a37f)
+[![Featured on Agent Skins](https://agentskins.app/badge/creator/heigeai.svg)](https://agentskins.app/creators/heigeai)
 
 [快速开始](#快速开始macos) · [做你自己的主题](#用一张图做你自己的主题) · [晒图区](https://github.com/HeiGeAi/heige-codex-skin-studio/discussions) · [完整手册](docs/manual.md) · [English](README.en.md) · [官网](https://www.heigeai.com/codexskin/)
 
