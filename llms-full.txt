@@ -119,7 +119,6 @@ Windows 11 版本现已发布：[查看最新 Release](https://github.com/HeiGeA
 - Windows 安装与恢复：使用 scripts\windows\install.bat / apply.bat，不修改 app.asar、应用二进制或签名资源。
 - 随 Windows 登录启动：开启「皮肤常驻」后会为当前用户注册登录计划任务，无需再次运行安装脚本。首次启用后请重启 Windows 或注销后重新登录一次；后台皮肤控制器将随登录启动，并在随后普通启动 Codex 时恢复主题与顶部入口。
 - 隐藏按钮：顶部主题入口可选择「隐藏此按钮」，收起为小圆点；点击即可恢复，状态会保存。
-- 随机主题：提供持久化的随机主题开关，随机选择主题并尽量避免连续重复。
 
 > Microsoft Store/MSIX 客户端仍需真机验证。商店版若报回环隔离，可先运行 `scripts\windows\enable-loopback.bat`（一次管理员权限）再重试 apply；自动接管在端口仍不可达时无法完成。
 
