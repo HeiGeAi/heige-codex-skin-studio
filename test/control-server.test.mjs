@@ -495,17 +495,20 @@ function rawSlowHeaderRequest(server) {
   });
 }
 
-function rawKeepAliveRequest(server) {
+function rawKeepAliveRequest(server, onResponse = () => {}) {
   return new Promise((resolve, reject) => {
     const socket = net.createConnection({ host: server.host, port: server.port });
     const chunks = [];
     const safetyTimeout = setTimeout(() => {
       socket.destroy();
       reject(new Error("IDLE_CONNECTION_TIMEOUT_NOT_ENFORCED"));
-    }, 250);
+    }, 5000);
     let unexpectedError;
     socket.setEncoding("utf8");
-    socket.on("data", (chunk) => chunks.push(chunk));
+    socket.on("data", (chunk) => {
+      chunks.push(chunk);
+      onResponse(chunks.join(""));
+    });
     socket.on("error", (error) => {
       if (error.code !== "ECONNRESET") unexpectedError = error;
     });
@@ -1104,10 +1107,19 @@ test("times out a connection that never completes request headers", async (t) =>
   assert.equal(rawResponse.includes(CONTROL_TOKEN), false);
 });
 
-test("closes an idle keep-alive socket without an unsolicited response", async (t) => {
+test("closes an idle keep-alive socket without an unsolicited response", { timeout: 5000 }, async (t) => {
+  // Advance the server's deadline only after it has actually sent the response.
+  // A 50 ms wall-clock deadline can expire before TCP delivery on a busy runner.
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const { server } = await startFixture(t, { requestTimeoutMs: 50 });
-
-  const rawResponse = await rawKeepAliveRequest(server);
+  let advanced = false;
+  const rawResponse = await rawKeepAliveRequest(server, (response) => {
+    if (!advanced && response.includes('"revision":4')) {
+      advanced = true;
+      t.mock.timers.tick(50);
+    }
+  });
+  assert.equal(advanced, true, "the idle timer advances after the successful response");
 
   assert.equal(rawResponse.match(/HTTP\/1\.1/g)?.length, 1);
   assert.match(rawResponse, /^HTTP\/1\.1 200 /);
