@@ -20,7 +20,7 @@
     "apply": "node src/cli.mjs apply"
   },
   "devDependencies": {
-    "happy-dom": "20.10.6",
+    "happy-dom": "21.0.4",
     "yazl": "3.3.1"
   }
 }
